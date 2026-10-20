@@ -1,0 +1,1133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EMS Nexacro Inspector</title>
+  <style>
+    :root {
+      --bg-base: #090d16;
+      --bg-surface: #111827;
+      --bg-surface-elevated: #1f2937;
+      --bg-code: #0b1120;
+      --border-subtle: #1f293d;
+      --border-strong: #374151;
+      --text-main: #f9fafb;
+      --text-muted: #9ca3af;
+      --text-faint: #6b7280;
+      
+      --accent-blue: #3b82f6;
+      --accent-blue-hover: #2563eb;
+      --accent-cyan: #06b6d4;
+      --accent-emerald: #10b981;
+      --accent-amber: #f59e0b;
+      --accent-rose: #f43f5e;
+      --accent-purple: #8b5cf6;
+      
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    /* Auto-Height Responsive Layout: adapts to full tab & popup seamlessly */
+    html {
+      min-height: 100%;
+      background-color: var(--bg-base);
+    }
+
+    body {
+      width: 100%;
+      min-width: 760px;
+      min-height: 100vh;
+      height: auto; /* Automatic height: expands naturally with content */
+      margin: 0;
+      padding: 0;
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      overflow-y: auto; /* Full page scrollbar */
+      font-size: 13px;
+    }
+
+    /* Sticky Header so controls remain accessible during long scrolls */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      background: rgba(17, 24, 39, 0.98);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 10px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      flex-shrink: 0;
+    }
+
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-icon {
+      width: 26px;
+      height: 26px;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(59, 130, 246, 0.35);
+    }
+
+    .brand-icon svg {
+      width: 15px;
+      height: 15px;
+      color: white;
+    }
+
+    .brand-title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .live-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background-color: var(--accent-emerald);
+      box-shadow: 0 0 8px var(--accent-emerald);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    button {
+      cursor: pointer;
+      border: none;
+      outline: none;
+      border-radius: var(--radius-md);
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 6px 11px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+      box-shadow: 0 2px 4px rgba(37, 99, 235, 0.25);
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    .btn-secondary {
+      background: var(--bg-surface-elevated);
+      color: var(--text-muted);
+      border: 1px solid var(--border-strong);
+    }
+
+    .btn-secondary:hover {
+      background: #374151;
+      color: var(--text-main);
+    }
+
+    .btn-secondary.active-view {
+      background: rgba(59, 130, 246, 0.2);
+      border-color: var(--accent-blue);
+      color: #93c5fd;
+    }
+
+    .btn-fullscreen {
+      background: rgba(139, 92, 246, 0.16);
+      border: 1px solid rgba(139, 92, 246, 0.35);
+      color: #c084fc;
+    }
+
+    .btn-fullscreen:hover {
+      background: rgba(139, 92, 246, 0.32);
+      color: white;
+    }
+
+    .dropdown-box {
+      position: relative;
+      display: inline-block;
+    }
+
+    .dropdown-menu {
+      display: none;
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 4px;
+      background: #1a2333;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+      z-index: 50;
+      min-width: 250px;
+      overflow: hidden;
+    }
+
+    .dropdown-box.open .dropdown-menu {
+      display: block;
+    }
+
+    .dropdown-item {
+      padding: 9px 12px;
+      color: var(--text-main);
+      font-size: 11.5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .dropdown-item:hover {
+      background: #2563eb;
+      color: white;
+    }
+
+    .dropdown-divider {
+      height: 1px;
+      background: var(--border-subtle);
+      margin: 2px 0;
+    }
+
+    .controls-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .search-box {
+      flex: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .search-box svg {
+      position: absolute;
+      left: 10px;
+      width: 14px;
+      height: 14px;
+      color: var(--text-faint);
+    }
+
+    .search-input {
+      width: 100%;
+      background: var(--bg-code);
+      border: 1px solid var(--border-strong);
+      color: var(--text-main);
+      padding: 6px 10px 6px 30px;
+      border-radius: var(--radius-md);
+      font-size: 12px;
+      transition: border-color 0.15s;
+    }
+
+    .search-input:focus {
+      outline: none;
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 0 1px var(--accent-blue);
+    }
+
+    .filter-chips {
+      display: flex;
+      gap: 5px;
+    }
+
+    .chip {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-strong);
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 4px 8px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s;
+    }
+
+    .chip:hover {
+      background: #374151;
+      color: var(--text-main);
+    }
+
+    .chip.active {
+      background: rgba(59, 130, 246, 0.18);
+      border-color: var(--accent-blue);
+      color: #93c5fd;
+      font-weight: 600;
+    }
+
+    .chip.chip-dep.active {
+      background: rgba(139, 92, 246, 0.18);
+      border-color: var(--accent-purple);
+      color: #c084fc;
+    }
+
+    .chip.chip-input.active {
+      background: rgba(245, 158, 11, 0.18);
+      border-color: var(--accent-amber);
+      color: #fcd34d;
+    }
+
+    /* Main Area with Automatic Height */
+    #mainViewArea {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: auto;
+      min-height: 0;
+      position: relative;
+    }
+
+    #cardsViewContainer {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: auto;
+    }
+
+    #apiList {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px 16px;
+      height: auto;
+    }
+
+    #apiList::-webkit-scrollbar,
+    .table-scroll-wrap::-webkit-scrollbar,
+    .data-table-wrapper::-webkit-scrollbar,
+    body::-webkit-scrollbar {
+      width: 7px;
+      height: 7px;
+    }
+
+    #apiList::-webkit-scrollbar-thumb,
+    .table-scroll-wrap::-webkit-scrollbar-thumb,
+    .data-table-wrapper::-webkit-scrollbar-thumb,
+    body::-webkit-scrollbar-thumb {
+      background: #374151;
+      border-radius: 4px;
+    }
+
+    .cards-footer-bar {
+      padding: 8px 16px;
+      background: #111827;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      position: sticky;
+      bottom: 0;
+      z-index: 30;
+    }    .empty-state {
+      margin: auto;
+      text-align: center;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding: 60px 20px;
+    }
+
+    .empty-state svg {
+      width: 44px;
+      height: 44px;
+      color: var(--text-faint);
+    }
+
+    .empty-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .empty-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      max-width: 360px;
+      line-height: 1.5;
+    }
+
+    .api-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      transition: border-color 0.15s, box-shadow 0.15s;
+      overflow: hidden;
+    }
+
+    .api-card:hover {
+      border-color: var(--border-strong);
+    }
+
+    .api-card.open {
+      border-color: #3b82f6;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    }
+
+    .card-header {
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .card-meta-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow: hidden;
+      flex: 1;
+    }
+
+    .method-badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: var(--radius-sm);
+      letter-spacing: 0.3px;
+      flex-shrink: 0;
+    }
+
+    .method-post {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .method-get {
+      background: rgba(59, 130, 246, 0.15);
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+    }
+
+    .status-badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      flex-shrink: 0;
+    }
+
+    .status-2xx {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+    }
+
+    .status-err {
+      background: rgba(244, 63, 94, 0.15);
+      color: #fb7185;
+      border: 1px solid rgba(244, 63, 94, 0.3);
+    }
+
+    .url-display {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-main);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+
+    .url-path {
+      color: #f3f4f6;
+      font-weight: 600;
+    }
+
+    .url-host {
+      color: var(--text-faint);
+      font-size: 11.5px;
+      margin-left: 4px;
+    }
+
+    .card-meta-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .dep-pill {
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(168, 85, 247, 0.25));
+      color: #d8b4fe;
+      border: 1px solid rgba(168, 85, 247, 0.4);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .duration-label {
+      font-size: 11px;
+      color: var(--text-faint);
+    }
+
+    .chevron-icon {
+      width: 16px;
+      height: 16px;
+      color: var(--text-faint);
+      transition: transform 0.2s ease;
+    }
+
+    .api-card.open .chevron-icon {
+      transform: rotate(180deg);
+      color: var(--accent-blue);
+    }
+
+    .card-drawer {
+      display: none;
+      border-top: 1px solid var(--border-subtle);
+      background: #0d1322;
+      padding: 12px 14px;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .api-card.open .card-drawer {
+      display: flex;
+    }
+
+    .drawer-tabs {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 8px;
+    }
+
+    .nav-tabs {
+      display: flex;
+      gap: 6px;
+    }
+
+    .tab-btn {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid transparent;
+      font-size: 11.5px;
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+    }
+
+    .tab-btn:hover {
+      color: var(--text-main);
+      background: var(--bg-surface-elevated);
+    }
+
+    .tab-btn.active {
+      background: #1e293b;
+      color: #60a5fa;
+      border-color: #3b82f6;
+      font-weight: 600;
+    }
+
+    .tab-btn.tab-dep.active {
+      color: #c084fc;
+      border-color: #8b5cf6;
+    }
+
+    .view-mode-toggle {
+      display: flex;
+      background: var(--bg-code);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+
+    .toggle-opt {
+      font-size: 10.5px;
+      padding: 3px 8px;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .toggle-opt.active {
+      background: #2563eb;
+      color: white;
+      font-weight: 600;
+    }
+
+    .tab-pane {
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .tab-pane.active {
+      display: flex;
+    }
+
+    /* Badges for Data Origin */
+    .badge-origin {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: var(--radius-sm);
+      white-space: nowrap;
+    }
+
+    .badge-origin.sourced {
+      background: rgba(139, 92, 246, 0.16);
+      color: #c084fc;
+      border: 1px solid rgba(139, 92, 246, 0.35);
+    }
+
+    .badge-origin.input {
+      background: rgba(245, 158, 11, 0.16);
+      color: #fcd34d;
+      border: 1px solid rgba(245, 158, 11, 0.35);
+    }
+
+    .dep-flow-container {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .dep-flow-item {
+      background: #131c2e;
+      border: 1px solid #1f2d48;
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .dep-row-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+    }
+
+    .dep-target-field {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+      color: #93c5fd;
+    }
+
+    .dep-val-pill {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #34d399;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11.5px;
+      padding: 2px 7px;
+      border-radius: var(--radius-sm);
+    }
+
+    .dep-lineage-flow {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg-code);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px;
+      font-size: 11.5px;
+    }
+
+    .flow-col {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .flow-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      color: var(--text-faint);
+    }
+
+    .flow-arrow {
+      color: var(--accent-purple);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .xpath-pill {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      color: #38bdf8;
+      background: rgba(6, 182, 212, 0.1);
+      border: 1px solid rgba(6, 182, 212, 0.2);
+      padding: 3px 6px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      word-break: break-all;
+    }
+
+    .xpath-pill.source {
+      color: #c084fc;
+      background: rgba(168, 85, 247, 0.1);
+      border-color: rgba(168, 85, 247, 0.2);
+    }
+
+    .copy-btn {
+      background: transparent;
+      border: none;
+      padding: 2px 4px;
+      cursor: pointer;
+      color: var(--text-faint);
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    .copy-btn:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .structured-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .structured-header {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Generous max-height so 15-20 rows show comfortably */
+    .data-table-wrapper {
+      background: var(--bg-code);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      overflow-x: auto;
+      overflow-y: auto;
+      max-height: 520px;
+    }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .data-table th {
+      background: #111b2e;
+      color: #94a3b8;
+      font-weight: 600;
+      text-align: left;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border-strong);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      white-space: nowrap;
+    }
+
+    .data-table td {
+      padding: 5px 10px;
+      border-bottom: 1px solid #162035;
+      color: #e2e8f0;
+      white-space: nowrap;
+    }
+
+    .data-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .data-table tr:hover td {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .raw-code-container {
+      position: relative;
+    }
+
+    .raw-code-actions {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      z-index: 2;
+    }
+
+    /* Generous code viewer height */
+    pre.code-view {
+      background: var(--bg-code);
+      border: 1px solid var(--border-subtle);
+      padding: 12px;
+      border-radius: var(--radius-md);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11.5px;
+      line-height: 1.5;
+      color: #e2e8f0;
+      max-height: 560px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .xml-tag { color: #f43f5e; font-weight: 600; }
+    .xml-attr-name { color: #fbbf24; }
+    .xml-attr-val { color: #34d399; }
+    .xml-text { color: #f8fafc; }
+
+    /* Interactive Full Table Matrix View: expands to monitor height */
+    #tableViewContainer {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      background: var(--bg-base);
+      min-height: calc(100vh - 120px);
+      height: auto;
+    }
+
+    .table-view-header {
+      padding: 8px 16px;
+      background: #111827;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    .table-view-tabs {
+      display: flex;
+      gap: 6px;
+    }
+
+    .table-subtab {
+      background: var(--bg-code);
+      border: 1px solid var(--border-strong);
+      color: var(--text-muted);
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .table-subtab.active {
+      background: #2563eb;
+      border-color: #2563eb;
+      color: white;
+      font-weight: 600;
+    }
+
+    .table-view-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .table-scroll-wrap {
+      flex: 1;
+      overflow-x: auto;
+      overflow-y: auto;
+      min-height: calc(100vh - 170px);
+    }
+
+    .matrix-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      min-width: 980px;
+    }
+
+    .matrix-table th {
+      background: #131c2e;
+      color: #94a3b8;
+      font-weight: 600;
+      text-align: left;
+      padding: 7px 11px;
+      border-bottom: 1px solid var(--border-strong);
+      border-right: 1px solid #1b263b;
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      white-space: nowrap;
+    }
+
+    .matrix-table td {
+      padding: 6px 11px;
+      border-bottom: 1px solid #162035;
+      border-right: 1px solid #141c2c;
+      color: #e2e8f0;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    .matrix-table tbody tr:hover td {
+      background: rgba(37, 99, 235, 0.08);
+    }
+
+    .table-pagination-bar {
+      padding: 7px 16px;
+      background: #111827;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      position: sticky;
+      bottom: 0;
+      z-index: 30;
+      flex-shrink: 0;
+    }
+
+    .page-controls {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .page-size-select {
+      background: var(--bg-code);
+      color: var(--text-main);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      padding: 3px 6px;
+      font-size: 11px;
+      outline: none;
+    }
+
+    #toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #2563eb;
+      color: white;
+      padding: 7px 16px;
+      border-radius: var(--radius-md);
+      font-size: 12px;
+      font-weight: 600;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(10px);
+      transition: all 0.2s ease;
+      z-index: 100;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-top">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+        <div class="brand-title">
+          <span>EMS Nexacro Inspector</span>
+          <span class="live-dot" title="Active Real-time Interceptor"></span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Open in Full Tab Window -->
+        <button id="btnOpenFullTab" class="btn-fullscreen" title="Open Inspector in a Full Browser Tab (Unlimited Screen & Scrolling)">
+          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+          </svg>
+          ⛶ Full Page
+        </button>
+
+        <!-- Switch Cards vs Table -->
+        <button id="btnToggleView" class="btn-secondary" title="Switch between Card View and Full Table Matrix">
+          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+          <span id="viewToggleLabel">Table View</span>
+        </button>
+
+        <!-- Export Dropdown -->
+        <div class="dropdown-box" id="exportDropdownContainer">
+          <button id="btnExportMenu" class="btn-primary" title="Export captured data as Tables / JSON">
+            <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Export Table ▾
+          </button>
+          <div class="dropdown-menu" id="exportMenu">
+            <div class="dropdown-item" id="btnExportCsvDeps">
+              📊 Export CSV: Dependencies Matrix
+            </div>
+            <div class="dropdown-item" id="btnExportCsvApis">
+              📋 Export CSV: APIs Summary Table
+            </div>
+            <div class="dropdown-item" id="btnExportCsvPayloads">
+              📤 Export CSV: Payloads (User Inputs & Linked)
+            </div>
+            <div class="dropdown-item" id="btnExportCsvResponses">
+              📥 Export CSV: Responses Table
+            </div>
+            <div class="dropdown-divider"></div>
+            <div class="dropdown-item" id="btnExportJson">
+              📦 Export Full JSON (Raw & Parsed)
+            </div>
+          </div>
+        </div>
+
+        <button id="btnClear" class="btn-secondary" title="Clear captured history">
+          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+          Clear
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Search & Category Chips with User Inputs filter -->
+    <div class="controls-row">
+      <div class="search-box">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+        <input type="text" id="searchInput" class="search-input" placeholder="Search endpoint, field name, XPath, or value..." />
+      </div>
+      <div class="filter-chips">
+        <div class="chip active" data-filter="all">All (<span id="countAll">0</span>)</div>
+        <div class="chip chip-dep" data-filter="deps">🔗 Linked (<span id="countDeps">0</span>)</div>
+        <div class="chip chip-input" data-filter="user_inputs">✍️ User Inputs (<span id="countInputs">0</span>)</div>
+        <div class="chip" data-filter="errors">Errors (<span id="countErrors">0</span>)</div>
+      </div>
+    </div>
+  </header>
+
+  <div id="mainViewArea">
+    <!-- View 1: Card List View -->
+    <div id="cardsViewContainer">
+      <div id="apiList"></div>
+      <div class="cards-footer-bar" id="cardsFooterBar">
+        <span id="cardsCountLabel">Showing 0 of 0 requests</span>
+        <button id="btnLoadMoreCards" class="btn-secondary" style="font-size: 11px; padding: 3px 9px;">
+          Load More
+        </button>
+      </div>
+    </div>
+
+    <!-- View 2: Full Table Matrix View -->
+    <div id="tableViewContainer">
+      <div class="table-view-header">
+        <div class="table-view-tabs">
+          <div class="table-subtab active" data-table-tab="matrix">
+            ⚡ Dependencies (<span id="tableDepsCount">0</span>)
+          </div>
+          <div class="table-subtab" data-table-tab="summary">
+            🌐 APIs Summary (<span id="tableApisCount">0</span>)
+          </div>
+          <div class="table-subtab" data-table-tab="payloads">
+            📤 Payloads (<span id="tablePayloadsCount">0</span>)
+          </div>
+          <div class="table-subtab" data-table-tab="responses">
+            📥 Responses (<span id="tableResponsesCount">0</span>)
+          </div>
+        </div>
+        <div class="table-view-actions">
+          <button id="btnDownloadActiveTableCsv" class="btn-primary" style="font-size: 11px; padding: 4px 8px;">
+            📥 Download Table CSV
+          </button>
+        </div>
+      </div>
+
+      <div class="table-scroll-wrap">
+        <table class="matrix-table" id="matrixTable"></table>
+      </div>
+
+      <div class="table-pagination-bar" id="tablePaginationBar">
+        <div id="tablePaginationInfo">Showing 0-0 of 0</div>
+        <div class="page-controls">
+          <select id="pageSizeSelect" class="page-size-select">
+            <option value="25">25 / page</option>
+            <option value="50" selected>50 / page</option>
+            <option value="100">100 / page</option>
+          </select>
+          <button id="btnPrevTablePage" class="btn-secondary" style="padding: 2px 7px;">‹ Prev</button>
+          <span id="pageCurrentDisplay" style="font-size: 11px; color: var(--text-muted); font-weight: 600;">Page 1 / 1</span>
+          <button id="btnNextTablePage" class="btn-secondary" style="padding: 2px 7px;">Next ›</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast">Copied to clipboard</div>
+
+  <script src="dependencyEngine.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

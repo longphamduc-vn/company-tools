@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "EMS Nexacro XML Interceptor & Dependency Engine",
+  "version": "1.0.0",
+  "description": "Intercepts Nexacro XML payloads/responses, generates exact XPaths, and maps cross-API data dependencies.",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "inject.js",
+        "dependencyEngine.js"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Nexacro API Inspector"
+  }
+}

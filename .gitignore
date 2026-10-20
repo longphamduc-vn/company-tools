@@ -1,0 +1,36 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual Environments
+.env
+.venv
+env/
+venv/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage
+.tox/
+.coverage
+.pytest_cache/
+
+# Excel temporary lock files
+~$*.xlsx
+~$*.xls
+
+# User config & output files
+.scada_tracelog_config.json
+*.csv

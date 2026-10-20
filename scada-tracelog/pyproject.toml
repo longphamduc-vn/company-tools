@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scada-tracelog"
+version = "1.0.0"
+description = "Industrial SCADA Recipe Change Tracker & 256-Column Data Loss Guard"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0",
+    "xlrd>=2.0.1"
+]
+
+[project.scripts]
+scada-tracelog = "scada_tracelog.app:main"
