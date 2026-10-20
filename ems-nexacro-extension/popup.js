@@ -39,6 +39,7 @@
   const btnExportCsvApis = document.getElementById('btnExportCsvApis');
   const btnExportCsvPayloads = document.getElementById('btnExportCsvPayloads');
   const btnExportCsvResponses = document.getElementById('btnExportCsvResponses');
+  const btnExportYaml = document.getElementById('btnExportYaml');
   const btnExportJson = document.getElementById('btnExportJson');
   const btnDownloadActiveTableCsv = document.getElementById('btnDownloadActiveTableCsv');
 
@@ -111,6 +112,11 @@
     btnExportCsvResponses.addEventListener('click', () => {
       exportDropdownContainer.classList.remove('open');
       handleExportCsvResponses();
+    });
+
+    btnExportYaml.addEventListener('click', () => {
+      exportDropdownContainer.classList.remove('open');
+      handleExportYAML();
     });
 
     btnExportJson.addEventListener('click', () => {
@@ -1434,6 +1440,132 @@
 
     const csvData = createCsvContent(headers, rows);
     downloadFile(csvData, `api_${api.index}_${type}_table_${Date.now()}.csv`, 'text/csv;charset=utf-8;');
+  }
+
+  function formatYamlScalar(val) {
+    if (val === null || val === undefined) return '~';
+    if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+    const str = String(val);
+    if (str === '') return '""';
+    if (
+      /[:#\[\]\{\},\n\r\t&*?|<>=!%@`"'\\]/.test(str) ||
+      str.startsWith(' ') ||
+      str.endsWith(' ') ||
+      str.toLowerCase() === 'true' ||
+      str.toLowerCase() === 'false' ||
+      str.toLowerCase() === 'null' ||
+      !isNaN(Number(str))
+    ) {
+      return JSON.stringify(str);
+    }
+    return str;
+  }
+
+  function formatYamlSection(parsed) {
+    if (!parsed) return ' {}\n';
+    let out = '\n';
+
+    // 1. Parameters
+    const params = parsed.parameters || {};
+    const paramKeys = Object.keys(params);
+    if (paramKeys.length > 0) {
+      out += '        params:\n';
+      paramKeys.forEach((k) => {
+        const val = typeof params[k] === 'object' && params[k] !== null ? params[k].value : params[k];
+        out += `          ${k}: ${formatYamlScalar(val)}\n`;
+      });
+    } else {
+      out += '        params: {}\n';
+    }
+
+    // 2. Datasets
+    const datasets = parsed.datasets || {};
+    const dsKeys = Object.keys(datasets);
+    if (dsKeys.length > 0) {
+      out += '        datasets:\n';
+      dsKeys.forEach((dsName) => {
+        const ds = datasets[dsName];
+        const colList = (ds.columns && ds.columns.length > 0)
+          ? ds.columns.map((c) => (typeof c === 'object' && c !== null ? c.id : c))
+          : (ds.rows && ds.rows.length > 0 ? Object.keys(ds.rows[0]) : []);
+
+        out += `          ${dsName}:\n`;
+        out += `            cols: [${colList.map(formatYamlScalar).join(', ')}]\n`;
+        out += `            count: ${(ds.rows || []).length}\n`;
+
+        if (ds.rows && ds.rows.length > 0) {
+          out += '            rows:\n';
+          ds.rows.forEach((row) => {
+            const rowVals = colList.map((colId) => {
+              const cellVal = row[colId];
+              return formatYamlScalar(cellVal !== undefined ? cellVal : '');
+            });
+            out += `              - [${rowVals.join(', ')}]\n`;
+          });
+        } else {
+          out += '            rows: []\n';
+        }
+      });
+    } else {
+      out += '        datasets: {}\n';
+    }
+
+    return out;
+  }
+
+  function handleExportYAML() {
+    if (computedLogs.length === 0) {
+      alert('No API records captured yet.');
+      return;
+    }
+
+    let yaml = '# ========================================================\n';
+    yaml += '# EMS Nexacro Interceptor & Dependency Engine - Compact YAML\n';
+    yaml += `# Exported: ${new Date().toISOString()}\n`;
+    yaml += `# Total Requests: ${computedLogs.length}\n`;
+    yaml += '# ========================================================\n\n';
+    yaml += 'meta:\n';
+    yaml += '  generator: "EMS Nexacro Interceptor & Dependency Engine"\n';
+    yaml += `  exportedAt: ${formatYamlScalar(new Date().toISOString())}\n`;
+    yaml += `  totalRequests: ${computedLogs.length}\n\n`;
+    yaml += 'apis:\n';
+
+    computedLogs.forEach((item) => {
+      yaml += `  - index: ${item.index}\n`;
+      yaml += `    method: ${formatYamlScalar(item.method)}\n`;
+      yaml += `    url: ${formatYamlScalar(item.url)}\n`;
+      yaml += `    status: ${item.status}\n`;
+      yaml += `    durationMs: ${item.durationMs || 0}\n`;
+
+      // Request
+      yaml += '    request:';
+      yaml += formatYamlSection(item.parsedRequest);
+
+      // Response
+      yaml += '    response:';
+      yaml += formatYamlSection(item.parsedResponse);
+
+      // Dependencies / Lineage
+      const deps = item.dependencies || [];
+      if (deps.length > 0) {
+        yaml += '    dependencies:\n';
+        deps.forEach((d) => {
+          const sourceApi = computedLogs.find((a) => a.id === d.sourceApiId);
+          const fromIdx = sourceApi ? sourceApi.index : (d.sourceApiIndex !== undefined ? d.sourceApiIndex : d.sourceApiId);
+          yaml += `      - target: ${formatYamlScalar(d.targetLocation || d.targetKey)}\n`;
+          yaml += `        fromApi: ${formatYamlScalar(fromIdx)}\n`;
+          yaml += `        source: ${formatYamlScalar(d.sourceXPath || d.sourceKey)}\n`;
+          if (d.targetValue !== undefined && d.targetValue !== '') {
+            yaml += `        value: ${formatYamlScalar(d.targetValue)}\n`;
+          }
+        });
+      } else {
+        yaml += '    dependencies: []\n';
+      }
+      yaml += '\n';
+    });
+
+    downloadFile(yaml, `nexacro_api_chain_${Date.now()}.yaml`, 'text/yaml;charset=utf-8;');
   }
 
   function handleExportJSON() {
