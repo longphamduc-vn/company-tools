@@ -43,6 +43,30 @@
   const btnExportJson = document.getElementById('btnExportJson');
   const btnDownloadActiveTableCsv = document.getElementById('btnDownloadActiveTableCsv');
 
+  // Modal Elements for Export API & Dependencies Chain
+  const btnOpenExportChainModal = document.getElementById('btnOpenExportChainModal');
+  const btnTableOpenExportChain = document.getElementById('btnTableOpenExportChain');
+  const exportChainModal = document.getElementById('exportChainModal');
+  const btnCloseChainModal = document.getElementById('btnCloseChainModal');
+  const btnChainModalClose = document.getElementById('btnChainModalClose');
+  const chainModalSelectApi = document.getElementById('chainModalSelectApi');
+  const chainModalApiCountBadge = document.getElementById('chainModalApiCountBadge');
+  const chainStatsBadge = document.getElementById('chainStatsBadge');
+  const chainVisualFlow = document.getElementById('chainVisualFlow');
+  const chainLineageContainer = document.getElementById('chainLineageContainer');
+  const chainVarsCount = document.getElementById('chainVarsCount');
+  const chainLineageList = document.getElementById('chainLineageList');
+  const chainModalFooterInfo = document.getElementById('chainModalFooterInfo');
+  const btnChainExportJson = document.getElementById('btnChainExportJson');
+  const btnChainExportYaml = document.getElementById('btnChainExportYaml');
+  const btnChainExportCsvDeps = document.getElementById('btnChainExportCsvDeps');
+  const btnChainExportCsvApis = document.getElementById('btnChainExportCsvApis');
+  const btnChainExportCsvPayloads = document.getElementById('btnChainExportCsvPayloads');
+  const btnChainExportCsvResponses = document.getElementById('btnChainExportCsvResponses');
+  const btnChainExportBundle = document.getElementById('btnChainExportBundle');
+
+  let activeChainResult = null;
+
   const btnClear = document.getElementById('btnClear');
   const searchInput = document.getElementById('searchInput');
   const countAllEl = document.getElementById('countAll');
@@ -135,6 +159,80 @@
         handleExportCsvResponses();
       }
     });
+
+    // 2b. Export API & Dependencies Chain Modal Triggers & Controls
+    if (btnOpenExportChainModal) {
+      btnOpenExportChainModal.addEventListener('click', () => {
+        exportDropdownContainer.classList.remove('open');
+        openExportChainModal();
+      });
+    }
+
+    if (btnTableOpenExportChain) {
+      btnTableOpenExportChain.addEventListener('click', () => {
+        openExportChainModal();
+      });
+    }
+
+    if (btnCloseChainModal) {
+      btnCloseChainModal.addEventListener('click', closeExportChainModal);
+    }
+    if (btnChainModalClose) {
+      btnChainModalClose.addEventListener('click', closeExportChainModal);
+    }
+    if (exportChainModal) {
+      exportChainModal.addEventListener('click', (e) => {
+        if (e.target === exportChainModal) {
+          closeExportChainModal();
+        }
+      });
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && exportChainModal && exportChainModal.classList.contains('open')) {
+        closeExportChainModal();
+      }
+    });
+
+    if (chainModalSelectApi) {
+      chainModalSelectApi.addEventListener('change', updateChainModalView);
+    }
+
+    if (btnChainExportJson) {
+      btnChainExportJson.addEventListener('click', () => {
+        if (activeChainResult) handleExportChainJSON(activeChainResult);
+      });
+    }
+    if (btnChainExportYaml) {
+      btnChainExportYaml.addEventListener('click', () => {
+        if (activeChainResult) handleExportChainYAML(activeChainResult);
+      });
+    }
+    if (btnChainExportCsvDeps) {
+      btnChainExportCsvDeps.addEventListener('click', () => {
+        if (activeChainResult) handleExportChainCsvDependencies(activeChainResult);
+      });
+    }
+    if (btnChainExportCsvApis) {
+      btnChainExportCsvApis.addEventListener('click', () => {
+        if (activeChainResult) handleExportChainCsvApis(activeChainResult);
+      });
+    }
+    if (btnChainExportCsvPayloads) {
+      btnChainExportCsvPayloads.addEventListener('click', () => {
+        if (activeChainResult) handleExportChainCsvPayloads(activeChainResult);
+      });
+    }
+    if (btnChainExportCsvResponses) {
+      btnChainExportCsvResponses.addEventListener('click', () => {
+        if (activeChainResult) handleExportChainCsvResponses(activeChainResult);
+      });
+    }
+    if (btnChainExportBundle) {
+      btnChainExportBundle.addEventListener('click', () => {
+        if (activeChainResult) handleExportChainBundle(activeChainResult);
+      });
+    }
 
     // 3. View Mode Toggle
     btnToggleView.addEventListener('click', () => {
@@ -246,7 +344,11 @@
 
     for (let i = 0; i < currentLogs.length; i++) {
       const current = currentLogs[i];
-      const pastApis = currentLogs.slice(0, i);
+      current.index = i + 1;
+      const pastApis = currentLogs.slice(0, i).map((p, pIdx) => ({
+        ...p,
+        index: p.index || pIdx + 1
+      }));
 
       let dependencies = [];
       let parsedRequest = null;
@@ -264,13 +366,21 @@
         }
       }
 
-      dependencies = dependencies.map((dep, depIdx) => ({
-        ...dep,
-        depIndex: depIdx + 1,
-        targetApiNo: i + 1,
-        targetMethod: current.method,
-        targetUrl: current.url
-      }));
+      dependencies = dependencies.map((dep, depIdx) => {
+        let sourceApiNo = dep.sourceApiNo;
+        if (!sourceApiNo && dep.sourceApiId) {
+          const sIdx = pastApis.findIndex((p) => p.id === dep.sourceApiId);
+          if (sIdx !== -1) sourceApiNo = sIdx + 1;
+        }
+        return {
+          ...dep,
+          depIndex: depIdx + 1,
+          targetApiNo: i + 1,
+          sourceApiNo: sourceApiNo || '?',
+          targetMethod: current.method,
+          targetUrl: current.url
+        };
+      });
 
       // Pre-index sourced targets for O(1) origin lookup
       const sourcedTargetsMap = new Map();
@@ -459,6 +569,9 @@
           </div>
         </div>
         <div class="card-meta-right">
+          <button class="btn-card-export-chain" data-api-index="${api.index}" title="Export this API along with all its upstream dependencies">
+            🎯 Export Chain
+          </button>
           ${
             depCount > 0
               ? `<div class="dep-pill" title="${depCount} variables linked from prior APIs">
@@ -476,7 +589,10 @@
     `;
 
     const header = card.querySelector('.card-header');
-    header.addEventListener('click', () => {
+    header.addEventListener('click', (e) => {
+      // Don't toggle drawer if export chain button was clicked
+      if (e.target.closest('.btn-card-export-chain')) return;
+
       const isCurrentlyOpen = card.classList.contains('open');
       if (!isCurrentlyOpen) {
         if (!card.dataset.drawerBuilt) {
@@ -488,6 +604,14 @@
         card.classList.remove('open');
       }
     });
+
+    const btnChain = card.querySelector('.btn-card-export-chain');
+    if (btnChain) {
+      btnChain.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openExportChainModal(api.index);
+      });
+    }
 
     return card;
   }
@@ -516,7 +640,7 @@
       </div>
 
       <div class="tab-pane ${depCount > 0 ? 'active' : ''}" data-pane-content="deps">
-        ${renderDependenciesPane(api.dependencies)}
+        ${renderDependenciesPane(api.dependencies, api.index)}
       </div>
 
       <div class="tab-pane ${depCount === 0 ? 'active' : ''}" data-pane-content="payload">
@@ -614,10 +738,17 @@
         const aType = singleExportBtn.getAttribute('data-type');
         handleExportSingleApiCsv(aIndex, aType);
       }
+
+      const drawerChainBtn = e.target.closest('.btn-drawer-export-chain');
+      if (drawerChainBtn) {
+        e.stopPropagation();
+        const aIndex = parseInt(drawerChainBtn.getAttribute('data-api-index'), 10);
+        openExportChainModal(aIndex);
+      }
     });
   }
 
-  function renderDependenciesPane(dependencies) {
+  function renderDependenciesPane(dependencies, apiIndex) {
     if (!dependencies || dependencies.length === 0) {
       return `
         <div style="padding: 14px; text-align: center; color: var(--text-muted); font-size: 11.5px;">
@@ -626,7 +757,13 @@
       `;
     }
 
-    let itemsHtml = '';
+    let itemsHtml = `
+      <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+        <button class="btn-secondary btn-drawer-export-chain" data-api-index="${apiIndex}" style="font-size: 11px; padding: 3px 8px;">
+          🎯 Export API #${apiIndex} with Dependencies Chain
+        </button>
+      </div>
+    `;
     dependencies.forEach((d) => {
       let sourceUrlShort = d.sourceApiUrl;
       try {
@@ -1600,6 +1737,494 @@
 
     const jsonStr = JSON.stringify(exportPayload, null, 2);
     downloadFile(jsonStr, `nexacro_api_chain_${Date.now()}.json`, 'application/json;charset=utf-8;');
+  }
+
+  // ========================================================
+  // EXPORT API & DEPENDENCIES CHAIN CONTROLLER & EXPORTERS
+  // ========================================================
+  function openExportChainModal(preselectIndex) {
+    if (computedLogs.length === 0) {
+      alert('No captured API records found to export.');
+      return;
+    }
+
+    chainModalSelectApi.innerHTML = '';
+    computedLogs.forEach((api) => {
+      let shortUrl = api.url;
+      try {
+        const u = new URL(api.url);
+        shortUrl = u.pathname;
+      } catch (e) {}
+
+      const depCount = (api.dependencies || []).length;
+      const opt = document.createElement('option');
+      opt.value = api.index;
+      opt.textContent = `API #${api.index} [${api.method}] ${shortUrl} (${depCount} dep${depCount === 1 ? '' : 's'})`;
+      chainModalSelectApi.appendChild(opt);
+    });
+
+    chainModalApiCountBadge.textContent = `${computedLogs.length} APIs Captured`;
+
+    let selectedIdx = preselectIndex;
+    if (!selectedIdx) {
+      const lastWithDeps = [...computedLogs].reverse().find((a) => a.dependencies && a.dependencies.length > 0);
+      selectedIdx = lastWithDeps ? lastWithDeps.index : computedLogs[computedLogs.length - 1].index;
+    }
+
+    chainModalSelectApi.value = String(selectedIdx);
+    updateChainModalView();
+
+    exportChainModal.classList.add('open');
+  }
+
+  function closeExportChainModal() {
+    exportChainModal.classList.remove('open');
+  }
+
+  function updateChainModalView() {
+    const selectedIdx = parseInt(chainModalSelectApi.value, 10);
+    if (isNaN(selectedIdx)) return;
+
+    if (!window.NexacroDependencyEngine || !window.NexacroDependencyEngine.resolveDependencyChain) {
+      console.warn('NexacroDependencyEngine.resolveDependencyChain is not loaded');
+      return;
+    }
+
+    activeChainResult = window.NexacroDependencyEngine.resolveDependencyChain(selectedIdx, computedLogs);
+
+    const targetApi = activeChainResult.targetApis[0];
+    const depApis = activeChainResult.dependencyApis;
+    const chainApis = activeChainResult.chainApis;
+    const edges = activeChainResult.edges;
+
+    // 1. Stats Badge
+    chainStatsBadge.textContent = `${depApis.length} Upstream Dependenc${depApis.length === 1 ? 'y' : 'ies'}`;
+
+    // 2. Visual Flow
+    if (depApis.length === 0) {
+      let shortUrl = targetApi ? targetApi.url : '';
+      try {
+        shortUrl = new URL(targetApi.url).pathname;
+      } catch (e) {}
+
+      chainVisualFlow.innerHTML = `
+        <div class="chain-standalone-notice">
+          <span>ℹ️</span>
+          <span><strong>Standalone API:</strong> API #${selectedIdx} [${escapeHtml(targetApi ? targetApi.method : '')} ${escapeHtml(shortUrl)}] does not depend on any previous responses. Export will contain 1 API.</span>
+        </div>
+      `;
+    } else {
+      let flowHtml = '';
+      chainApis.forEach((api, idx) => {
+        const isTarget = api.index === selectedIdx;
+        let shortUrl = api.url;
+        try {
+          shortUrl = new URL(api.url).pathname;
+        } catch (e) {}
+
+        const nodeClass = isTarget ? 'chain-node node-target' : 'chain-node node-upstream';
+        const roleLabel = isTarget ? '🎯 Target' : 'Upstream';
+
+        flowHtml += `
+          <span class="${nodeClass}" title="${roleLabel}: ${escapeAttr(api.url)}">
+            #${api.index} ${escapeHtml(api.method)} ${escapeHtml(shortUrl)}
+          </span>
+        `;
+
+        if (idx < chainApis.length - 1) {
+          flowHtml += `<span class="chain-arrow">➔</span>`;
+        }
+      });
+      chainVisualFlow.innerHTML = flowHtml;
+    }
+
+    // 3. Variable Lineage
+    if (edges.length > 0) {
+      chainLineageContainer.style.display = 'block';
+      chainVarsCount.textContent = edges.length;
+
+      let itemsHtml = '';
+      edges.forEach((edge) => {
+        itemsHtml += `
+          <div class="chain-lineage-item">
+            <span class="lineage-col-target" title="Target: ${escapeAttr(edge.targetLocation)}">
+              <strong>${escapeHtml(edge.targetKey)}</strong>
+            </span>
+            <span class="lineage-col-val" title="${escapeAttr(edge.targetValue)}">
+              "${escapeHtml(edge.targetValue)}"
+            </span>
+            <span class="lineage-col-src" title="Source: ${escapeAttr(edge.sourceXPath)}">
+              🔗 from API #${edge.sourceIndex} (${escapeHtml(edge.sourceKey)})
+            </span>
+          </div>
+        `;
+      });
+      chainLineageList.innerHTML = itemsHtml;
+    } else {
+      chainLineageContainer.style.display = 'none';
+      chainVarsCount.textContent = '0';
+      chainLineageList.innerHTML = '';
+    }
+
+    // 4. Footer Info
+    chainModalFooterInfo.textContent = `Chain contains ${chainApis.length} API(s) total: 1 target API + ${depApis.length} upstream dependencies.`;
+  }
+
+  function handleExportChainJSON(chainResult) {
+    if (!chainResult || !chainResult.chainApis || chainResult.chainApis.length === 0) {
+      alert('No APIs in chain to export.');
+      return;
+    }
+
+    const targetSet = new Set(chainResult.targetApis.map((t) => t.index));
+    const targetIdx = chainResult.targetApis.map((a) => a.index).join('_') || 'selected';
+
+    const exportPayload = {
+      exportedAt: new Date().toISOString(),
+      generator: 'EMS Nexacro XML Interceptor & Dependency Engine',
+      exportType: 'API_WITH_DEPENDENCIES_CHAIN',
+      targetApis: chainResult.targetApis.map((a) => ({
+        index: a.index,
+        method: a.method,
+        url: a.url
+      })),
+      dependencySummary: {
+        targetApiCount: chainResult.targetApis.length,
+        dependenciesCount: chainResult.dependencyApis.length,
+        totalApisInChain: chainResult.chainApis.length,
+        chainSequence: chainResult.chainApis.map((a) => ({
+          role: targetSet.has(a.index) ? 'Target' : 'Upstream Dependency',
+          index: a.index,
+          method: a.method,
+          url: a.url
+        }))
+      },
+      lineageEdges: chainResult.edges || [],
+      chain: chainResult.chainApis.map((item) => ({
+        id: item.id,
+        index: item.index,
+        role: targetSet.has(item.index) ? 'target' : 'upstream_dependency',
+        timestamp: item.timestamp,
+        durationMs: item.durationMs,
+        clientType: item.clientType,
+        method: item.method,
+        url: item.url,
+        status: item.status,
+        statusText: item.statusText,
+        requestHeaders: item.requestHeaders,
+        requestBodyRaw: item.requestBody,
+        requestParsed: item.parsedRequest,
+        responseHeaders: item.responseHeaders,
+        responseBodyRaw: item.responseBody,
+        responseParsed: item.parsedResponse,
+        dependencies: item.dependencies || []
+      }))
+    };
+
+    const jsonStr = JSON.stringify(exportPayload, null, 2);
+    downloadFile(jsonStr, `nexacro_api_${targetIdx}_chain_${Date.now()}.json`, 'application/json;charset=utf-8;');
+  }
+
+  function handleExportChainYAML(chainResult) {
+    if (!chainResult || !chainResult.chainApis || chainResult.chainApis.length === 0) {
+      alert('No APIs in chain to export.');
+      return;
+    }
+
+    const targetSet = new Set(chainResult.targetApis.map((t) => t.index));
+    const targetIdx = chainResult.targetApis.map((a) => a.index).join('_') || 'selected';
+
+    let yaml = '# ========================================================\n';
+    yaml += '# EMS Nexacro Interceptor - API & Dependency Chain Export\n';
+    yaml += `# Target API(s): ${chainResult.targetApis.map((t) => `API #${t.index} [${t.method}] ${t.url}`).join(', ')}\n`;
+    yaml += `# Upstream Dependencies Count: ${chainResult.dependencyApis.length}\n`;
+    yaml += `# Total APIs in Chain: ${chainResult.chainApis.length}\n`;
+    yaml += `# Exported: ${new Date().toISOString()}\n`;
+    yaml += '# ========================================================\n\n';
+
+    yaml += 'meta:\n';
+    yaml += '  generator: "EMS Nexacro XML Interceptor & Dependency Engine"\n';
+    yaml += '  exportType: "API_WITH_DEPENDENCIES_CHAIN"\n';
+    yaml += `  exportedAt: ${formatYamlScalar(new Date().toISOString())}\n`;
+    yaml += `  totalRequestsInChain: ${chainResult.chainApis.length}\n`;
+    yaml += `  targetApis: [${chainResult.targetApis.map((t) => t.index).join(', ')}]\n`;
+    yaml += `  upstreamDependencies: [${chainResult.dependencyApis.map((d) => d.index).join(', ')}]\n`;
+    const chainSequenceStr = chainResult.chainApis.map((a) => `API #${a.index}`).join(' ➔ ');
+    yaml += `  chainFlow: ${formatYamlScalar(chainSequenceStr)}\n\n`;
+
+    if (chainResult.edges && chainResult.edges.length > 0) {
+      yaml += 'lineageEdges:\n';
+      chainResult.edges.forEach((edge) => {
+        yaml += `  - targetApi: ${edge.targetIndex}\n`;
+        yaml += `    targetField: ${formatYamlScalar(edge.targetKey)}\n`;
+        yaml += `    targetXPath: ${formatYamlScalar(edge.targetLocation)}\n`;
+        yaml += `    sourceApi: ${edge.sourceIndex}\n`;
+        yaml += `    sourceField: ${formatYamlScalar(edge.sourceKey)}\n`;
+        yaml += `    sourceXPath: ${formatYamlScalar(edge.sourceXPath)}\n`;
+        yaml += `    value: ${formatYamlScalar(edge.targetValue)}\n`;
+      });
+      yaml += '\n';
+    }
+
+    yaml += 'apis:\n';
+    chainResult.chainApis.forEach((item) => {
+      yaml += `  - index: ${item.index}\n`;
+      yaml += `    role: ${targetSet.has(item.index) ? 'target' : 'upstream_dependency'}\n`;
+      yaml += `    method: ${formatYamlScalar(item.method)}\n`;
+      yaml += `    url: ${formatYamlScalar(item.url)}\n`;
+      yaml += `    status: ${item.status}\n`;
+      yaml += `    durationMs: ${item.durationMs || 0}\n`;
+
+      yaml += '    request:';
+      yaml += formatYamlSection(item.parsedRequest);
+
+      yaml += '    response:';
+      yaml += formatYamlSection(item.parsedResponse);
+
+      const deps = item.dependencies || [];
+      if (deps.length > 0) {
+        yaml += '    dependencies:\n';
+        deps.forEach((d) => {
+          yaml += `      - target: ${formatYamlScalar(d.targetLocation || d.targetKey)}\n`;
+          yaml += `        fromApi: ${formatYamlScalar(d.sourceApiNo || d.sourceApiId)}\n`;
+          yaml += `        source: ${formatYamlScalar(d.sourceXPath || d.sourceKey)}\n`;
+          if (d.targetValue !== undefined && d.targetValue !== '') {
+            yaml += `        value: ${formatYamlScalar(d.targetValue)}\n`;
+          }
+        });
+      } else {
+        yaml += '    dependencies: []\n';
+      }
+      yaml += '\n';
+    });
+
+    downloadFile(yaml, `nexacro_api_${targetIdx}_chain_${Date.now()}.yaml`, 'text/yaml;charset=utf-8;');
+  }
+
+  function handleExportChainCsvDependencies(chainResult) {
+    if (!chainResult || !chainResult.chainApis || chainResult.chainApis.length === 0) {
+      alert('No APIs in chain to export.');
+      return;
+    }
+
+    const headers = [
+      'Index',
+      'Target_API_No',
+      'Target_Method',
+      'Target_URL',
+      'Target_Field',
+      'Target_XPath',
+      'Matched_Value',
+      'Source_API_ID',
+      'Source_API_No',
+      'Source_Method',
+      'Source_URL',
+      'Source_Field',
+      'Source_XPath',
+      'Source_Type'
+    ];
+
+    const rows = [];
+    let count = 0;
+
+    chainResult.chainApis.forEach((api) => {
+      (api.dependencies || []).forEach((d) => {
+        count++;
+        rows.push([
+          count,
+          api.index,
+          api.method,
+          api.url,
+          d.targetKey,
+          d.targetLocation,
+          d.targetValue,
+          d.sourceApiId,
+          d.sourceApiNo || '-',
+          d.sourceMethod,
+          d.sourceApiUrl,
+          d.sourceKey,
+          d.sourceXPath,
+          d.sourceType
+        ]);
+      });
+    });
+
+    if (rows.length === 0) {
+      alert('No dependencies found for this API (it is a standalone API).');
+      return;
+    }
+
+    const targetIdx = chainResult.targetApis.map((a) => a.index).join('_') || 'selected';
+    const csvData = createCsvContent(headers, rows);
+    downloadFile(csvData, `nexacro_dependencies_matrix_chain_api_${targetIdx}_${Date.now()}.csv`, 'text/csv;charset=utf-8;');
+  }
+
+  function handleExportChainCsvApis(chainResult) {
+    if (!chainResult || !chainResult.chainApis || chainResult.chainApis.length === 0) {
+      alert('No APIs in chain to export.');
+      return;
+    }
+
+    const headers = [
+      'Chain_Role',
+      'No',
+      'Timestamp',
+      'Formatted_Time',
+      'Client_Type',
+      'Method',
+      'Status',
+      'Duration_ms',
+      'URL',
+      'Dependencies_Count',
+      'Req_Params_Count',
+      'Req_Datasets_Count',
+      'Res_Params_Count',
+      'Res_Datasets_Count'
+    ];
+
+    const targetSet = new Set(chainResult.targetApis.map((t) => t.index));
+
+    const rows = chainResult.chainApis.map((api) => {
+      const reqParamsCount = api.parsedRequest ? Object.keys(api.parsedRequest.parameters || {}).length : 0;
+      const reqDatasetsCount = api.parsedRequest ? Object.keys(api.parsedRequest.datasets || {}).length : 0;
+      const resParamsCount = api.parsedResponse ? Object.keys(api.parsedResponse.parameters || {}).length : 0;
+      const resDatasetsCount = api.parsedResponse ? Object.keys(api.parsedResponse.datasets || {}).length : 0;
+
+      return [
+        targetSet.has(api.index) ? 'Target API' : 'Upstream Dependency',
+        api.index,
+        api.timestamp,
+        new Date(api.timestamp).toISOString(),
+        api.clientType,
+        api.method,
+        api.status,
+        api.durationMs || 0,
+        api.url,
+        (api.dependencies || []).length,
+        reqParamsCount,
+        reqDatasetsCount,
+        resParamsCount,
+        resDatasetsCount
+      ];
+    });
+
+    const targetIdx = chainResult.targetApis.map((a) => a.index).join('_') || 'selected';
+    const csvData = createCsvContent(headers, rows);
+    downloadFile(csvData, `nexacro_apis_summary_chain_api_${targetIdx}_${Date.now()}.csv`, 'text/csv;charset=utf-8;');
+  }
+
+  function handleExportChainCsvPayloads(chainResult) {
+    if (!chainResult || !chainResult.chainApis || chainResult.chainApis.length === 0) {
+      alert('No APIs in chain to export.');
+      return;
+    }
+
+    const items = extractXmlFlatItems(chainResult.chainApis, 'request');
+    if (items.length === 0) {
+      alert('No request payload parameters or datasets found in this chain.');
+      return;
+    }
+
+    const headers = [
+      'Index',
+      'API_No',
+      'Method',
+      'URL',
+      'Category',
+      'Dataset_ID',
+      'Row_Index',
+      'Field_Name',
+      'Value',
+      'Data_Origin',
+      'Source_API_No',
+      'Source_Field',
+      'Source_XPath',
+      'XPath'
+    ];
+
+    const rows = items.map((item, idx) => [
+      idx + 1,
+      item.apiIndex,
+      item.method,
+      item.url,
+      item.category,
+      item.datasetId,
+      item.rowIndex,
+      item.fieldName,
+      item.value,
+      item.isSourced ? 'Sourced from Prior Response' : 'User Input',
+      item.sourceDep ? item.sourceDep.sourceApiNo : '-',
+      item.sourceDep ? item.sourceDep.sourceKey : '-',
+      item.sourceDep ? item.sourceDep.sourceXPath : '-',
+      item.xpath
+    ]);
+
+    const targetIdx = chainResult.targetApis.map((a) => a.index).join('_') || 'selected';
+    const csvData = createCsvContent(headers, rows);
+    downloadFile(csvData, `nexacro_payloads_chain_api_${targetIdx}_${Date.now()}.csv`, 'text/csv;charset=utf-8;');
+  }
+
+  function handleExportChainCsvResponses(chainResult) {
+    if (!chainResult || !chainResult.chainApis || chainResult.chainApis.length === 0) {
+      alert('No APIs in chain to export.');
+      return;
+    }
+
+    const items = extractXmlFlatItems(chainResult.chainApis, 'response');
+    if (items.length === 0) {
+      alert('No response parameters or datasets found in this chain.');
+      return;
+    }
+
+    const headers = [
+      'Index',
+      'API_No',
+      'Method',
+      'URL',
+      'Category',
+      'Dataset_ID',
+      'Row_Index',
+      'Field_Name',
+      'Value',
+      'XPath'
+    ];
+
+    const rows = items.map((item, idx) => [
+      idx + 1,
+      item.apiIndex,
+      item.method,
+      item.url,
+      item.category,
+      item.datasetId,
+      item.rowIndex,
+      item.fieldName,
+      item.value,
+      item.xpath
+    ]);
+
+    const targetIdx = chainResult.targetApis.map((a) => a.index).join('_') || 'selected';
+    const csvData = createCsvContent(headers, rows);
+    downloadFile(csvData, `nexacro_responses_chain_api_${targetIdx}_${Date.now()}.csv`, 'text/csv;charset=utf-8;');
+  }
+
+  function handleExportChainBundle(chainResult) {
+    if (!chainResult || !chainResult.chainApis || chainResult.chainApis.length === 0) {
+      alert('No APIs in chain to export.');
+      return;
+    }
+    handleExportChainJSON(chainResult);
+    setTimeout(() => {
+      handleExportChainYAML(chainResult);
+    }, 250);
+    if (chainResult.edges && chainResult.edges.length > 0) {
+      setTimeout(() => {
+        handleExportChainCsvDependencies(chainResult);
+      }, 500);
+    }
+    setTimeout(() => {
+      handleExportChainCsvApis(chainResult);
+    }, 750);
+    showToast('Exporting chain bundle (JSON, YAML, CSVs)...');
   }
 
   function handleClearLogs() {

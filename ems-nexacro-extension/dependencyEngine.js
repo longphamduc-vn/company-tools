@@ -266,6 +266,7 @@
               targetKey: targetItem.key,
               targetValue: targetVal,
               sourceApiId: candidate.api.id,
+              sourceApiNo: candidate.api.index || null,
               sourceApiUrl: candidate.api.url,
               sourceMethod: candidate.api.method,
               sourceType: sourceItem.sourceType,
@@ -284,10 +285,139 @@
     return dependencies;
   }
 
+  /**
+   * Resolves the full upstream dependency chain (direct and transitive) for the given target API(s).
+   *
+   * @param {number|string|Array<number|string>} targetIdentifiers - Target API index(es) (1-based) or id(s)
+   * @param {Array<Object>} allApis - List of all captured/computed APIs
+   * @returns {Object} Lineage resolution summary
+   */
+  function resolveDependencyChain(targetIdentifiers, allApis) {
+    if (!allApis || !Array.isArray(allApis) || allApis.length === 0) {
+      return {
+        targetApis: [],
+        dependencyApis: [],
+        chainApis: [],
+        edges: [],
+        stats: { totalTarget: 0, totalDependencies: 0, totalInChain: 0 }
+      };
+    }
+
+    const rawTargets = Array.isArray(targetIdentifiers) ? targetIdentifiers : [targetIdentifiers];
+
+    // Build lookup maps
+    const apiById = new Map();
+    const apiByIndex = new Map();
+
+    allApis.forEach((api, idx) => {
+      const idxNum = api.index !== undefined ? api.index : idx + 1;
+      if (api.id) apiById.set(String(api.id), api);
+      apiByIndex.set(idxNum, api);
+      apiByIndex.set(String(idxNum), api);
+    });
+
+    function findApi(ident) {
+      if (ident === null || ident === undefined) return null;
+      if (typeof ident === 'object' && ident.index !== undefined) return ident;
+      if (apiByIndex.has(ident)) return apiByIndex.get(ident);
+      const str = String(ident);
+      if (apiByIndex.has(str)) return apiByIndex.get(str);
+      if (apiById.has(str)) return apiById.get(str);
+      return null;
+    }
+
+    const resolvedTargetApis = [];
+    const targetKeysSet = new Set();
+
+    rawTargets.forEach((ident) => {
+      const a = findApi(ident);
+      if (a) {
+        const key = a.id || a.index;
+        if (!targetKeysSet.has(key)) {
+          targetKeysSet.add(key);
+          resolvedTargetApis.push(a);
+        }
+      }
+    });
+
+    const dependencyApisMap = new Map();
+    const edges = [];
+    const queue = [...resolvedTargetApis];
+    const visited = new Set();
+
+    resolvedTargetApis.forEach((a) => visited.add(a.id || a.index));
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      const currentDeps = current.dependencies || [];
+
+      for (const dep of currentDeps) {
+        let srcApi = null;
+        if (dep.sourceApiId && apiById.has(String(dep.sourceApiId))) {
+          srcApi = apiById.get(String(dep.sourceApiId));
+        } else if (dep.sourceApiNo && apiByIndex.has(dep.sourceApiNo)) {
+          srcApi = apiByIndex.get(dep.sourceApiNo);
+        }
+
+        if (srcApi) {
+          edges.push({
+            targetIndex: current.index,
+            targetMethod: current.method,
+            targetUrl: current.url,
+            targetKey: dep.targetKey,
+            targetLocation: dep.targetLocation,
+            targetValue: dep.targetValue,
+            sourceIndex: srcApi.index,
+            sourceMethod: srcApi.method,
+            sourceUrl: srcApi.url,
+            sourceKey: dep.sourceKey,
+            sourceXPath: dep.sourceXPath,
+            sourceType: dep.sourceType
+          });
+
+          const srcKey = srcApi.id || srcApi.index;
+          if (!targetKeysSet.has(srcKey)) {
+            dependencyApisMap.set(srcKey, srcApi);
+          }
+
+          if (!visited.has(srcKey)) {
+            visited.add(srcKey);
+            queue.push(srcApi);
+          }
+        }
+      }
+    }
+
+    const dependencyApis = Array.from(dependencyApisMap.values()).sort(
+      (a, b) => (a.index || 0) - (b.index || 0)
+    );
+
+    const allChainMap = new Map();
+    resolvedTargetApis.forEach((a) => allChainMap.set(a.id || a.index, a));
+    dependencyApis.forEach((a) => allChainMap.set(a.id || a.index, a));
+
+    const chainApis = Array.from(allChainMap.values()).sort(
+      (a, b) => (a.index || 0) - (b.index || 0)
+    );
+
+    return {
+      targetApis: resolvedTargetApis,
+      dependencyApis: dependencyApis,
+      chainApis: chainApis,
+      edges: edges,
+      stats: {
+        totalTarget: resolvedTargetApis.length,
+        totalDependencies: dependencyApis.length,
+        totalInChain: chainApis.length
+      }
+    };
+  }
+
   return {
     parseXmlDoc: parseXmlDoc,
     parseNexacroXML: parseNexacroXML,
     findDependencies: findDependencies,
+    resolveDependencyChain: resolveDependencyChain,
     isMeaningfulValue: isMeaningfulValue
   };
 });

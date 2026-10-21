@@ -37,6 +37,17 @@
    - **🎯 Per-API Export**: Export individual API payload or response tables directly from each card.
    - **📦 Export Full JSON**: Exports the complete execution chain with raw and parsed trees.
 
+7. **Export API & Dependency Chain (🎯 Export API & Dependencies)**:
+   - **Trace Full Upstream Lineage**: Select any API to automatically trace and export its complete upstream dependency graph (both direct and transitive dependencies).
+   - **Interactive Visual Flow**: Visual breadcrumbs (`API #1 ➔ API #3 ➔ 🎯 API #5`) showing execution sequence and dependencies.
+   - **Variable Lineage Breakdown**: Detailed variable table showing exact values passed from upstream responses into target request parameters and dataset columns.
+   - **Targeted Multi-Format Exporters**:
+     - **📦 Full Chain JSON**: Complete raw XML, parsed datasets, and lineage metadata graph for the chain.
+     - **✨ Compact YAML**: Human-readable structure with direct lineage mappings for docs/LLMs.
+     - **📊 CSV Matrix**: Dependencies matrix scoped exclusively to this chain.
+     - **📑 CSV Table Pack**: Summary, Payloads (with Data Origin), and Responses CSVs for this chain.
+     - **One-Click Package**: Download complete bundle in one click.
+
 ---
 
 ## 📁 Directory Structure
