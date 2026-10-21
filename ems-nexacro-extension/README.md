@@ -41,6 +41,7 @@
    - **Trace Full Upstream Lineage**: Select any API to automatically trace and export its complete upstream dependency graph (both direct and transitive dependencies).
    - **Interactive Visual Flow**: Visual breadcrumbs (`API #1 ➔ API #3 ➔ 🎯 API #5`) showing execution sequence and dependencies.
    - **Variable Lineage Breakdown**: Detailed variable table showing exact values passed from upstream responses into target request parameters and dataset columns.
+   - **Multi-Select & Bulk YAML Export**: Tick individual API cards or table rows with checkboxes `[✓]` to export custom subsets with their complete upstream dependency graph to YAML/JSON.
    - **Targeted Multi-Format Exporters**:
      - **📦 Full Chain JSON**: Complete raw XML, parsed datasets, and lineage metadata graph for the chain.
      - **✨ Compact YAML**: Human-readable structure with direct lineage mappings for docs/LLMs.

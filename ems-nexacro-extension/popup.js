@@ -65,6 +65,24 @@
   const btnChainExportCsvResponses = document.getElementById('btnChainExportCsvResponses');
   const btnChainExportBundle = document.getElementById('btnChainExportBundle');
 
+  // Multi-Selection Elements
+  const selectionActionBar = document.getElementById('selectionActionBar');
+  const selectionCountBadge = document.getElementById('selectionCountBadge');
+  const selectionDepsHint = document.getElementById('selectionDepsHint');
+  const btnExportSelectedYaml = document.getElementById('btnExportSelectedYaml');
+  const btnExportSelectedJson = document.getElementById('btnExportSelectedJson');
+  const btnOpenSelectedModal = document.getElementById('btnOpenSelectedModal');
+  const btnClearSelection = document.getElementById('btnClearSelection');
+  const btnExportTickedYaml = document.getElementById('btnExportTickedYaml');
+
+  // Modal Targets Checklist Elements
+  const chainModalTargetsList = document.getElementById('chainModalTargetsList');
+  const btnModalSelectAll = document.getElementById('btnModalSelectAll');
+  const btnModalDeselectAll = document.getElementById('btnModalDeselectAll');
+
+  // Multi-Selection State (Stores set of api.index)
+  const selectedApiIndices = new Set();
+
   let activeChainResult = null;
 
   const btnClear = document.getElementById('btnClear');
@@ -196,6 +214,51 @@
 
     if (chainModalSelectApi) {
       chainModalSelectApi.addEventListener('change', updateChainModalView);
+    }
+
+    // Multi-Selection Action Bar Triggers
+    if (btnExportSelectedYaml) {
+      btnExportSelectedYaml.addEventListener('click', exportSelectedToYaml);
+    }
+    if (btnExportTickedYaml) {
+      btnExportTickedYaml.addEventListener('click', () => {
+        exportDropdownContainer.classList.remove('open');
+        exportSelectedToYaml();
+      });
+    }
+    if (btnExportSelectedJson) {
+      btnExportSelectedJson.addEventListener('click', exportSelectedToJson);
+    }
+    if (btnOpenSelectedModal) {
+      btnOpenSelectedModal.addEventListener('click', () => {
+        openExportChainModal(Array.from(selectedApiIndices));
+      });
+    }
+    if (btnClearSelection) {
+      btnClearSelection.addEventListener('click', clearSelection);
+    }
+
+    if (btnModalSelectAll) {
+      btnModalSelectAll.addEventListener('click', () => {
+        if (!chainModalTargetsList) return;
+        chainModalTargetsList.querySelectorAll('.modal-target-cb').forEach((cb) => {
+          cb.checked = true;
+          const item = cb.closest('.chain-target-item');
+          if (item) item.classList.add('checked');
+        });
+        updateChainModalView();
+      });
+    }
+    if (btnModalDeselectAll) {
+      btnModalDeselectAll.addEventListener('click', () => {
+        if (!chainModalTargetsList) return;
+        chainModalTargetsList.querySelectorAll('.modal-target-cb').forEach((cb) => {
+          cb.checked = false;
+          const item = cb.closest('.chain-target-item');
+          if (item) item.classList.remove('checked');
+        });
+        updateChainModalView();
+      });
     }
 
     if (btnChainExportJson) {
@@ -485,6 +548,77 @@
       return inUrl || inMethod || inStatus || inDeps || inPayload || inResponse;
     });
   }
+
+  // ========================================================
+  // MULTI-SELECTION & EXPORT CONTROLLER
+  // ========================================================
+  function updateSelectionUI() {
+    if (selectedApiIndices.size === 0) {
+      if (selectionActionBar) selectionActionBar.classList.remove('visible');
+      return;
+    }
+
+    const targets = Array.from(selectedApiIndices);
+    let depCount = 0;
+    if (window.NexacroDependencyEngine && window.NexacroDependencyEngine.resolveDependencyChain) {
+      const chain = window.NexacroDependencyEngine.resolveDependencyChain(targets, computedLogs);
+      depCount = chain.dependencyApis.length;
+    }
+
+    if (selectionCountBadge) {
+      selectionCountBadge.textContent = `${targets.length} API${targets.length > 1 ? 's' : ''} ticked`;
+    }
+    if (selectionDepsHint) {
+      selectionDepsHint.textContent = depCount > 0
+        ? `(+ ${depCount} upstream dep${depCount > 1 ? 's' : ''})`
+        : '(standalone)';
+    }
+    if (selectionActionBar) selectionActionBar.classList.add('visible');
+  }
+
+  function clearSelection() {
+    selectedApiIndices.clear();
+    document.querySelectorAll('.card-checkbox').forEach((cb) => {
+      cb.checked = false;
+      const card = cb.closest('.api-card');
+      if (card) card.classList.remove('card-selected');
+    });
+    document.querySelectorAll('.table-api-checkbox').forEach((cb) => {
+      cb.checked = false;
+    });
+    updateSelectionUI();
+  }
+
+  function exportSelectedToYaml() {
+    if (selectedApiIndices.size === 0) {
+      showToast('Please tick at least 1 API first, or click Export Chain on any API card.');
+      return;
+    }
+    const targets = Array.from(selectedApiIndices);
+    if (!window.NexacroDependencyEngine || !window.NexacroDependencyEngine.resolveDependencyChain) {
+      alert('Dependency engine not loaded.');
+      return;
+    }
+    const chainResult = window.NexacroDependencyEngine.resolveDependencyChain(targets, computedLogs);
+    handleExportChainYAML(chainResult);
+    showToast(`Exported ${targets.length} API(s) with ${chainResult.dependencyApis.length} dependencies to YAML`);
+  }
+
+  function exportSelectedToJson() {
+    if (selectedApiIndices.size === 0) {
+      showToast('Please tick at least 1 API first.');
+      return;
+    }
+    const targets = Array.from(selectedApiIndices);
+    if (!window.NexacroDependencyEngine || !window.NexacroDependencyEngine.resolveDependencyChain) {
+      alert('Dependency engine not loaded.');
+      return;
+    }
+    const chainResult = window.NexacroDependencyEngine.resolveDependencyChain(targets, computedLogs);
+    handleExportChainJSON(chainResult);
+    showToast(`Exported ${targets.length} API(s) with ${chainResult.dependencyApis.length} dependencies to JSON`);
+  }
+
   // ========================================================
   // RENDER 1: Card List View with Virtual Incremental Batching & Lazy Drawers
   // ========================================================
@@ -539,7 +673,8 @@
 
   function createApiCard(api) {
     const card = document.createElement('div');
-    card.className = 'api-card';
+    const isSelected = selectedApiIndices.has(api.index);
+    card.className = 'api-card' + (isSelected ? ' card-selected' : '');
 
     const isPost = api.method === 'POST';
     const methodClass = isPost ? 'method-post' : 'method-get';
@@ -560,6 +695,9 @@
     card.innerHTML = `
       <div class="card-header">
         <div class="card-meta-left">
+          <label class="card-checkbox-wrap" title="Tick to select API for YAML/JSON export with dependencies">
+            <input type="checkbox" class="card-checkbox api-checkbox" data-api-index="${api.index}" ${isSelected ? 'checked' : ''} />
+          </label>
           <span style="font-size: 11px; font-weight: 700; color: var(--text-faint);">#${api.index}</span>
           <span class="method-badge ${methodClass}">${escapeHtml(api.method)}</span>
           <span class="status-badge ${statusClass}">${api.status || 'ERR'}</span>
@@ -590,8 +728,8 @@
 
     const header = card.querySelector('.card-header');
     header.addEventListener('click', (e) => {
-      // Don't toggle drawer if export chain button was clicked
-      if (e.target.closest('.btn-card-export-chain')) return;
+      // Don't toggle drawer if export chain button or checkbox was clicked
+      if (e.target.closest('.btn-card-export-chain') || e.target.closest('.card-checkbox-wrap')) return;
 
       const isCurrentlyOpen = card.classList.contains('open');
       if (!isCurrentlyOpen) {
@@ -604,6 +742,24 @@
         card.classList.remove('open');
       }
     });
+
+    const checkbox = card.querySelector('.card-checkbox');
+    if (checkbox) {
+      checkbox.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+      checkbox.addEventListener('change', (e) => {
+        e.stopPropagation();
+        if (checkbox.checked) {
+          selectedApiIndices.add(api.index);
+          card.classList.add('card-selected');
+        } else {
+          selectedApiIndices.delete(api.index);
+          card.classList.remove('card-selected');
+        }
+        updateSelectionUI();
+      });
+    }
 
     const btnChain = card.querySelector('.btn-card-export-chain');
     if (btnChain) {
@@ -1128,7 +1284,10 @@
     let thead = `
       <thead>
         <tr>
-          <th style="width: 40px;">#</th>
+          <th style="width: 30px; text-align: center;">
+            <input type="checkbox" id="thSelectAllSummaryApis" class="api-checkbox" title="Select / Deselect all on this page" />
+          </th>
+          <th style="width: 38px;">#</th>
           <th>Time</th>
           <th>Method</th>
           <th>Status</th>
@@ -1143,6 +1302,7 @@
 
     let tbody = '<tbody>';
     pagedApis.forEach((api) => {
+      const isChecked = selectedApiIndices.has(api.index);
       const timeStr = new Date(api.timestamp).toLocaleTimeString();
       const depCount = (api.dependencies || []).length;
       const isSuccess = api.status >= 200 && api.status < 300;
@@ -1152,7 +1312,10 @@
       const resDsCount = api.parsedResponse ? Object.keys(api.parsedResponse.datasets || {}).length : 0;
 
       tbody += `
-        <tr>
+        <tr class="${isChecked ? 'row-selected' : ''}">
+          <td style="text-align: center;">
+            <input type="checkbox" class="table-api-checkbox api-checkbox" data-api-index="${api.index}" ${isChecked ? 'checked' : ''} />
+          </td>
           <td style="color: var(--text-faint);">${api.index}</td>
           <td style="color: var(--text-muted);">${timeStr}</td>
           <td style="font-weight: 700; color: ${api.method === 'POST' ? '#34d399' : '#60a5fa'};">${api.method}</td>
@@ -1176,6 +1339,28 @@
     tbody += '</tbody>';
 
     matrixTable.innerHTML = thead + tbody;
+
+    const thSelectAll = document.getElementById('thSelectAllSummaryApis');
+    if (thSelectAll) {
+      thSelectAll.checked = pagedApis.length > 0 && pagedApis.every((a) => selectedApiIndices.has(a.index));
+      thSelectAll.addEventListener('change', () => {
+        pagedApis.forEach((a) => {
+          if (thSelectAll.checked) selectedApiIndices.add(a.index);
+          else selectedApiIndices.delete(a.index);
+        });
+        renderApisSummaryTable(apis);
+        updateSelectionUI();
+      });
+    }
+
+    matrixTable.querySelectorAll('.table-api-checkbox').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const idx = parseInt(cb.getAttribute('data-api-index'), 10);
+        if (cb.checked) selectedApiIndices.add(idx);
+        else selectedApiIndices.delete(idx);
+        updateSelectionUI();
+      });
+    });
   }
 
   function extractXmlFlatItems(apis, type) {
@@ -1748,32 +1933,62 @@
       return;
     }
 
-    chainModalSelectApi.innerHTML = '';
-    computedLogs.forEach((api) => {
-      let shortUrl = api.url;
-      try {
-        const u = new URL(api.url);
-        shortUrl = u.pathname;
-      } catch (e) {}
+    // Determine initial targets
+    let initialTargets = [];
+    if (Array.isArray(preselectIndex)) {
+      initialTargets = preselectIndex.map((x) => parseInt(x, 10)).filter((n) => !isNaN(n));
+    } else if (preselectIndex !== undefined && preselectIndex !== null) {
+      const idx = parseInt(preselectIndex, 10);
+      if (!isNaN(idx)) initialTargets = [idx];
+    } else if (selectedApiIndices.size > 0) {
+      initialTargets = Array.from(selectedApiIndices);
+    }
 
-      const depCount = (api.dependencies || []).length;
-      const opt = document.createElement('option');
-      opt.value = api.index;
-      opt.textContent = `API #${api.index} [${api.method}] ${shortUrl} (${depCount} dep${depCount === 1 ? '' : 's'})`;
-      chainModalSelectApi.appendChild(opt);
-    });
+    if (initialTargets.length === 0) {
+      const lastWithDeps = [...computedLogs].reverse().find((a) => a.dependencies && a.dependencies.length > 0);
+      initialTargets = [lastWithDeps ? lastWithDeps.index : computedLogs[computedLogs.length - 1].index];
+    }
+
+    const targetSet = new Set(initialTargets);
+
+    // Build the checklist inside the modal
+    if (chainModalTargetsList) {
+      chainModalTargetsList.innerHTML = '';
+      computedLogs.forEach((api) => {
+        let shortUrl = api.url;
+        try {
+          const u = new URL(api.url);
+          shortUrl = u.pathname;
+        } catch (e) {}
+
+        const depCount = (api.dependencies || []).length;
+        const isChecked = targetSet.has(api.index);
+
+        const item = document.createElement('label');
+        item.className = 'chain-target-item' + (isChecked ? ' checked' : '');
+        item.innerHTML = `
+          <input type="checkbox" class="modal-target-cb" value="${api.index}" ${isChecked ? 'checked' : ''} />
+          <span style="font-weight: 700; color: #93c5fd; font-size: 11px;">#${api.index}</span>
+          <span class="method-badge ${api.method === 'POST' ? 'method-post' : 'method-get'}">${escapeHtml(api.method)}</span>
+          <span class="chain-target-name" title="${escapeAttr(api.url)}">${escapeHtml(shortUrl)}</span>
+          <span class="chain-target-dep-tag ${depCount > 0 ? 'dep-tag-has-deps' : 'dep-tag-standalone'}">
+            ${depCount > 0 ? `⚡ ${depCount} dep${depCount > 1 ? 's' : ''}` : 'Standalone'}
+          </span>
+        `;
+
+        const cb = item.querySelector('.modal-target-cb');
+        cb.addEventListener('change', () => {
+          item.classList.toggle('checked', cb.checked);
+          updateChainModalView();
+        });
+
+        chainModalTargetsList.appendChild(item);
+      });
+    }
 
     chainModalApiCountBadge.textContent = `${computedLogs.length} APIs Captured`;
 
-    let selectedIdx = preselectIndex;
-    if (!selectedIdx) {
-      const lastWithDeps = [...computedLogs].reverse().find((a) => a.dependencies && a.dependencies.length > 0);
-      selectedIdx = lastWithDeps ? lastWithDeps.index : computedLogs[computedLogs.length - 1].index;
-    }
-
-    chainModalSelectApi.value = String(selectedIdx);
     updateChainModalView();
-
     exportChainModal.classList.add('open');
   }
 
@@ -1782,41 +1997,58 @@
   }
 
   function updateChainModalView() {
-    const selectedIdx = parseInt(chainModalSelectApi.value, 10);
-    if (isNaN(selectedIdx)) return;
+    let selectedTargets = [];
+    if (chainModalTargetsList) {
+      chainModalTargetsList.querySelectorAll('.modal-target-cb:checked').forEach((cb) => {
+        const val = parseInt(cb.value, 10);
+        if (!isNaN(val)) selectedTargets.push(val);
+      });
+    }
+
+    // Fallback if none checked: keep notice
+    if (selectedTargets.length === 0) {
+      chainStatsBadge.textContent = '0 Targets Selected';
+      chainVisualFlow.innerHTML = `
+        <div class="chain-standalone-notice">
+          <span>⚠️</span>
+          <span>Please tick at least 1 target API above to trace its dependency graph.</span>
+        </div>
+      `;
+      if (chainLineageContainer) chainLineageContainer.style.display = 'none';
+      if (chainModalFooterInfo) chainModalFooterInfo.textContent = 'No APIs selected.';
+      activeChainResult = null;
+      return;
+    }
 
     if (!window.NexacroDependencyEngine || !window.NexacroDependencyEngine.resolveDependencyChain) {
       console.warn('NexacroDependencyEngine.resolveDependencyChain is not loaded');
       return;
     }
 
-    activeChainResult = window.NexacroDependencyEngine.resolveDependencyChain(selectedIdx, computedLogs);
+    activeChainResult = window.NexacroDependencyEngine.resolveDependencyChain(selectedTargets, computedLogs);
 
-    const targetApi = activeChainResult.targetApis[0];
+    const targetApis = activeChainResult.targetApis;
     const depApis = activeChainResult.dependencyApis;
     const chainApis = activeChainResult.chainApis;
     const edges = activeChainResult.edges;
+    const targetSet = new Set(targetApis.map((t) => t.index));
 
     // 1. Stats Badge
-    chainStatsBadge.textContent = `${depApis.length} Upstream Dependenc${depApis.length === 1 ? 'y' : 'ies'}`;
+    chainStatsBadge.textContent = `${targetApis.length} Target${targetApis.length > 1 ? 's' : ''} • ${depApis.length} Upstream Dependenc${depApis.length === 1 ? 'y' : 'ies'}`;
 
     // 2. Visual Flow
     if (depApis.length === 0) {
-      let shortUrl = targetApi ? targetApi.url : '';
-      try {
-        shortUrl = new URL(targetApi.url).pathname;
-      } catch (e) {}
-
+      const names = targetApis.map((t) => `#${t.index}`).join(', ');
       chainVisualFlow.innerHTML = `
         <div class="chain-standalone-notice">
           <span>ℹ️</span>
-          <span><strong>Standalone API:</strong> API #${selectedIdx} [${escapeHtml(targetApi ? targetApi.method : '')} ${escapeHtml(shortUrl)}] does not depend on any previous responses. Export will contain 1 API.</span>
+          <span><strong>Standalone Target(s) (${names}):</strong> Selected API(s) do not depend on any previous responses. Export will contain ${targetApis.length} API(s).</span>
         </div>
       `;
     } else {
       let flowHtml = '';
       chainApis.forEach((api, idx) => {
-        const isTarget = api.index === selectedIdx;
+        const isTarget = targetSet.has(api.index);
         let shortUrl = api.url;
         try {
           shortUrl = new URL(api.url).pathname;
@@ -1827,7 +2059,7 @@
 
         flowHtml += `
           <span class="${nodeClass}" title="${roleLabel}: ${escapeAttr(api.url)}">
-            #${api.index} ${escapeHtml(api.method)} ${escapeHtml(shortUrl)}
+            ${isTarget ? '🎯 ' : ''}#${api.index} ${escapeHtml(api.method)} ${escapeHtml(shortUrl)}
           </span>
         `;
 
@@ -1847,8 +2079,8 @@
       edges.forEach((edge) => {
         itemsHtml += `
           <div class="chain-lineage-item">
-            <span class="lineage-col-target" title="Target: ${escapeAttr(edge.targetLocation)}">
-              <strong>${escapeHtml(edge.targetKey)}</strong>
+            <span class="lineage-col-target" title="Target: API #${edge.targetIndex} - ${escapeAttr(edge.targetLocation)}">
+              <strong>[#${edge.targetIndex}] ${escapeHtml(edge.targetKey)}</strong>
             </span>
             <span class="lineage-col-val" title="${escapeAttr(edge.targetValue)}">
               "${escapeHtml(edge.targetValue)}"
@@ -1863,11 +2095,11 @@
     } else {
       chainLineageContainer.style.display = 'none';
       chainVarsCount.textContent = '0';
-      chainLineageList.innerHTML = '';
     }
 
-    // 4. Footer Info
-    chainModalFooterInfo.textContent = `Chain contains ${chainApis.length} API(s) total: 1 target API + ${depApis.length} upstream dependencies.`;
+    if (chainModalFooterInfo) {
+      chainModalFooterInfo.textContent = `Ready to export ${chainApis.length} total APIs (${targetApis.length} target${targetApis.length > 1 ? 's' : ''} + ${depApis.length} upstream).`;
+    }
   }
 
   function handleExportChainJSON(chainResult) {
@@ -2232,6 +2464,7 @@
     chrome.storage.local.set({ [STORAGE_KEY]: [] }, () => {
       currentLogs = [];
       computedLogs = [];
+      clearSelection();
       chrome.action.setBadgeText({ text: '' });
       updateHeaderCounts();
       if (currentViewMode === 'cards') {

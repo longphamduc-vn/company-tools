@@ -972,6 +972,15 @@
       opacity: 0;
       pointer-events: none;
       transform: translateY(10px);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 9999;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
     /* Modal Backdrop & Container */
     .modal-backdrop {
       position: fixed;
@@ -1429,6 +1438,204 @@
       background: #2563eb;
       color: white;
     }
+
+    /* Multi-Select Checkboxes & Floating Action Bar */
+    .card-checkbox-wrap {
+      display: inline-flex;
+      align-items: center;
+      cursor: pointer;
+      margin-right: 2px;
+      user-select: none;
+    }
+
+    .api-checkbox {
+      width: 15px;
+      height: 15px;
+      cursor: pointer;
+      accent-color: var(--accent-blue);
+      border-radius: 3px;
+    }
+
+    .api-card.card-selected {
+      border-color: rgba(59, 130, 246, 0.65);
+      background: linear-gradient(180deg, rgba(37, 99, 235, 0.08) 0%, rgba(17, 24, 39, 0.98) 100%);
+      box-shadow: 0 0 12px rgba(59, 130, 246, 0.2);
+    }
+
+    .selection-action-bar {
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: rgba(17, 24, 39, 0.96);
+      border: 1px solid rgba(59, 130, 246, 0.55);
+      border-radius: 999px;
+      padding: 7px 14px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.65), 0 0 20px rgba(59, 130, 246, 0.25);
+      backdrop-filter: blur(12px);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      z-index: 120;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      max-width: 95%;
+    }
+
+    .selection-action-bar.visible {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .selection-bar-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11.5px;
+      white-space: nowrap;
+    }
+
+    .selection-badge {
+      font-weight: 700;
+      color: #93c5fd;
+      background: rgba(59, 130, 246, 0.2);
+      border: 1px solid rgba(59, 130, 246, 0.4);
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+    }
+
+    .selection-deps-text {
+      color: #c084fc;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .selection-bar-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-clear-selection {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid transparent;
+      padding: 3px 6px;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+
+    .btn-clear-selection:hover {
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444;
+      border-color: rgba(239, 68, 68, 0.4);
+    }
+
+    /* Modal Targets Checklist */
+    .modal-target-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+    }
+
+    .btn-link-action {
+      background: none;
+      border: none;
+      padding: 0;
+      color: #60a5fa;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .btn-link-action:hover {
+      color: #93c5fd;
+    }
+
+    .action-divider {
+      color: var(--text-faint);
+    }
+
+    .chain-targets-list {
+      max-height: 140px;
+      overflow-y: auto;
+      background: var(--bg-code);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      padding: 5px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .chain-target-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 8px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background 0.12s;
+      font-size: 11.5px;
+      user-select: none;
+    }
+
+    .chain-target-item:hover {
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .chain-target-item.checked {
+      background: rgba(59, 130, 246, 0.12);
+      border: 1px solid rgba(59, 130, 246, 0.35);
+    }
+
+    .chain-target-item input[type="checkbox"] {
+      cursor: pointer;
+      accent-color: var(--accent-blue);
+      width: 14px;
+      height: 14px;
+    }
+
+    .chain-target-name {
+      color: var(--text-main);
+      font-weight: 600;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chain-target-dep-tag {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      flex-shrink: 0;
+      font-weight: 600;
+    }
+
+    .dep-tag-has-deps {
+      background: rgba(139, 92, 246, 0.18);
+      color: #c084fc;
+      border: 1px solid rgba(139, 92, 246, 0.35);
+    }
+
+    .dep-tag-standalone {
+      background: rgba(107, 114, 128, 0.15);
+      color: var(--text-faint);
+      border: 1px solid rgba(107, 114, 128, 0.25);
+    }
   </style>
 </head>
 <body>
@@ -1475,6 +1682,9 @@
           <div class="dropdown-menu" id="exportMenu">
             <div class="dropdown-item dropdown-item-highlight" id="btnOpenExportChainModal">
               🎯 Export API & Dependencies Chain...
+            </div>
+            <div class="dropdown-item" id="btnExportTickedYaml" title="Export all currently ticked APIs with their upstream dependencies to YAML">
+              ✨ Export Ticked APIs to YAML (with Dependencies)
             </div>
             <div class="dropdown-divider"></div>
             <div class="dropdown-item" id="btnExportCsvDeps">
@@ -1605,11 +1815,19 @@
       <div class="modal-body">
         <!-- Target API Selection -->
         <div class="modal-section">
-          <label class="modal-label" for="chainModalSelectApi">
-            <span>1. Choose Target API:</span>
-            <span id="chainModalApiCountBadge" class="modal-badge-count">0 APIs Captured</span>
-          </label>
-          <select id="chainModalSelectApi" class="modal-select"></select>
+          <div class="modal-section-header">
+            <label class="modal-label">
+              <span>1. Choose Target API(s):</span>
+              <span id="chainModalApiCountBadge" class="modal-badge-count">0 APIs Captured</span>
+            </label>
+            <div class="modal-target-actions">
+              <button id="btnModalSelectAll" type="button" class="btn-link-action">Select All</button>
+              <span class="action-divider">•</span>
+              <button id="btnModalDeselectAll" type="button" class="btn-link-action">Clear</button>
+            </div>
+          </div>
+          <div id="chainModalTargetsList" class="chain-targets-list"></div>
+          <select id="chainModalSelectApi" class="modal-select" style="display: none;"></select>
         </div>
 
         <!-- Dependency Analysis & Visualization -->
@@ -1718,6 +1936,26 @@
           <button id="btnChainModalClose" class="btn-secondary">Close</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Floating Multi-Selection Action Bar -->
+  <div id="selectionActionBar" class="selection-action-bar">
+    <div class="selection-bar-info">
+      <span class="selection-badge" id="selectionCountBadge">0 ticked</span>
+      <span class="selection-deps-text" id="selectionDepsHint"></span>
+    </div>
+    <div class="selection-bar-actions">
+      <button id="btnExportSelectedYaml" class="btn-primary" title="Export selected APIs + all upstream dependencies to YAML">
+        ✨ Export YAML
+      </button>
+      <button id="btnExportSelectedJson" class="btn-secondary" title="Export full JSON chain">
+        📦 JSON
+      </button>
+      <button id="btnOpenSelectedModal" class="btn-secondary" title="Preview complete dependency graph in modal">
+        🎯 Preview Chain
+      </button>
+      <button id="btnClearSelection" class="btn-clear-selection" title="Deselect all">✕</button>
     </div>
   </div>
 
