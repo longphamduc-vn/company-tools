@@ -1,4 +1,4 @@
-/* Google Keep Text File Transfer - Premium Dark Modern Design */
+/* Google Keep Text File Transfer - Premium Modern Design (English UI) */
 
 :root {
   --bg-primary: #0F172A;
@@ -38,7 +38,7 @@
 
 body {
   width: 480px;
-  height: 600px;
+  height: 620px;
   background-color: var(--bg-primary);
   color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -48,7 +48,7 @@ body {
   user-select: none;
 }
 
-/* Scrollbar */
+/* Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -76,7 +76,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 10px 14px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
 }
@@ -95,7 +95,7 @@ body {
 }
 
 .brand-text h1 {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.2px;
@@ -110,6 +110,33 @@ body {
   font-weight: 600;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-popout {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-popout:hover {
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--keep-amber);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
 .header-status {
   display: flex;
   align-items: center;
@@ -117,7 +144,7 @@ body {
   font-size: 11px;
   color: var(--text-secondary);
   background: rgba(0, 0, 0, 0.25);
-  padding: 4px 8px;
+  padding: 3px 8px;
   border-radius: 12px;
   border: 1px solid var(--border-color);
 }
@@ -153,7 +180,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 12px;
+  padding: 8px 11px;
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
@@ -163,6 +190,7 @@ body {
   cursor: pointer;
   transition: var(--transition);
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  white-space: nowrap;
 }
 
 .tab-btn:hover {
@@ -180,14 +208,14 @@ body {
 .tab-content-wrapper {
   flex: 1;
   overflow-y: auto;
-  padding: 14px 16px;
+  padding: 12px 14px;
   position: relative;
 }
 
 .tab-pane {
   display: none;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .tab-pane.active {
@@ -199,10 +227,10 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-radius: var(--radius-md);
   font-size: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 4px;
 }
 
 .alert-warning {
@@ -224,13 +252,25 @@ body {
   border-radius: 4px;
 }
 
+.alert-info {
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: var(--info);
+}
+
+.alert-info p {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 /* Drop Zone */
 .drop-zone {
   position: relative;
   border: 2px dashed rgba(245, 158, 11, 0.35);
   background: rgba(30, 41, 59, 0.4);
   border-radius: var(--radius-lg);
-  padding: 24px 16px;
+  padding: 20px 14px;
   text-align: center;
   cursor: pointer;
   transition: var(--transition);
@@ -256,7 +296,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .drop-title {
@@ -299,7 +339,7 @@ body {
 
 .form-textarea {
   width: 100%;
-  height: 90px;
+  height: 85px;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
@@ -320,7 +360,7 @@ body {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 12px;
+  padding: 10px 12px;
 }
 
 .file-card-header {
@@ -330,7 +370,7 @@ body {
 }
 
 .file-icon {
-  font-size: 22px;
+  font-size: 20px;
 }
 
 .file-details {
@@ -354,7 +394,7 @@ body {
 
 .chunk-summary-badge {
   margin-top: 8px;
-  padding: 6px 10px;
+  padding: 5px 8px;
   background: rgba(245, 158, 11, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.25);
   border-radius: var(--radius-sm);
@@ -362,12 +402,31 @@ body {
   font-size: 11px;
 }
 
+.config-note-toggle-row {
+  margin-top: 8px;
+  font-size: 11px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.checkbox-label input[type="checkbox"] {
+  accent-color: var(--keep-amber);
+  width: 14px;
+  height: 14px;
+}
+
 /* Progress Section */
 .progress-box {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 12px;
+  padding: 10px 12px;
 }
 
 .progress-info {
@@ -407,7 +466,29 @@ body {
   font-size: 11px;
   color: var(--text-secondary);
   margin-top: 6px;
-  text-align: right;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.char-verify-status {
+  font-size: 10px;
+  color: #34D399;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.transfer-control-group {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.transfer-control-group .btn {
+  flex: 1;
 }
 
 /* Log Console */
@@ -442,7 +523,7 @@ body {
 }
 
 .log-entries {
-  max-height: 90px;
+  max-height: 85px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -521,7 +602,7 @@ body {
 }
 
 .section-title-row h3 {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
@@ -538,14 +619,14 @@ body {
 
 .files-empty-state {
   text-align: center;
-  padding: 30px 20px;
+  padding: 24px 16px;
   background: var(--bg-secondary);
   border: 1px dashed var(--border-color);
   border-radius: var(--radius-md);
 }
 
 .empty-icon {
-  font-size: 28px;
+  font-size: 26px;
   margin-bottom: 6px;
 }
 
@@ -592,6 +673,12 @@ body {
   max-width: 260px;
 }
 
+.bundle-badges {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
 .bundle-badge {
   font-size: 10px;
   padding: 2px 6px;
@@ -610,6 +697,12 @@ body {
   background: rgba(245, 158, 11, 0.2);
   color: #FCD34D;
   border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.bundle-badge.config {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38BDF8;
+  border: 1px solid rgba(56, 189, 248, 0.4);
 }
 
 .bundle-meta {
@@ -636,7 +729,7 @@ body {
 }
 
 .notes-manual-list {
-  max-height: 310px;
+  max-height: 290px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -646,7 +739,7 @@ body {
 .empty-manual-msg {
   text-align: center;
   color: var(--text-muted);
-  padding: 30px 10px;
+  padding: 24px 10px;
   font-size: 12px;
 }
 
@@ -687,13 +780,13 @@ body {
 .settings-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .form-label {
@@ -713,7 +806,7 @@ body {
 /* Forms */
 .form-input, .form-select {
   width: 100%;
-  padding: 8px 10px;
+  padding: 7px 10px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
@@ -794,7 +887,7 @@ body {
 }
 
 .btn-lg {
-  padding: 10px 16px;
+  padding: 9px 16px;
   font-size: 13px;
 }
 

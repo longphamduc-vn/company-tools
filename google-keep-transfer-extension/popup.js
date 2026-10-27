@@ -1,4 +1,4 @@
-// Google Keep Text File Transfer - Popup Logic
+// Google Keep Text File Transfer - Popup Logic (English Version)
 
 document.addEventListener("DOMContentLoaded", async () => {
   // Elements
@@ -7,6 +7,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const statusText = document.getElementById("statusText");
   const keepTabWarning = document.getElementById("keepTabWarning");
   const openKeepBtn = document.getElementById("openKeepBtn");
+  const popoutBtn = document.getElementById("popoutBtn");
 
   // Tabs
   const tabBtns = document.querySelectorAll(".tab-btn");
@@ -26,6 +27,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const clearFileBtn = document.getElementById("clearFileBtn");
   const chunkCountDisplay = document.getElementById("chunkCountDisplay");
   const chunkSizeDisplay = document.getElementById("chunkSizeDisplay");
+  const createConfigNoteCheckbox = document.getElementById("createConfigNoteCheckbox");
 
   const uploadProgressBox = document.getElementById("uploadProgressBox");
   const progressStatusLabel = document.getElementById("progressStatusLabel");
@@ -33,13 +35,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   const progressBarFill = document.getElementById("progressBarFill");
   const currentChunkCount = document.getElementById("currentChunkCount");
   const totalChunkCount = document.getElementById("totalChunkCount");
+  const charVerifyStatus = document.getElementById("charVerifyStatus");
 
   const logConsole = document.getElementById("logConsole");
   const logEntries = document.getElementById("logEntries");
   const clearLogBtn = document.getElementById("clearLogBtn");
 
   const startUploadBtn = document.getElementById("startUploadBtn");
+  const transferControlGroup = document.getElementById("transferControlGroup");
+  const pauseUploadBtn = document.getElementById("pauseUploadBtn");
+  const resumeUploadBtn = document.getElementById("resumeUploadBtn");
+  const focusKeepTabBtn = document.getElementById("focusKeepTabBtn");
   const cancelUploadBtn = document.getElementById("cancelUploadBtn");
+  const autoClosePopupCheckbox = document.getElementById("autoClosePopupCheckbox");
 
   // Download Tab
   const quickScanBtn = document.getElementById("quickScanBtn");
@@ -66,7 +74,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const settingChunkSize = document.getElementById("settingChunkSize");
   const settingDelayMs = document.getElementById("settingDelayMs");
   const settingPrefix = document.getElementById("settingPrefix");
+  const settingConfigPrefix = document.getElementById("settingConfigPrefix");
   const settingScrollDelay = document.getElementById("settingScrollDelay");
+  const settingAutoClose = document.getElementById("settingAutoClose");
   const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 
   // Modal Preview
@@ -78,15 +88,55 @@ document.addEventListener("DOMContentLoaded", async () => {
   const downloadPreviewBtn = document.getElementById("downloadPreviewBtn");
   const toastContainer = document.getElementById("toastContainer");
 
+  // Pop Out Window Handling
+  const isWindowMode = window.location.search.includes("mode=window");
+  if (isWindowMode && popoutBtn) {
+    popoutBtn.style.display = "none";
+  }
+
+  popoutBtn.addEventListener("click", () => {
+    chrome.windows.create({
+      url: "popup.html?mode=window",
+      type: "popup",
+      width: 490,
+      height: 650
+    });
+    window.close();
+  });
+
+  // Focus Keep Tab Button
+  if (focusKeepTabBtn) {
+    focusKeepTabBtn.addEventListener("click", () => {
+      if (activeKeepTab) {
+        chrome.tabs.update(activeKeepTab.id, { active: true });
+        if (activeKeepTab.windowId) {
+          chrome.windows.update(activeKeepTab.windowId, { focused: true });
+        }
+      }
+      window.close();
+    });
+  }
+
+  // Toggle Auto Close Checkbox
+  if (autoClosePopupCheckbox) {
+    autoClosePopupCheckbox.addEventListener("change", () => {
+      const isChecked = autoClosePopupCheckbox.checked;
+      if (settingAutoClose) settingAutoClose.checked = isChecked;
+      chrome.storage.local.set({ autoClose: isChecked });
+    });
+  }
+
   // State
   let activeKeepTab = null;
-  let activePort = null;
-  let currentFile = null; // { name, size, text, chunks }
+  let activeScanPort = null;
+  let currentFile = null; // { name, size, text, chunks, configNote, fileId }
   let currentSettings = {
     chunkSize: 10000,
     delayMs: 800,
-    prefixTag: "[KeepTransfer]",
-    scrollDelay: 1200
+    prefixTag: "[KT]",
+    configPrefix: "[KT-CONFIG]",
+    scrollDelay: 1200,
+    autoClose: true
   };
   let scannedNotes = [];
   let detectedFileBundles = {};
@@ -95,16 +145,22 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Load Settings
   async function loadSettings() {
     return new Promise((resolve) => {
-      chrome.storage.local.get(["chunkSize", "delayMs", "prefixTag", "scrollDelay"], (res) => {
+      chrome.storage.local.get(["chunkSize", "delayMs", "prefixTag", "configPrefix", "scrollDelay", "autoClose"], (res) => {
         if (res.chunkSize) currentSettings.chunkSize = parseInt(res.chunkSize, 10);
         if (res.delayMs) currentSettings.delayMs = parseInt(res.delayMs, 10);
         if (res.prefixTag) currentSettings.prefixTag = res.prefixTag;
+        if (res.configPrefix) currentSettings.configPrefix = res.configPrefix;
         if (res.scrollDelay) currentSettings.scrollDelay = parseInt(res.scrollDelay, 10);
+        if (typeof res.autoClose !== "undefined") currentSettings.autoClose = Boolean(res.autoClose);
+        else currentSettings.autoClose = true;
 
         settingChunkSize.value = currentSettings.chunkSize;
         settingDelayMs.value = currentSettings.delayMs;
         settingPrefix.value = currentSettings.prefixTag;
+        settingConfigPrefix.value = currentSettings.configPrefix;
         settingScrollDelay.value = currentSettings.scrollDelay;
+        if (settingAutoClose) settingAutoClose.checked = currentSettings.autoClose;
+        if (autoClosePopupCheckbox) autoClosePopupCheckbox.checked = currentSettings.autoClose;
         chunkSizeDisplay.innerText = Number(currentSettings.chunkSize).toLocaleString();
         resolve();
       });
@@ -119,15 +175,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     toastContainer.appendChild(toast);
     setTimeout(() => {
       if (toast.parentNode) toast.parentNode.removeChild(toast);
-    }, 2600);
+    }, 2800);
   }
 
-  // Log to Console UI
+  // Add Log Entry
   function addLog(text, type = "normal") {
     logConsole.classList.remove("hidden");
     const line = document.createElement("div");
     line.className = `log-line ${type}`;
-    const time = new Date().toLocaleTimeString("vi-VN", { hour12: false });
+    const time = new Date().toLocaleTimeString("en-US", { hour12: false });
     line.innerText = `[${time}] ${text}`;
     logEntries.appendChild(line);
     logEntries.scrollTop = logEntries.scrollHeight;
@@ -141,32 +197,31 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (currentTab && currentTab.url && currentTab.url.includes("keep.google.com")) {
       activeKeepTab = currentTab;
       statusDot.className = "status-dot connected";
-      statusText.innerText = "Keep: Kết nối";
+      statusText.innerText = "Keep: Connected";
       keepTabWarning.classList.add("hidden");
       return true;
     }
 
-    // Check if Keep is open in any other tab
     const keepTabs = await chrome.tabs.query({ url: "*://keep.google.com/*" });
     if (keepTabs.length > 0) {
       activeKeepTab = keepTabs[0];
       statusDot.className = "status-dot connected";
       statusText.innerText = `Keep: Tab #${activeKeepTab.id}`;
-      keepTabWarning.classList.remove("hidden");
+      keepTabWarning.classList.add("hidden");
       return true;
     }
 
     activeKeepTab = null;
     statusDot.className = "status-dot disconnected";
-    statusText.innerText = "Chưa mở Keep";
+    statusText.innerText = "Keep Not Found";
     keepTabWarning.classList.remove("hidden");
     return false;
   }
 
-  // Open or switch to Google Keep
+  // Switch to or open Google Keep
   openKeepBtn.addEventListener("click", () => {
     chrome.runtime.sendMessage({ type: "OPEN_KEEP_TAB" }, (res) => {
-      setTimeout(checkKeepConnection, 500);
+      setTimeout(checkKeepConnection, 600);
     });
   });
 
@@ -188,23 +243,22 @@ document.addEventListener("DOMContentLoaded", async () => {
       const response = await chrome.tabs.sendMessage(tabId, { action: "PING" });
       if (response && response.status === "OK") return true;
     } catch (e) {
-      // Content script not loaded yet, inject it
       try {
         await chrome.scripting.executeScript({
           target: { tabId },
           files: ["content.js"]
         });
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 250));
         return true;
       } catch (err) {
-        console.error("Không thể inject content script:", err);
+        console.error("Failed to inject content script:", err);
         return false;
       }
     }
     return true;
   }
 
-  // Helper: Format bytes
+  // Format bytes
   function formatBytes(bytes) {
     if (bytes === 0) return "0 Bytes";
     const k = 1024;
@@ -224,11 +278,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     return chunks;
   }
 
-  // Generate Unique File ID
+  // Generate Short 6-char Unique File ID (e.g. "a9f2b1")
   function generateFileId() {
-    const rand = Math.random().toString(36).substring(2, 7);
-    const ts = Date.now().toString(36);
-    return `kpf_${ts}_${rand}`;
+    const rand = Math.random().toString(36).substring(2, 6);
+    const ts = (Date.now() % 1000000).toString(36);
+    return `${ts}${rand}`.slice(0, 6);
   }
 
   // Prepare File for Upload
@@ -237,34 +291,67 @@ document.addEventListener("DOMContentLoaded", async () => {
     const rawChunks = chunkText(fileText, chunkSize);
     const fileId = generateFileId();
     const total = rawChunks.length;
+    const padLength = String(total).length > 1 ? String(total).length : 2;
+    const totalNum = String(total).padStart(padLength, "0");
 
-    const preparedChunks = rawChunks.map((content, idx) => ({
-      index: idx + 1,
-      total: total,
-      title: `${currentSettings.prefixTag} ${fileName} | Part ${idx + 1}/${total} | ID:${fileId}`,
-      content: content
-    }));
+    // Clean prefix: e.g. "KT"
+    const prefix = (currentSettings.prefixTag || "KT").replace(/[\[\]]/g, "").trim() || "KT";
+
+    const preparedChunks = rawChunks.map((content, idx) => {
+      const partNum = String(idx + 1).padStart(padLength, "0");
+      return {
+        index: idx + 1,
+        total: total,
+        partString: partNum,
+        totalString: totalNum,
+        // Compact front-loaded title: [KT 01/05 #abc12] filename.ext
+        // Part & ID are at the beginning so Keep card truncation never hides them
+        title: `[${prefix} ${partNum}/${totalNum} #${fileId}] ${fileName}`,
+        content: content,
+        length: content.length
+      };
+    });
+
+    // Compact config note format: [KT CFG #abc12] (5 parts) filename.ext
+    const configNote = {
+      title: `[${prefix} CFG #${fileId}] (${total} parts) ${fileName}`,
+      content: JSON.stringify({
+        transferVersion: "1.3",
+        fileId: fileId,
+        fileName: fileName,
+        fileSize: fileSize,
+        totalChunks: total,
+        chunkSize: chunkSize,
+        createdAt: new Date().toISOString(),
+        chunks: preparedChunks.map((c) => ({
+          part: c.index,
+          title: c.title,
+          length: c.length
+        }))
+      }, null, 2)
+    };
 
     currentFile = {
       name: fileName,
       size: fileSize,
       length: fileText.length,
       chunks: preparedChunks,
+      configNote: configNote,
       fileId: fileId
     };
 
     // Update UI
     fileNameDisplay.innerText = fileName;
-    fileMetaDisplay.innerText = `${formatBytes(fileSize)} • ${fileText.length.toLocaleString()} ký tự`;
+    fileMetaDisplay.innerText = `${formatBytes(fileSize)} • ${fileText.length.toLocaleString()} characters`;
     chunkCountDisplay.innerText = total;
     fileCard.classList.remove("hidden");
     startUploadBtn.disabled = false;
     startUploadBtn.innerHTML = `
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-      Tách làm ${total} ghi chú & Tải lên Keep
+      Split into ${total} Notes & Upload to Keep
     `;
 
-    addLog(`Đã tải file "${fileName}" (${formatBytes(fileSize)}, ${fileText.length.toLocaleString()} ký tự). Tách thành ${total} phần.`);
+    addLog(`Loaded file "${fileName}" (${formatBytes(fileSize)}, ${fileText.length.toLocaleString()} chars). Split into ${total} parts.`);
   }
 
   // File Input Change
@@ -299,7 +386,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // Toggle Paste Direct Text
+  // Toggle Direct Text Paste
   togglePasteBox.addEventListener("click", () => {
     pasteContainer.classList.toggle("hidden");
     if (!pasteContainer.classList.contains("hidden")) {
@@ -310,11 +397,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   pasteTextInput.addEventListener("input", () => {
     const text = pasteTextInput.value;
     if (!text.trim()) return;
-    const name = pasteFileName.value.trim() || "pasted_text.txt";
+    const name = pasteFileName.value.trim() || "snippet.txt";
     handleFileLoaded(name, text, new Blob([text]).size);
   });
 
-  // Clear File
+  // Clear File Selection
   clearFileBtn.addEventListener("click", () => {
     currentFile = null;
     fileInput.value = "";
@@ -323,10 +410,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     startUploadBtn.disabled = true;
     startUploadBtn.innerHTML = `
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-      Tách file & Tải lên Google Keep
+      Split File & Upload to Google Keep
     `;
     uploadProgressBox.classList.add("hidden");
-    addLog("Đã hủy chọn file.");
+    transferControlGroup.classList.add("hidden");
+    startUploadBtn.classList.remove("hidden");
+    addLog("Selection cleared.");
   });
 
   // Clear Logs
@@ -335,137 +424,287 @@ document.addEventListener("DOMContentLoaded", async () => {
     logConsole.classList.add("hidden");
   });
 
-  // Start Upload Button
+  // -------------------------------------------------------------
+  // AUTONOMOUS BACKGROUND TRANSFER SYNC & CONTROLS
+  // -------------------------------------------------------------
+  function updateTransferUI(transfer) {
+    if (!transfer || transfer.state === "IDLE") {
+      uploadProgressBox.classList.add("hidden");
+      transferControlGroup.classList.add("hidden");
+      startUploadBtn.classList.remove("hidden");
+      return;
+    }
+
+    const total = (transfer.notes && transfer.notes.length) || 0;
+    const current = transfer.currentIndex || 0;
+    const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+
+    uploadProgressBox.classList.remove("hidden");
+    startUploadBtn.classList.add("hidden");
+    transferControlGroup.classList.remove("hidden");
+
+    progressBarFill.style.width = `${pct}%`;
+    progressPercentLabel.innerText = `${pct}%`;
+    currentChunkCount.innerText = current;
+    totalChunkCount.innerText = total;
+
+    if (transfer.state === "RUNNING") {
+      progressStatusLabel.innerText = transfer.statusText || `Creating note [${current + 1}/${total}]...`;
+      pauseUploadBtn.classList.remove("hidden");
+      resumeUploadBtn.classList.add("hidden");
+      charVerifyStatus.innerText = "✓ Verifying Integrity";
+    } else if (transfer.state === "PAUSED") {
+      progressStatusLabel.innerText = transfer.statusText || `Paused at note [${current + 1}/${total}].`;
+      pauseUploadBtn.classList.add("hidden");
+      resumeUploadBtn.classList.remove("hidden");
+      charVerifyStatus.innerText = "⏸ Paused";
+    } else if (transfer.state === "COMPLETED") {
+      progressStatusLabel.innerText = "Upload Complete!";
+      progressBarFill.style.width = "100%";
+      progressPercentLabel.innerText = "100%";
+      currentChunkCount.innerText = total;
+      transferControlGroup.classList.add("hidden");
+      startUploadBtn.classList.remove("hidden");
+      charVerifyStatus.innerText = "✓ 100% Verified";
+      showToast("Transfer completed successfully!", "success");
+    }
+
+    // Restore logs if available
+    if (transfer.logs && transfer.logs.length > 0) {
+      logConsole.classList.remove("hidden");
+      logEntries.innerHTML = "";
+      transfer.logs.forEach((item) => {
+        const line = document.createElement("div");
+        line.className = "log-line success";
+        line.innerText = `[${item.time}] ${item.text}`;
+        logEntries.appendChild(line);
+      });
+      logEntries.scrollTop = logEntries.scrollHeight;
+    }
+  }
+
+  // Check ongoing transfer on Keep tab
+  async function syncActiveTransfer() {
+    if (!activeKeepTab) return;
+    try {
+      const response = await chrome.tabs.sendMessage(activeKeepTab.id, { action: "GET_TRANSFER_STATUS" });
+      if (response && response.transfer) {
+        updateTransferUI(response.transfer);
+      }
+    } catch (e) {
+      chrome.storage.local.get("activeTransferState", (res) => {
+        if (res.activeTransferState) {
+          updateTransferUI(res.activeTransferState);
+        }
+      });
+    }
+  }
+
+  // Listen to runtime progress updates from content script
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === "TRANSFER_UPDATE" && msg.transfer) {
+      updateTransferUI(msg.transfer);
+    }
+  });
+
+  // Start Upload
   startUploadBtn.addEventListener("click", async () => {
     if (!currentFile || !currentFile.chunks.length) {
-      showToast("Vui lòng chọn hoặc dán file trước!", "error");
+      showToast("Please choose or paste a text file first!", "error");
       return;
     }
 
     const isConnected = await checkKeepConnection();
     if (!isConnected || !activeKeepTab) {
-      showToast("Chưa kết nối tab Google Keep. Hãy mở keep.google.com trước!", "error");
+      showToast("Google Keep tab not found. Please open keep.google.com first!", "error");
       return;
     }
 
-    // Ensure content script is ready
     const ready = await ensureContentScriptInjected(activeKeepTab.id);
     if (!ready) {
-      showToast("Không thể kết nối với trang Google Keep!", "error");
+      showToast("Could not connect to Google Keep tab!", "error");
       return;
     }
 
-    // Update UI for Uploading state
+    const shouldCreateConfig = createConfigNoteCheckbox.checked;
+    const configNote = shouldCreateConfig ? currentFile.configNote : null;
+    const totalNotes = currentFile.chunks.length + (shouldCreateConfig ? 1 : 0);
+
+    // Update UI immediately
     startUploadBtn.classList.add("hidden");
-    cancelUploadBtn.classList.remove("hidden");
+    transferControlGroup.classList.remove("hidden");
+    pauseUploadBtn.classList.remove("hidden");
+    resumeUploadBtn.classList.add("hidden");
+
     uploadProgressBox.classList.remove("hidden");
-    progressStatusLabel.innerText = "Bắt đầu tải lên...";
+    progressStatusLabel.innerText = "Starting autonomous upload...";
     progressBarFill.style.width = "0%";
     progressPercentLabel.innerText = "0%";
     currentChunkCount.innerText = "0";
-    totalChunkCount.innerText = currentFile.chunks.length;
+    totalChunkCount.innerText = totalNotes;
 
-    addLog(`🚀 Bắt đầu tải lên file "${currentFile.name}" gồm ${currentFile.chunks.length} ghi chú...`);
+    addLog(`🚀 Upload launched: "${currentFile.name}" (${totalNotes} total notes: ${currentFile.chunks.length} chunks${shouldCreateConfig ? " + 1 Config Note" : ""})...`);
 
-    // Connect Port to Content Script
-    try {
-      activePort = chrome.tabs.connect(activeKeepTab.id, { name: "keep-transfer-port" });
-      activePort.onMessage.addListener((msg) => {
-        if (msg.type === "UPLOAD_PROGRESS") {
-          const pct = Math.round((msg.current / msg.total) * 100);
-          progressBarFill.style.width = `${pct}%`;
-          progressPercentLabel.innerText = `${pct}%`;
-          currentChunkCount.innerText = msg.current;
-          progressStatusLabel.innerText = msg.status || `Đang tạo [${msg.current}/${msg.total}]...`;
-          addLog(`✅ Đã tạo ghi chú [${msg.current}/${msg.total}]: "${msg.title}"`, "success");
-        }
+    // Dispatch task to content script
+    chrome.tabs.sendMessage(activeKeepTab.id, {
+      action: "START_UPLOAD",
+      chunks: currentFile.chunks,
+      configNote: configNote,
+      delayMs: currentSettings.delayMs,
+      fileId: currentFile.fileId,
+      fileName: currentFile.name
+    }, (res) => {
+      if (res && res.success) {
+        showToast("Autonomous upload running in Google Keep tab!", "info");
+      }
+    });
 
-        if (msg.type === "UPLOAD_COMPLETE") {
-          progressBarFill.style.width = "100%";
-          progressPercentLabel.innerText = "100%";
-          progressStatusLabel.innerText = "Hoàn tất!";
-          startUploadBtn.classList.remove("hidden");
-          cancelUploadBtn.classList.add("hidden");
-          addLog(`🎉 HOÀN TẤT! Đã tạo thành công ${msg.total} ghi chú lên Google Keep.`, "success");
-          showToast(`Đã tải lên toàn bộ ${msg.total} ghi chú!`, "success");
-        }
+    // Bring Google Keep tab and its window to front
+    chrome.tabs.update(activeKeepTab.id, { active: true });
+    if (activeKeepTab.windowId) {
+      chrome.windows.update(activeKeepTab.windowId, { focused: true });
+    }
 
-        if (msg.type === "UPLOAD_ERROR") {
-          progressStatusLabel.innerText = "Xảy ra lỗi!";
-          addLog(`❌ Lỗi ghi chú [${msg.current}/${msg.total}]: ${msg.error}`, "error");
-          showToast(`Lỗi: ${msg.error}`, "error");
-          startUploadBtn.classList.remove("hidden");
-          cancelUploadBtn.classList.add("hidden");
-        }
-
-        if (msg.type === "UPLOAD_CANCELLED") {
-          progressStatusLabel.innerText = "Đã dừng.";
-          addLog(`⚠️ Đã dừng tải lên tại ghi chú ${msg.index}.`, "error");
-          showToast("Đã dừng quá trình tải lên.", "info");
-          startUploadBtn.classList.remove("hidden");
-          cancelUploadBtn.classList.add("hidden");
-        }
-      });
-
-      // Send start message
-      activePort.postMessage({
-        action: "START_UPLOAD",
-        chunks: currentFile.chunks,
-        delayMs: currentSettings.delayMs
-      });
-    } catch (err) {
-      console.error(err);
-      addLog(`❌ Lỗi kết nối: ${err.message}`, "error");
-      showToast("Lỗi kết nối tới tab Keep", "error");
-      startUploadBtn.classList.remove("hidden");
-      cancelUploadBtn.classList.add("hidden");
+    // Auto-close popup if enabled and not in detached window mode
+    const shouldAutoClose = autoClosePopupCheckbox && autoClosePopupCheckbox.checked && !isWindowMode;
+    if (shouldAutoClose) {
+      showToast("Transfer running! Closing popup to monitor on Keep...", "info");
+      setTimeout(() => {
+        window.close();
+      }, 350);
     }
   });
 
-  // Cancel Upload Button
-  cancelUploadBtn.addEventListener("click", () => {
-    if (activePort) {
-      activePort.postMessage({ action: "CANCEL_OPERATION" });
-    }
+  // Pause Upload
+  pauseUploadBtn.addEventListener("click", () => {
     if (activeKeepTab) {
-      chrome.tabs.sendMessage(activeKeepTab.id, { action: "CANCEL_OPERATION" });
+      chrome.tabs.sendMessage(activeKeepTab.id, { action: "PAUSE_UPLOAD" }, (res) => {
+        pauseUploadBtn.classList.add("hidden");
+        resumeUploadBtn.classList.remove("hidden");
+        showToast("Transfer paused. You can click Resume anytime.", "info");
+      });
     }
-    cancelUploadBtn.classList.add("hidden");
-    startUploadBtn.classList.remove("hidden");
+  });
+
+  // Resume Upload
+  resumeUploadBtn.addEventListener("click", () => {
+    if (activeKeepTab) {
+      chrome.tabs.sendMessage(activeKeepTab.id, { action: "RESUME_UPLOAD" }, (res) => {
+        if (res && res.success) {
+          resumeUploadBtn.classList.add("hidden");
+          pauseUploadBtn.classList.remove("hidden");
+          showToast("Transfer resumed!", "success");
+        } else {
+          showToast(res ? res.message : "Failed to resume", "error");
+        }
+      });
+    }
+  });
+
+  // Cancel Upload
+  cancelUploadBtn.addEventListener("click", () => {
+    if (activeKeepTab) {
+      chrome.tabs.sendMessage(activeKeepTab.id, { action: "CANCEL_UPLOAD" }, () => {
+        showToast("Transfer cancelled.", "info");
+        uploadProgressBox.classList.add("hidden");
+        transferControlGroup.classList.add("hidden");
+        startUploadBtn.classList.remove("hidden");
+      });
+    }
   });
 
   // -------------------------------------------------------------
   // DOWNLOAD & REASSEMBLY LOGIC
   // -------------------------------------------------------------
+  function parseNoteTitle(note) {
+    const rawTitle = (note.title || "").trim();
+    if (!rawTitle) return null;
 
-  // Regex parser for chunk titles
-  // Format: [KeepTransfer] filename.txt | Part 1/5 | ID:kpf_xyz
-  const chunkTitleRegex = /\[(.*?)\]\s*(.*?)\s*\|\s*Part\s*(\d+)\/(\d+)\s*\|\s*ID:([a-zA-Z0-9_-]+)/i;
-  // Fallback regex: filename.txt (Part 1/5)
-  const fallbackChunkRegex = /(.*?)\s*(?:\||\-|\[|\()\s*Part\s*(\d+)[\/ ](\d+)(?:[\]\)]|\s*\|\s*ID:([^\s\|\]]+))?/i;
+    // 1. New Compact Config Note: [KT CFG #id] (5 parts) filename or [KT-CFG #id] filename
+    const compactConfigMatch = rawTitle.match(/^\[(?:KT|KeepTransfer|.*?)?\s*(?:CFG|CONFIG)(?:\s*#([a-zA-Z0-9_-]+))?\](?:\s*\(\s*(\d+)\s*(?:parts|notes|p)?\s*\))?\s*(.*)$/i);
+    if (compactConfigMatch) {
+      let parsedConfig = null;
+      try {
+        parsedConfig = JSON.parse(note.content);
+      } catch (e) {
+        parsedConfig = null;
+      }
+      const fileId = compactConfigMatch[1] || (parsedConfig && parsedConfig.fileId) || "cfg_unknown";
+      const totalParts = compactConfigMatch[2] ? parseInt(compactConfigMatch[2], 10) : (parsedConfig && parsedConfig.totalChunks) || 0;
+      const fileName = (compactConfigMatch[3] || (parsedConfig && parsedConfig.fileName) || "file.txt")
+        .replace(/[…\.\s\|]+$/, "")
+        .trim();
 
-  function parseChunkNote(note) {
-    const title = (note.title || "").trim();
-    let match = title.match(chunkTitleRegex);
-    if (match) {
       return {
-        prefix: match[1],
-        fileName: match[2].trim(),
-        part: parseInt(match[3], 10),
-        total: parseInt(match[4], 10),
-        fileId: match[5],
+        isConfig: true,
+        fileId: fileId,
+        fileName: fileName,
+        total: totalParts,
+        configData: parsedConfig,
         rawNote: note
       };
     }
 
-    match = title.match(fallbackChunkRegex);
-    if (match) {
+    // 2. Old Config Note: [KT-CONFIG] filename | ID:xxx
+    const oldConfigMatch = rawTitle.match(/\[(.*?-CONFIG)\]\s*(.*?)\s*\|\s*ID:([a-zA-Z0-9_-]+)/i);
+    if (oldConfigMatch) {
+      let parsedConfig = null;
+      try {
+        parsedConfig = JSON.parse(note.content);
+      } catch (e) {
+        parsedConfig = null;
+      }
       return {
-        prefix: "",
-        fileName: match[1].replace(/^\[.*?\]\s*/, "").trim(),
-        part: parseInt(match[2], 10),
-        total: parseInt(match[3], 10),
-        fileId: match[4] || `auto_${match[1].trim()}`,
+        isConfig: true,
+        fileId: oldConfigMatch[3].trim(),
+        fileName: oldConfigMatch[2].replace(/[…\.\s\|]+$/, "").trim(),
+        total: (parsedConfig && parsedConfig.totalChunks) || 0,
+        configData: parsedConfig,
+        rawNote: note
+      };
+    }
+
+    // 3. New Compact Chunk Note: [KT 01/05 #abc12] filename or [01/05 #abc12] filename
+    const compactChunkMatch = rawTitle.match(/^\[(?:KT|KeepTransfer|.*?)?\s*(\d+)[\/ ](\d+)(?:\s*#([a-zA-Z0-9_-]+))?\]\s*(?:#([a-zA-Z0-9_-]+)\s*\|?\s*)?(.*)$/i);
+    if (compactChunkMatch) {
+      const part = parseInt(compactChunkMatch[1], 10);
+      const total = parseInt(compactChunkMatch[2], 10);
+      const fileId = compactChunkMatch[3] || compactChunkMatch[4] || "default_id";
+      const rawFileName = (compactChunkMatch[5] || "").replace(/[…\.\s\|]+$/, "").trim() || "transfer_file.txt";
+
+      return {
+        isConfig: false,
+        part: part,
+        total: total,
+        fileId: fileId,
+        fileName: rawFileName,
+        rawNote: note
+      };
+    }
+
+    // 4. Old Chunk Note: [KT] filename | Part 01/05 | ID:xxx
+    const oldChunkMatch = rawTitle.match(/\[(.*?)\]\s*(.*?)\s*\|\s*Part\s*(\d+)[\/ ](\d+)\s*\|\s*ID:([a-zA-Z0-9_-]+)/i);
+    if (oldChunkMatch) {
+      return {
+        isConfig: false,
+        prefix: oldChunkMatch[1],
+        fileName: oldChunkMatch[2].replace(/[…\.\s\|]+$/, "").trim(),
+        part: parseInt(oldChunkMatch[3], 10),
+        total: parseInt(oldChunkMatch[4], 10),
+        fileId: oldChunkMatch[5].trim(),
+        rawNote: note
+      };
+    }
+
+    // 5. Fallback Part matcher: Part 01/05
+    const fallbackMatch = rawTitle.match(/(.*?)\s*(?:\||\-|\[|\()\s*Part\s*(\d+)[\/ ](\d+)(?:[\]\)]|\s*\|\s*ID:([^\s\|\]]+))?/i);
+    if (fallbackMatch) {
+      return {
+        isConfig: false,
+        fileName: fallbackMatch[1].replace(/^\[.*?\]\s*/, "").replace(/[…\.\s\|]+$/, "").trim(),
+        part: parseInt(fallbackMatch[2], 10),
+        total: parseInt(fallbackMatch[3], 10),
+        fileId: fallbackMatch[4] || `auto_${fallbackMatch[1].trim()}`,
         rawNote: note
       };
     }
@@ -473,29 +712,50 @@ document.addEventListener("DOMContentLoaded", async () => {
     return null;
   }
 
-  // Group chunks into File Bundles
   function processScannedNotes(notes) {
     scannedNotes = notes;
     detectedFileBundles = {};
 
     notes.forEach((note) => {
-      const parsed = parseChunkNote(note);
+      const parsed = parseNoteTitle(note);
       if (!parsed) return;
 
-      const key = parsed.fileId || parsed.fileName;
+      const key = (parsed.fileId && parsed.fileId !== "default_id") ? parsed.fileId : parsed.fileName;
       if (!detectedFileBundles[key]) {
         detectedFileBundles[key] = {
           fileId: parsed.fileId,
           fileName: parsed.fileName,
-          total: parsed.total,
+          total: parsed.total || 0,
           parts: {},
-          scannedCount: 0
+          scannedCount: 0,
+          configNote: null
         };
       }
 
-      if (!detectedFileBundles[key].parts[parsed.part]) {
-        detectedFileBundles[key].parts[parsed.part] = note;
-        detectedFileBundles[key].scannedCount++;
+      // Preserve the longest un-truncated filename across notes in the bundle
+      if (parsed.fileName && parsed.fileName.length > detectedFileBundles[key].fileName.length && !parsed.fileName.endsWith("…")) {
+        detectedFileBundles[key].fileName = parsed.fileName;
+      }
+
+      if (parsed.isConfig) {
+        detectedFileBundles[key].configNote = parsed;
+        if (parsed.total && parsed.total > 0) {
+          detectedFileBundles[key].total = parsed.total;
+        }
+        if (parsed.configData && parsed.configData.totalChunks) {
+          detectedFileBundles[key].total = parsed.configData.totalChunks;
+        }
+        if (parsed.configData && parsed.configData.fileName) {
+          detectedFileBundles[key].fileName = parsed.configData.fileName;
+        }
+      } else {
+        if (!detectedFileBundles[key].parts[parsed.part]) {
+          detectedFileBundles[key].parts[parsed.part] = note;
+          detectedFileBundles[key].scannedCount++;
+        }
+        if (parsed.total && parsed.total > detectedFileBundles[key].total) {
+          detectedFileBundles[key].total = parsed.total;
+        }
       }
     });
 
@@ -503,7 +763,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderManualNotesList();
   }
 
-  // Render Detected Files in Download Tab
   function renderDetectedFiles() {
     const filter = (scanFilterInput.value || "").toLowerCase().trim();
     const bundleKeys = Object.keys(detectedFileBundles);
@@ -526,20 +785,35 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       const totalParts = bundle.total;
       const foundCount = bundle.scannedCount;
-      const isComplete = foundCount >= totalParts;
+      const hasConfig = bundle.configNote !== null;
 
-      // Calculate total characters
+      // Calculate missing parts
+      const missingParts = [];
+      if (totalParts > 0) {
+        for (let p = 1; p <= totalParts; p++) {
+          if (!bundle.parts[p]) missingParts.push(p);
+        }
+      }
+
+      // ACCURATE EVALUATION:
+      // A file is ONLY complete when totalParts > 0 AND missingParts is empty AND foundCount === totalParts
+      const isComplete = totalParts > 0 && missingParts.length === 0 && foundCount === totalParts;
+
       let totalChars = 0;
-      for (let p = 1; p <= totalParts; p++) {
+      const limit = totalParts > 0 ? totalParts : foundCount;
+      for (let p = 1; p <= limit; p++) {
         if (bundle.parts[p]) {
           totalChars += (bundle.parts[p].content || "").length;
         }
       }
 
-      // Check missing parts
-      const missingParts = [];
-      for (let p = 1; p <= totalParts; p++) {
-        if (!bundle.parts[p]) missingParts.push(p);
+      let statusBadgeHtml = "";
+      if (isComplete) {
+        statusBadgeHtml = `<span class="bundle-badge complete">Complete (${foundCount}/${totalParts}) ✅</span>`;
+      } else if (totalParts > 0) {
+        statusBadgeHtml = `<span class="bundle-badge partial">Incomplete (${foundCount}/${totalParts}) ⚠️</span>`;
+      } else {
+        statusBadgeHtml = `<span class="bundle-badge partial">Found ${foundCount} parts (Total unknown) ⚠️</span>`;
       }
 
       const card = document.createElement("div");
@@ -547,20 +821,28 @@ document.addEventListener("DOMContentLoaded", async () => {
       card.innerHTML = `
         <div class="bundle-header">
           <span class="bundle-title" title="${bundle.fileName}">${bundle.fileName}</span>
-          <span class="bundle-badge ${isComplete ? "complete" : "partial"}">
-            ${isComplete ? `Đủ ${foundCount}/${totalParts} phần ✅` : `Đã thấy ${foundCount}/${totalParts} phần ⚠️`}
-          </span>
+          <div class="bundle-badges">
+            ${hasConfig ? `<span class="bundle-badge config" title="Master Config Note was detected">Config ✅</span>` : ""}
+            ${statusBadgeHtml}
+          </div>
         </div>
         <div class="bundle-meta">
-          ID: <code>${bundle.fileId}</code> • ${totalChars.toLocaleString()} ký tự • ~${formatBytes(totalChars)}
-          ${missingParts.length > 0 ? `<br><span style="color:#F59E0B">Thiếu phần: ${missingParts.join(", ")}</span>` : ""}
+          ID: <code>${bundle.fileId}</code> • ${totalChars.toLocaleString()} chars • ~${formatBytes(totalChars)}
+          ${missingParts.length > 0 ? `<br><span style="color:#F59E0B; font-weight:600;">⚠️ Missing parts: ${missingParts.map(p => `Part ${p}`).join(", ")}</span>` : ""}
+          ${totalParts === 0 ? `<br><span style="color:#F59E0B;">⚠️ Total parts unverified (Deep Scan to find all parts)</span>` : ""}
         </div>
         <div class="bundle-actions">
-          <button class="btn btn-sm btn-primary btn-download-file" data-key="${key}" ${!isComplete ? "title='Chưa đủ phần nhưng vẫn có thể tải'" : ""}>
-            📥 Tải xuống (.txt)
-          </button>
+          ${isComplete ? `
+            <button class="btn btn-sm btn-primary btn-download-file" data-key="${key}">
+              📥 Download (.txt)
+            </button>
+          ` : `
+            <button class="btn btn-sm btn-secondary btn-download-file" data-key="${key}" title="Warning: File has missing parts" style="border-color:#F59E0B; color:#FCD34D;">
+              ⚠️ Download Partial (${foundCount}/${totalParts || "?"})
+            </button>
+          `}
           <button class="btn btn-sm btn-secondary btn-preview-file" data-key="${key}">
-            👁️ Xem trước
+            👁️ Preview
           </button>
           <button class="btn btn-sm btn-secondary btn-copy-file" data-key="${key}">
             📋 Copy
@@ -568,17 +850,14 @@ document.addEventListener("DOMContentLoaded", async () => {
         </div>
       `;
 
-      // Download Button
       card.querySelector(".btn-download-file").addEventListener("click", () => {
         downloadMergedFile(bundle);
       });
 
-      // Preview Button
       card.querySelector(".btn-preview-file").addEventListener("click", () => {
         previewMergedFile(bundle);
       });
 
-      // Copy Button
       card.querySelector(".btn-copy-file").addEventListener("click", () => {
         copyMergedFile(bundle);
       });
@@ -587,10 +866,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Combine and Download
   function getMergedContent(bundle) {
     const partsArray = [];
-    for (let p = 1; p <= bundle.total; p++) {
+    const totalParts = bundle.total || bundle.scannedCount;
+    for (let p = 1; p <= totalParts; p++) {
       if (bundle.parts[p]) {
         partsArray.push(bundle.parts[p].content || "");
       }
@@ -599,6 +878,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function downloadMergedFile(bundle) {
+    const totalParts = bundle.total;
+    const missingParts = [];
+    if (totalParts > 0) {
+      for (let p = 1; p <= totalParts; p++) {
+        if (!bundle.parts[p]) missingParts.push(p);
+      }
+    }
+
+    if (missingParts.length > 0) {
+      const confirmDownload = confirm(`⚠️ Warning: This file is missing ${missingParts.length} parts (${missingParts.map(p => `Part ${p}`).join(", ")}).\n\nIf downloaded, the file will be incomplete.\n\nDo you want to download partial content anyway?`);
+      if (!confirmDownload) return;
+    }
+
     const merged = getMergedContent(bundle);
     chrome.runtime.sendMessage({
       type: "DOWNLOAD_FILE",
@@ -606,9 +898,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       content: merged
     }, (res) => {
       if (res && res.success) {
-        showToast(`Đã bắt đầu tải xuống: ${bundle.fileName}`, "success");
+        showToast(`Download started: ${bundle.fileName}`, "success");
       } else {
-        showToast("Lỗi khi tải xuống file", "error");
+        showToast("Error starting download", "error");
       }
     });
   }
@@ -616,79 +908,71 @@ document.addEventListener("DOMContentLoaded", async () => {
   function previewMergedFile(bundle) {
     const merged = getMergedContent(bundle);
     previewCurrentData = {
-      title: `${bundle.fileName} (${bundle.scannedCount}/${bundle.total} phần)`,
+      title: `${bundle.fileName} (${bundle.scannedCount}/${bundle.total || bundle.scannedCount} parts)`,
       filename: bundle.fileName,
       content: merged
     };
     previewModalTitle.innerText = previewCurrentData.title;
-    previewModalBody.innerText = merged.slice(0, 100000) + (merged.length > 100000 ? "\n\n... (Đã cắt bớt xem trước) ..." : "");
+    previewModalBody.innerText = merged.slice(0, 80000) + (merged.length > 80000 ? "\n\n... (Preview truncated for display) ..." : "");
     previewModal.classList.remove("hidden");
   }
 
   function copyMergedFile(bundle) {
     const merged = getMergedContent(bundle);
     navigator.clipboard.writeText(merged).then(() => {
-      showToast(`Đã sao chép ${merged.length.toLocaleString()} ký tự vào clipboard!`, "success");
+      showToast(`Copied ${merged.length.toLocaleString()} characters to clipboard!`, "success");
     }).catch(() => {
-      showToast("Không thể sao chép vào clipboard", "error");
+      showToast("Failed to copy to clipboard", "error");
     });
   }
 
-  // Search Filter in Download Tab
   scanFilterInput.addEventListener("input", renderDetectedFiles);
   refreshFilesBtn.addEventListener("click", renderDetectedFiles);
 
-  // Trigger Scan Helper
   async function triggerScan(scanAction) {
     const isConnected = await checkKeepConnection();
     if (!isConnected || !activeKeepTab) {
-      showToast("Chưa kết nối tab Google Keep!", "error");
+      showToast("Google Keep tab not found!", "error");
       return;
     }
 
     const ready = await ensureContentScriptInjected(activeKeepTab.id);
     if (!ready) {
-      showToast("Không thể kết nối với tab Google Keep!", "error");
+      showToast("Could not connect to Google Keep tab!", "error");
       return;
     }
 
     scanStatusAlert.classList.remove("hidden");
-    scanStatusMsg.innerText = "Đang kết nối và quét ghi chú...";
+    scanStatusMsg.innerText = "Connecting and scanning notes...";
 
     try {
-      activePort = chrome.tabs.connect(activeKeepTab.id, { name: "keep-transfer-port" });
+      activeScanPort = chrome.tabs.connect(activeKeepTab.id, { name: "keep-transfer-port" });
       const receivedNotes = [];
 
-      activePort.onMessage.addListener((msg) => {
+      activeScanPort.onMessage.addListener((msg) => {
         if (msg.type === "SCAN_STATUS") {
           scanStatusMsg.innerText = msg.message;
         }
 
         if (msg.type === "SCAN_PROGRESS") {
           if (msg.note) receivedNotes.push(msg.note);
-          scanStatusMsg.innerText = `Đang đọc ghi chú [${msg.current}/${msg.total}]: "${(msg.note && msg.note.title) || ""}"...`;
+          scanStatusMsg.innerText = `Scanning [${msg.current}/${msg.total}]: "${(msg.note && msg.note.title) || ""}"...`;
         }
 
         if (msg.type === "SCAN_COMPLETE") {
           scanStatusAlert.classList.add("hidden");
           const finalNotes = msg.results || receivedNotes;
           processScannedNotes(finalNotes);
-          showToast(`Quét xong! Đã tìm thấy ${finalNotes.length} ghi chú.`, "success");
+          showToast(`Scan complete! Found ${finalNotes.length} notes.`, "success");
         }
 
         if (msg.type === "SCAN_ERROR") {
           scanStatusAlert.classList.add("hidden");
-          showToast(`Lỗi quét: ${msg.error}`, "error");
-        }
-
-        if (msg.type === "SCAN_CANCELLED") {
-          scanStatusAlert.classList.add("hidden");
-          processScannedNotes(msg.results || receivedNotes);
-          showToast("Đã dừng quét ghi chú.", "info");
+          showToast(`Scan error: ${msg.error}`, "error");
         }
       });
 
-      activePort.postMessage({
+      activeScanPort.postMessage({
         action: scanAction,
         options: {
           prefix: currentSettings.prefixTag,
@@ -698,21 +982,20 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
     } catch (err) {
       scanStatusAlert.classList.add("hidden");
-      showToast("Lỗi kết nối khi quét", "error");
+      showToast("Connection error during scan", "error");
     }
   }
 
-  // Quick Scan Button
   quickScanBtn.addEventListener("click", () => triggerScan("START_QUICK_SCAN"));
-
-  // Deep Scan Button
   deepScanBtn.addEventListener("click", () => triggerScan("START_DEEP_SCAN"));
 
-  // Cancel Scan Button
   cancelScanBtn.addEventListener("click", () => {
-    if (activePort) activePort.postMessage({ action: "CANCEL_OPERATION" });
-    if (activeKeepTab) chrome.tabs.sendMessage(activeKeepTab.id, { action: "CANCEL_OPERATION" });
+    if (activeScanPort) {
+      activeScanPort.disconnect();
+      activeScanPort = null;
+    }
     scanStatusAlert.classList.add("hidden");
+    showToast("Scan stopped.", "info");
   });
 
   // -------------------------------------------------------------
@@ -723,7 +1006,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     notesManualList.innerHTML = "";
 
     if (scannedNotes.length === 0) {
-      notesManualList.innerHTML = `<div class="empty-manual-msg">Chưa có ghi chú nào. Hãy bấm "Quét nhanh" hoặc "Quét toàn diện" ở tab "Ghép & Tải xuống" trước.</div>`;
+      notesManualList.innerHTML = `<div class="empty-manual-msg">No notes available. Click "Quick Scan" or "Deep Scan" in the "Reassemble & Download" tab first.</div>`;
       mergeSelectedBtn.disabled = true;
       exportAllJsonBtn.disabled = true;
       return;
@@ -737,8 +1020,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       card.innerHTML = `
         <input type="checkbox" class="note-select-check" data-index="${index}">
         <div class="note-item-info">
-          <div class="note-item-title">${note.title || "Không có tiêu đề"}</div>
-          <div class="note-item-snippet">${(note.content || "").slice(0, 100).replace(/\n/g, " ") || "[Trống]"}</div>
+          <div class="note-item-title">${note.title || "Untitled Note"}</div>
+          <div class="note-item-snippet">${(note.content || "").slice(0, 100).replace(/\n/g, " ") || "[Empty content]"}</div>
         </div>
       `;
 
@@ -762,7 +1045,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     updateManualSelectionStats();
   });
 
-  // Merge Selected Notes
   mergeSelectedBtn.addEventListener("click", () => {
     const checks = Array.from(notesManualList.querySelectorAll(".note-select-check:checked"));
     if (checks.length === 0) return;
@@ -784,12 +1066,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       content: mergedText
     }, (res) => {
       if (res && res.success) {
-        showToast("Đã bắt đầu tải file gộp!", "success");
+        showToast("Merged download started!", "success");
       }
     });
   });
 
-  // Export All as JSON (Matches user script exactly)
   exportAllJsonBtn.addEventListener("click", () => {
     if (scannedNotes.length === 0) return;
     const jsonString = JSON.stringify(scannedNotes, null, 2);
@@ -800,26 +1081,29 @@ document.addEventListener("DOMContentLoaded", async () => {
       mimeType: "application/json;charset=utf-8"
     }, (res) => {
       if (res && res.success) {
-        showToast("Đã bắt đầu xuất file JSON!", "success");
+        showToast("Exported JSON successfully!", "success");
       }
     });
   });
 
   // -------------------------------------------------------------
-  // TAB 4: SETTINGS LOGIC
+  // TAB 4: SETTINGS
   // -------------------------------------------------------------
   saveSettingsBtn.addEventListener("click", () => {
     const newSettings = {
       chunkSize: parseInt(settingChunkSize.value, 10),
       delayMs: parseInt(settingDelayMs.value, 10),
-      prefixTag: settingPrefix.value.trim() || "[KeepTransfer]",
-      scrollDelay: parseInt(settingScrollDelay.value, 10)
+      prefixTag: settingPrefix.value.trim() || "[KT]",
+      configPrefix: settingConfigPrefix.value.trim() || "[KT-CONFIG]",
+      scrollDelay: parseInt(settingScrollDelay.value, 10),
+      autoClose: settingAutoClose ? settingAutoClose.checked : true
     };
 
     chrome.storage.local.set(newSettings, () => {
       currentSettings = newSettings;
+      if (autoClosePopupCheckbox) autoClosePopupCheckbox.checked = currentSettings.autoClose;
       chunkSizeDisplay.innerText = Number(currentSettings.chunkSize).toLocaleString();
-      showToast("Đã lưu cài đặt thành công!", "success");
+      showToast("Settings saved successfully!", "success");
     });
   });
 
@@ -833,7 +1117,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   copyPreviewBtn.addEventListener("click", () => {
     if (previewCurrentData) {
       navigator.clipboard.writeText(previewCurrentData.content).then(() => {
-        showToast("Đã sao chép nội dung vào clipboard!", "success");
+        showToast("Copied content to clipboard!", "success");
       });
     }
   });
@@ -846,19 +1130,19 @@ document.addEventListener("DOMContentLoaded", async () => {
         content: previewCurrentData.content
       }, (res) => {
         if (res && res.success) {
-          showToast("Đã bắt đầu tải xuống!", "success");
+          showToast("Download started!", "success");
           previewModal.classList.add("hidden");
         }
       });
     }
   });
 
-  // Close modal on click outside
   previewModal.addEventListener("click", (e) => {
     if (e.target === previewModal) previewModal.classList.add("hidden");
   });
 
-  // Initial load
+  // Initial Load & State Sync
   await loadSettings();
   await checkKeepConnection();
+  await syncActiveTransfer();
 });

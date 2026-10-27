@@ -1,83 +1,97 @@
 # Google Keep Text File Transfer (Chrome Extension - Manifest V3)
 
-Extension cho trình duyệt (Chrome, Brave, Edge, Cốc Cốc) hỗ trợ **tải lên (upload)** và **tải xuống (download)** các file text dung lượng lớn qua **Google Keep** (`keep.google.com`) bằng cơ chế tự động chia nhỏ (chunking) và ghép nối dữ liệu (reassembly).
+A Chrome extension designed to **upload**, **split**, **reassemble**, and **download** large text files through **Google Keep** (`keep.google.com`).
 
 ---
 
-## 🌟 Tính năng chính
+## 🌟 Key Features
 
-1. **📤 Tách nhỏ & Tải lên Google Keep (Upload)**:
-   - Hỗ trợ mọi loại file văn bản: `.txt`, `.json`, `.csv`, `.md`, `.js`, `.py`, `.xml`, `.yml`, `.log`, hoặc dán trực tiếp đoạn text dài.
-   - Tự động chia nhỏ nội dung thành các phần an toàn (mặc định 10.000 ký tự/ghi chú để đảm bảo không vượt giới hạn lưu trữ của Google Keep).
-   - Đặt tiêu đề ghi chú tự động theo cấu trúc chuẩn:
-     `[KeepTransfer] <tên_file> | Part <số_thứ_tự>/<tổng_số_phần> | ID:<mã_file>`
-   - Tự động điền dữ liệu vào ô soạn thảo của Keep (`contenteditable`), kích hoạt lưu và đóng ghi chú tuần tự với độ trễ tối ưu (chống lag / rate limit).
-   - Thanh tiến trình trực quan (% hoàn thành, số ghi chú đã tạo, nhật ký hoạt động trực tiếp).
+1. **📤 Upload & Automated Chunking**:
+   - Handles any text file (`.txt`, `.json`, `.csv`, `.md`, `.js`, `.py`, `.xml`, `.log`, `.yaml`, etc.) or direct text paste.
+   - Splits files into safe, bite-sized notes (default 10,000 characters per note, well within Google Keep's character limits).
+   - Generates structured, padded titles for alphabetical and natural sorting:
+     `[KT] <filename> | Part 01/05 | ID:<file_id>`
+   - **Master Config Note (`[KT-CONFIG]`)**: Automatically creates a manifest note containing the file metadata, file ID, timestamp, and chunk map.
+   - Robust note saving: Accurately triggers Keep's content editor, sets title and body, awaits debounced state, and closes/saves cleanly.
 
-2. **📥 Tự động quét & Ghép lại file gốc (Download & Reassembly)**:
-   - **Quét nhanh (Quick Scan)**: Quét các thẻ ghi chú đang hiển thị trên giao diện Keep.
-   - **Quét toàn diện (Deep Scan - Cuộn không sót)**: Tự động cuộn trang Keep xuống cuối và mở chi tiết từng ghi chú để trích xuất 100% nội dung (kế thừa thuật toán `extractAllKeepNotesNoOmission`).
-   - Tự động phân tích tiêu đề, nhóm các phần thuộc cùng 1 file, kiểm tra tính toàn vẹn (đủ X/X phần hay còn thiếu phần nào).
-   - Ghép đúng thứ tự các phần (`Part 1 -> Part 2 -> ... -> Part N`) và tải xuống trực tiếp dưới tên file gốc.
-   - Cho phép xem trước (Preview) và sao chép nhanh (Copy to Clipboard).
+2. **⚡ Autonomous In-Page Execution & Floating Widget**:
+   - Transfers run directly in the `keep.google.com` tab with an injected on-screen floating widget.
+   - The floating widget displays live progress, note counters, character verification badges, Pause, Resume, and Stop buttons directly inside Google Keep.
+   - **Auto-Close Popup**: The extension popup automatically closes when transfer starts to return 100% native window focus to Google Keep, allowing Closure auto-save and blur listeners to commit notes instantaneously.
+   - You can reopen the popup at any time to inspect logs, or click **"👁 View in Keep"** to focus the tab.
 
-3. **📑 Gộp thủ công (Manual Merger)**:
-   - Cho phép chọn bất kỳ ghi chú nào đã quét trong Keep.
-   - Tùy chọn dấu ngắt dòng khi ghép: Nối liền, Xuống dòng (`\n`), Cách đoạn (`\n\n`), hoặc Dấu phân cách (`---`).
-   - Xuất dữ liệu thành file text hoặc file JSON đầy đủ.
+3. **📥 Automated Detection & Reassembly (Download)**:
+   - **Quick Scan**: Rapidly checks note cards currently in the Keep tab.
+   - **Deep Scan (No Omissions)**: Automatically scrolls the entire Keep page to the bottom and reads full note modal contents without skipping.
+   - Detects **Master Config Notes** and correlates them with chunk notes.
+   - Checks completeness: Displays `Complete (5/5) ✅` or lists missing parts (`Missing parts: 02, 04 ⚠️`).
+   - Reassembles parts in sequential order (`Part 01 -> Part 02 -> ... -> Part N`) and downloads the exact original text file.
+   - Live content preview modal with one-click copy and download.
 
-4. **⚙️ Tùy biến linh hoạt**:
-   - Tùy chỉnh kích thước mỗi phần: 5.000 / 10.000 / 15.000 / 18.000 ký tự.
-   - Tùy chỉnh độ trễ giữa các ghi chú: 400ms / 800ms / 1.200ms / 2.000ms.
-   - Đổi tiền tố nhận diện (`[KeepTransfer]`, `[MyDrop]`, v.v.).
+4. **⧉ Pop Out Window Support**:
+   - Use the **⧉ Pop Out** button in the header if you want to keep Keep Transfer open as a detached, standalone window alongside Google Keep.
+
+5. **📑 Manual Merger**:
+   - Select any combination of notes scanned from Google Keep.
+   - Choose delimiter: Direct concatenation, Single newline (`\n`), Double newline (`\n\n`), or Divider line (`---`).
+   - Download as a merged `.txt` file or export everything as a structured JSON file.
+
+5. **⚙️ Customization**:
+   - Chunk Size: 5,000 / 10,000 (Recommended) / 15,000 / 18,000 characters.
+   - Delay between notes: 400ms / 800ms (Recommended) / 1,200ms / 2,000ms.
+   - Customizable prefix tags: Chunk prefix (`[KT]`) and Config prefix (`[KT-CONFIG]`).
+   - Scroll delay on scan: 800ms / 1,200ms / 1,800ms.
 
 ---
 
-## 📂 Cấu trúc thư mục dự án
+## 📂 Project Structure
 
 ```
 google-keep-transfer-extension/
-├── manifest.json       # Cấu hình Manifest V3
-├── background.js      # Service Worker xử lý tải file & tab
-├── content.js         # Tương tác trực tiếp với DOM Google Keep (Tạo & Trích xuất ghi chú)
-├── popup.html         # Giao diện người dùng
-├── popup.css          # CSS thiết kế Dark Mode hiện đại
-├── popup.js           # Logic chia tách, ghép nối và điều khiển
-├── icons/             # Bộ icon chuẩn Chrome Extension (16, 32, 48, 128)
-└── README.md          # Tài liệu hướng dẫn
+├── manifest.json       # Manifest V3 configuration
+├── background.js      # Background service worker for downloads & tab management
+├── content.js         # Google Keep DOM automation & extraction engine
+├── popup.html         # English extension UI with Pop Out and Config Note options
+├── popup.css          # Modern dark-mode styling with status badges and animations
+├── popup.js           # Chunking, config note manifest, reassembly, and scan logic
+├── icons/             # 16x16, 32x32, 48x48, 128x128 icons
+└── README.md          # Documentation & usage guide
 ```
 
 ---
 
-## 🚀 Hướng dẫn cài đặt
+## 🚀 Installation Guide
 
-1. Mở trình duyệt Chrome hoặc trình duyệt nhân Chromium bất kỳ (Brave, Edge, Cốc Cốc).
-2. Truy cập vào trang quản lý tiện ích:
+1. Open Google Chrome, Brave, Edge, or any Chromium-based browser.
+2. Navigate to:
    ```
    chrome://extensions/
    ```
-3. Bật công tắc **"Chế độ dành cho nhà phát triển" (Developer mode)** ở góc trên bên phải.
-4. Bấm nút **"Tải tiện ích đã giải nén" (Load unpacked)**.
-5. Chọn thư mục dự án:
+3. Enable **Developer mode** (toggle in the top-right corner).
+4. Click **Load unpacked** (top-left).
+5. Select the extension directory:
    ```
    /home/longp/projects/company-tools/google-keep-transfer-extension
    ```
-6. Tiện ích **Google Keep Text File Transfer** sẽ xuất hiện trên thanh công cụ của trình duyệt!
+6. The **Keep Transfer** extension icon will appear on your browser toolbar!
 
 ---
 
-## 📖 Hướng dẫn sử dụng
+## 📖 How to Use
 
-### 1. Upload file văn bản lên Keep:
-1. Mở trang [https://keep.google.com/](https://keep.google.com/) trên trình duyệt.
-2. Bấm vào icon tiện ích trên thanh công cụ.
-3. Kéo thả file text hoặc bấm để chọn file từ máy tính.
-4. Xem trước số lượng ghi chú dự kiến được tách.
-5. Bấm nút **"Tách file & Tải lên Google Keep"**. Tiện ích sẽ tự động tạo từng ghi chú trên Google Keep theo đúng thứ tự.
+### 1. Upload a File to Google Keep:
+1. Open [https://keep.google.com/](https://keep.google.com/) in a browser tab.
+2. Click the **Keep Transfer** icon on your browser toolbar.
+3. *(Recommended)* Click **⧉ Pop Out** in the top header to keep the extension window open side-by-side.
+4. Drag and drop your text file or paste text directly.
+5. Ensure the **"Create Master Config Note"** checkbox is checked.
+6. Click **"Split File & Upload to Google Keep"**. Watch the live progress bar and logs as each note is created and saved.
 
-### 2. Ghép và Tải file gốc về máy:
-1. Mở trang [https://keep.google.com/](https://keep.google.com/).
-2. Mở popup tiện ích, chuyển sang tab **"Ghép & Tải xuống"**.
-3. Bấm **"Quét nhanh"** (nếu ghi chú đang ở đầu trang) hoặc **"Quét toàn diện"** (để cuộn toàn bộ trang nạp tất cả ghi chú).
-4. Tiện ích sẽ tự động nhận diện các file đã được chia nhỏ, hiển thị trạng thái `Đủ X/X phần ✅`.
-5. Bấm nút **"📥 Tải xuống (.txt)"** để tải về file đã ghép hoàn chỉnh.
+### 2. Reassemble & Download:
+1. Open [https://keep.google.com/](https://keep.google.com/).
+2. Open Keep Transfer and switch to the **"Reassemble & Download"** tab.
+3. Click **"Quick Scan"** or **"Deep Scan (All Notes)"**.
+4. The extension detects your file and displays its status:
+   - `Config ✅` (Master config note identified)
+   - `Complete (X/X) ✅` (All chunks found)
+5. Click **"📥 Download (.txt)"** to reassemble and save your original file!

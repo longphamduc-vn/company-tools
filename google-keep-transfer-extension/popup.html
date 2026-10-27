@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Google Keep Text File Transfer</title>
+  <title>Keep Transfer - Google Keep Text Transfer</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -21,48 +21,62 @@
         </div>
         <div class="brand-text">
           <h1>Keep Transfer</h1>
-          <span class="version">v1.0.0</span>
+          <span class="version">v1.1.0</span>
         </div>
       </div>
-      <div class="header-status" id="connectionBadge">
-        <span class="status-dot"></span>
-        <span class="status-label" id="statusText">Đang kiểm tra...</span>
+      <div class="header-actions">
+        <button class="btn-popout" id="popoutBtn" title="Open in a separate floating window so it stays open continuously">
+          ⧉ Pop Out
+        </button>
+        <div class="header-status" id="connectionBadge">
+          <span class="status-dot"></span>
+          <span class="status-label" id="statusText">Checking...</span>
+        </div>
       </div>
     </header>
 
-    <!-- Tab Navigation -->
+    <!-- Navigation Tabs -->
     <nav class="nav-tabs">
       <button class="tab-btn active" data-tab="uploadTab">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Upload & Tách
+        Upload & Split
       </button>
       <button class="tab-btn" data-tab="downloadTab">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Ghép & Tải xuống
+        Reassemble & Download
       </button>
       <button class="tab-btn" data-tab="manualTab">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-        Gộp thủ công
+        Manual Merger
       </button>
       <button class="tab-btn" data-tab="settingsTab">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
     </nav>
 
-    <!-- Main Content Area -->
+    <!-- Main Content -->
     <main class="tab-content-wrapper">
       
-      <!-- Warning if not on Keep -->
+      <!-- Alert if not on Keep -->
       <div class="alert-box alert-warning hidden" id="keepTabWarning">
         <div class="alert-icon">⚠️</div>
         <div class="alert-body">
-          <strong>Chưa mở Google Keep</strong>
-          <p>Bạn cần chuyển sang tab <code>keep.google.com</code> để tải lên hoặc quét ghi chú.</p>
+          <strong>Google Keep Tab Not Found</strong>
+          <p>Please open or switch to <code>keep.google.com</code> to run file transfers.</p>
         </div>
-        <button class="btn btn-sm btn-primary" id="openKeepBtn">Mở Keep</button>
+        <button class="btn btn-sm btn-primary" id="openKeepBtn">Open Keep</button>
       </div>
 
-      <!-- TAB 1: UPLOAD & CHUNK -->
+      <!-- Keep-Window-Open Reminder Alert -->
+      <div class="alert-box alert-info" id="keepOpenReminder">
+        <div class="alert-icon">💡</div>
+        <div class="alert-body">
+          <strong>Autonomous In-Page Transfers</strong>
+          <p>Transfers run autonomously inside Google Keep with an on-screen widget. Auto-closing the popup gives Keep full focus to save notes immediately without interruption.</p>
+        </div>
+      </div>
+
+      <!-- TAB 1: UPLOAD & SPLIT -->
       <section class="tab-pane active" id="uploadTab">
         <!-- Drag & Drop Zone -->
         <div class="drop-zone" id="dropZone">
@@ -77,111 +91,136 @@
               </svg>
             </div>
             <div class="drop-text">
-              <span class="drop-title">Kéo & thả file text vào đây</span>
-              <span class="drop-subtitle">hoặc bấm để duyệt file từ máy tính</span>
+              <span class="drop-title">Drag & drop text file here</span>
+              <span class="drop-subtitle">or click to browse from computer</span>
             </div>
           </div>
         </div>
 
-        <!-- Or Paste Direct Text Toggle -->
-        <div class="text-toggle-bar">
-          <button class="text-link" id="togglePasteBox">Hoặc dán trực tiếp văn bản vào đây ✍️</button>
-        </div>
+          <!-- Direct Text Paste Option -->
+          <div class="text-toggle-bar">
+            <button class="text-link" id="togglePasteBox">Or paste raw text directly here ✍️</button>
+          </div>
 
-        <div class="paste-box-container hidden" id="pasteContainer">
-          <input type="text" id="pasteFileName" class="form-input" placeholder="Tên file ảo (ví dụ: document.txt)" value="snippet.txt">
-          <textarea id="pasteTextInput" class="form-textarea" placeholder="Dán nội dung văn bản dài cần chuyển qua Google Keep tại đây..."></textarea>
-        </div>
+          <div class="paste-box-container hidden" id="pasteContainer">
+            <input type="text" id="pasteFileName" class="form-input" placeholder="Virtual file name (e.g. document.txt)" value="snippet.txt">
+            <textarea id="pasteTextInput" class="form-textarea" placeholder="Paste large text content here to transfer across Google Keep..."></textarea>
+          </div>
 
-        <!-- File Inspection Card -->
-        <div class="file-card hidden" id="fileCard">
-          <div class="file-card-header">
-            <span class="file-icon">📄</span>
-            <div class="file-details">
-              <span class="file-name" id="fileNameDisplay">file.txt</span>
-              <span class="file-meta" id="fileMetaDisplay">0 KB • 0 ký tự</span>
+          <!-- File Inspection Card -->
+          <div class="file-card hidden" id="fileCard">
+            <div class="file-card-header">
+              <span class="file-icon">📄</span>
+              <div class="file-details">
+                <span class="file-name" id="fileNameDisplay">file.txt</span>
+                <span class="file-meta" id="fileMetaDisplay">0 KB • 0 characters</span>
+              </div>
+              <button class="btn-icon" id="clearFileBtn" title="Clear selection">✕</button>
             </div>
-            <button class="btn-icon" id="clearFileBtn" title="Xóa chọn lại">✕</button>
+            <div class="chunk-summary-badge" id="chunkSummaryBadge">
+              Will split into <strong id="chunkCountDisplay">0</strong> notes (~<span id="chunkSizeDisplay">10,000</span> chars each)
+            </div>
+            <div class="config-note-toggle-row">
+              <label class="checkbox-label">
+                <input type="checkbox" id="createConfigNoteCheckbox" checked>
+                <span>Create <strong>Master Config Note</strong> (Stores file manifest & chunk map)</span>
+              </label>
+            </div>
+            <div class="config-note-toggle-row">
+              <label class="checkbox-label" title="Closes this popup when transfer starts so Keep has full focus to save notes immediately">
+                <input type="checkbox" id="autoClosePopupCheckbox" checked>
+                <span><strong>Auto-close popup</strong> on start (Monitor via on-screen widget on Keep)</span>
+              </label>
+            </div>
           </div>
-          <div class="chunk-summary-badge" id="chunkSummaryBadge">
-            Dự kiến tách thành <strong id="chunkCountDisplay">0</strong> ghi chú (mỗi phần ~<span id="chunkSizeDisplay">10,000</span> ký tự)
-          </div>
-        </div>
 
-        <!-- Upload Progress & Status -->
-        <div class="progress-box hidden" id="uploadProgressBox">
-          <div class="progress-info">
-            <span class="progress-label" id="progressStatusLabel">Đang chuẩn bị...</span>
-            <span class="progress-percent" id="progressPercentLabel">0%</span>
+          <!-- Upload Progress & Status -->
+          <div class="progress-box hidden" id="uploadProgressBox">
+            <div class="progress-info">
+              <span class="progress-label" id="progressStatusLabel">Preparing transfer...</span>
+              <span class="progress-percent" id="progressPercentLabel">0%</span>
+            </div>
+            <div class="progress-bar-track">
+              <div class="progress-bar-fill" id="progressBarFill" style="width: 0%"></div>
+            </div>
+            <div class="progress-counters" id="progressCounters">
+              <span>Created: <strong id="currentChunkCount">0</strong> / <strong id="totalChunkCount">0</strong> notes</span>
+              <span class="char-verify-status" id="charVerifyStatus">✓ Integrity Checked</span>
+            </div>
           </div>
-          <div class="progress-bar-track">
-            <div class="progress-bar-fill" id="progressBarFill" style="width: 0%"></div>
-          </div>
-          <div class="progress-counters" id="progressCounters">
-            Đã tạo: <span id="currentChunkCount">0</span> / <span id="totalChunkCount">0</span> ghi chú
-          </div>
-        </div>
 
-        <!-- Live Log Console -->
-        <div class="log-console hidden" id="logConsole">
-          <div class="log-header">
-            <span>Nhật ký hoạt động</span>
-            <button class="btn-clear-log" id="clearLogBtn">Xóa</button>
+          <!-- Activity Log Console -->
+          <div class="log-console hidden" id="logConsole">
+            <div class="log-header">
+              <span>Live Activity Log</span>
+              <button class="btn-clear-log" id="clearLogBtn">Clear</button>
+            </div>
+            <div class="log-entries" id="logEntries"></div>
           </div>
-          <div class="log-entries" id="logEntries"></div>
-        </div>
 
-        <!-- Action Buttons -->
-        <div class="action-bar">
-          <button class="btn btn-primary btn-block btn-lg" id="startUploadBtn" disabled>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            Tách file & Tải lên Google Keep
-          </button>
-          <button class="btn btn-danger btn-block btn-lg hidden" id="cancelUploadBtn">
-            🛑 Hủy bỏ tải lên
-          </button>
+          <!-- Action Buttons -->
+          <div class="action-bar" id="uploadActionBar">
+            <button class="btn btn-primary btn-block btn-lg" id="startUploadBtn" disabled>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Split File & Upload to Google Keep
+            </button>
+            
+            <div class="transfer-control-group hidden" id="transferControlGroup">
+              <button class="btn btn-secondary" id="pauseUploadBtn">
+                ⏸ Pause
+              </button>
+              <button class="btn btn-primary hidden" id="resumeUploadBtn">
+                ▶ Resume
+              </button>
+            <button class="btn btn-outline-primary" id="focusKeepTabBtn" title="Switch focus to Keep tab and close popup">
+              👁 View in Keep
+            </button>
+            <button class="btn btn-danger" id="cancelUploadBtn">
+              🛑 Cancel
+            </button>
+          </div>
         </div>
       </section>
 
-      <!-- TAB 2: DOWNLOAD & REASSEMBLY -->
+      <!-- TAB 2: REASSEMBLE & DOWNLOAD -->
       <section class="tab-pane" id="downloadTab">
-        <!-- Scan Control Bar -->
+        <!-- Scan Controls -->
         <div class="scan-bar">
           <div class="scan-btn-group">
-            <button class="btn btn-secondary" id="quickScanBtn" title="Quét các thẻ ghi chú đang hiển thị trên màn hình Keep">
-              ⚡ Quét nhanh
+            <button class="btn btn-secondary" id="quickScanBtn" title="Scan currently visible note cards in Keep">
+              ⚡ Quick Scan
             </button>
-            <button class="btn btn-primary" id="deepScanBtn" title="Tự động cuộn trang Keep để lấy 100% tất cả ghi chú không sót">
-              🔍 Quét toàn diện
+            <button class="btn btn-primary" id="deepScanBtn" title="Auto-scroll entire Keep page to load all notes without omission">
+              🔍 Deep Scan (All Notes)
             </button>
           </div>
           <div class="search-filter-box">
-            <input type="text" id="scanFilterInput" class="form-input form-input-sm" placeholder="Tìm kiếm file theo tên hoặc ID...">
+            <input type="text" id="scanFilterInput" class="form-input form-input-sm" placeholder="Filter files by name or ID...">
           </div>
         </div>
 
         <!-- Scan Status Indicator -->
         <div class="scan-status-alert hidden" id="scanStatusAlert">
           <div class="spinner"></div>
-          <span id="scanStatusMsg">Đang quét ghi chú trên Google Keep...</span>
-          <button class="btn btn-xs btn-outline-danger" id="cancelScanBtn">Hủy</button>
+          <span id="scanStatusMsg">Scanning notes on Google Keep...</span>
+          <button class="btn btn-xs btn-outline-danger" id="cancelScanBtn">Stop</button>
         </div>
 
-        <!-- Detected Files Container -->
+        <!-- Detected Files Section -->
         <div class="detected-files-section">
           <div class="section-title-row">
-            <h3>Các file phát hiện được (<span id="detectedFilesCount">0</span>)</h3>
-            <button class="btn-text-sm" id="refreshFilesBtn">Làm mới</button>
+            <h3>Detected Files (<span id="detectedFilesCount">0</span>)</h3>
+            <button class="btn-text-sm" id="refreshFilesBtn">Refresh</button>
           </div>
 
           <div class="files-empty-state" id="filesEmptyState">
             <div class="empty-icon">📁</div>
-            <p>Chưa có file nào được quét.</p>
-            <span class="empty-hint">Bấm <strong>"Quét nhanh"</strong> hoặc <strong>"Quét toàn diện"</strong> để phát hiện các phần ghi chú trên Google Keep.</span>
+            <p>No transferred files detected yet.</p>
+            <span class="empty-hint">Click <strong>"Quick Scan"</strong> or <strong>"Deep Scan"</strong> above to detect parts and config notes from Google Keep.</span>
           </div>
 
           <div class="detected-file-list" id="detectedFileList">
-            <!-- Dynamic File Cards will be rendered here -->
+            <!-- Dynamically populated file bundle cards -->
           </div>
         </div>
       </section>
@@ -192,30 +231,30 @@
           <div class="selection-actions">
             <label class="checkbox-label">
               <input type="checkbox" id="selectAllNotesCheckbox">
-              <span>Chọn tất cả (<span id="selectedNotesCount">0</span>/<span id="totalScannedNotes">0</span>)</span>
+              <span>Select All (<span id="selectedNotesCount">0</span>/<span id="totalScannedNotes">0</span>)</span>
             </label>
           </div>
           <div class="merge-options">
             <select id="mergeSeparatorSelect" class="form-select form-select-sm">
-              <option value="none">Nối liền (Không dấu cách)</option>
-              <option value="newline" selected>Xuống 1 dòng (\n)</option>
-              <option value="double_newline">Xuống 2 dòng (\n\n)</option>
-              <option value="divider">Dấu phân cách (---)</option>
+              <option value="none">No separator (Direct)</option>
+              <option value="newline" selected>Single newline (\n)</option>
+              <option value="double_newline">Double newline (\n\n)</option>
+              <option value="divider">Divider line (---)</option>
             </select>
           </div>
         </div>
 
-        <!-- Note List -->
+        <!-- Notes List -->
         <div class="notes-manual-list" id="notesManualList">
-          <div class="empty-manual-msg">Hãy quét ghi chú ở tab "Ghép & Tải xuống" trước để nạp danh sách vào đây.</div>
+          <div class="empty-manual-msg">Scan notes in the "Reassemble & Download" tab first to populate this list.</div>
         </div>
 
         <div class="action-bar-grid">
           <button class="btn btn-primary" id="mergeSelectedBtn" disabled>
-            📥 Gộp & Tải file (.txt)
+            📥 Merge Selected & Download (.txt)
           </button>
           <button class="btn btn-secondary" id="exportAllJsonBtn" disabled>
-            📋 Xuất toàn bộ JSON
+            📋 Export All as JSON
           </button>
         </div>
       </section>
@@ -225,63 +264,78 @@
         <div class="settings-form">
           <div class="form-group">
             <label for="settingChunkSize" class="form-label">
-              Kích thước mỗi phần (Chunk Size)
-              <span class="label-hint">Giới hạn ký tự trong 1 ghi chú</span>
+              Chunk Size (Characters per note)
+              <span class="label-hint">Safe limit to prevent Keep rejection</span>
             </label>
             <select id="settingChunkSize" class="form-select">
-              <option value="5000">5,000 ký tự (Rất an toàn)</option>
-              <option value="10000" selected>10,000 ký tự (Mặc định khuyên dùng)</option>
-              <option value="15000">15,000 ký tự (Tối ưu số ghi chú)</option>
-              <option value="18000">18,000 ký tự (Gần giới hạn Google Keep)</option>
+              <option value="5000">5,000 characters (Ultra Safe)</option>
+              <option value="10000" selected>10,000 characters (Recommended Default)</option>
+              <option value="15000">15,000 characters (Optimized)</option>
+              <option value="18000">18,000 characters (Near Google Keep limit)</option>
             </select>
           </div>
 
           <div class="form-group">
             <label for="settingDelayMs" class="form-label">
-              Độ trễ giữa mỗi ghi chú (Delay)
-              <span class="label-hint">Tránh lỗi giao diện hoặc Google Keep giới hạn</span>
+              Delay Between Notes
+              <span class="label-hint">Allows Keep to autosave and sync</span>
             </label>
             <select id="settingDelayMs" class="form-select">
-              <option value="400">400 ms (Nhanh)</option>
-              <option value="800" selected>800 ms (Cân bằng khuyên dùng)</option>
-              <option value="1200">1,200 ms (Chậm & Chắc chắn)</option>
-              <option value="2000">2,000 ms (Khi mạng chậm)</option>
+              <option value="400">400 ms (Fast)</option>
+              <option value="800" selected>800 ms (Recommended Balanced)</option>
+              <option value="1200">1,200 ms (Slow & Thorough)</option>
+              <option value="2000">2,000 ms (For slow network connections)</option>
             </select>
           </div>
 
           <div class="form-group">
             <label for="settingPrefix" class="form-label">
-              Tiền tố tiêu đề (Prefix Tag)
-              <span class="label-hint">Nhận diện file chuyển qua Keep</span>
+              Chunk Title Prefix Tag
+              <span class="label-hint">Identifies transferred parts</span>
             </label>
-            <input type="text" id="settingPrefix" class="form-input" value="[KeepTransfer]">
+            <input type="text" id="settingPrefix" class="form-input" value="[KT]">
+          </div>
+
+          <div class="form-group">
+            <label for="settingConfigPrefix" class="form-label">
+              Config Note Prefix Tag
+              <span class="label-hint">Master note with transfer metadata</span>
+            </label>
+            <input type="text" id="settingConfigPrefix" class="form-input" value="[KT-CONFIG]">
           </div>
 
           <div class="form-group">
             <label for="settingScrollDelay" class="form-label">
-              Độ trễ cuộn trang khi quét (Scroll Delay)
-              <span class="label-hint">Thời gian chờ Google Keep tải thêm thẻ</span>
+              Scroll Delay on Scan
+              <span class="label-hint">Wait time for Keep to load new cards</span>
             </label>
             <select id="settingScrollDelay" class="form-select">
               <option value="800">800 ms</option>
-              <option value="1200" selected>1,200 ms (Mặc định)</option>
+              <option value="1200" selected>1,200 ms (Default)</option>
               <option value="1800">1,800 ms</option>
             </select>
           </div>
 
+          <div class="form-group">
+            <label class="checkbox-label" style="margin-top: 4px;">
+              <input type="checkbox" id="settingAutoClose" checked>
+              <span><strong>Auto-close popup when upload begins</strong> (Keeps transfer running via on-screen widget)</span>
+            </label>
+          </div>
+
           <button class="btn btn-primary btn-block" id="saveSettingsBtn">
-            💾 Lưu cấu hình
+            💾 Save Settings
           </button>
         </div>
       </section>
 
     </main>
 
-    <!-- Content Preview Modal -->
+    <!-- Preview Modal -->
     <div class="modal-overlay hidden" id="previewModal">
       <div class="modal-content">
         <div class="modal-header">
-          <h3 class="modal-title" id="previewModalTitle">Xem trước nội dung</h3>
+          <h3 class="modal-title" id="previewModalTitle">Content Preview</h3>
           <button class="btn-close-modal" id="closePreviewBtn">✕</button>
         </div>
         <div class="modal-body">
@@ -289,7 +343,7 @@
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" id="copyPreviewBtn">📋 Copy</button>
-          <button class="btn btn-primary" id="downloadPreviewBtn">📥 Tải xuống</button>
+          <button class="btn btn-primary" id="downloadPreviewBtn">📥 Download</button>
         </div>
       </div>
     </div>
