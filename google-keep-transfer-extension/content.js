@@ -62,7 +62,7 @@ function initKeepDomMonitor() {
   console.log("%c[Keep DOM Monitor] 🚀 Started listening to Google Keep DOM mutations & interactions...", "color: #3b82f6; font-weight: bold; font-size: 13px;");
 
   function getElSummary(el) {
-    if (!el || !el.tagName) return "null";
+    if (!el || !el.tagName || typeof el.getAttribute !== "function") return "null";
     const tag = el.tagName.toLowerCase();
     const id = el.id ? `#${el.id}` : "";
     const classes = el.className && typeof el.className === "string" ? `.${el.className.trim().split(/\s+/).slice(0, 3).join(".")}` : "";
@@ -75,13 +75,26 @@ function initKeepDomMonitor() {
 
   // 1. Capture user & script click interactions
   window.addEventListener("click", (e) => {
-    const t = e.target;
+    let t = e.target;
     if (!t) return;
-    const isClose = (t.innerText || t.getAttribute("aria-label") || "").trim().toLowerCase() === "close" ||
-                    (t.innerText || t.getAttribute("aria-label") || "").trim().toLowerCase() === "đóng" ||
+    if (t.nodeType !== 1) {
+      t = t.parentElement;
+    }
+    if (!t || typeof t.getAttribute !== "function") return;
+
+    const ariaLabel = (t.getAttribute("aria-label") || "").trim().toLowerCase();
+    const text = (t.innerText || t.textContent || "").trim().toLowerCase();
+    const isClose = text === "close" ||
+                    ariaLabel === "close" ||
+                    text === "đóng" ||
+                    ariaLabel === "đóng" ||
                     (t.classList && t.classList.contains("IZ65Hb-TvD9Pc"));
-    const isCard = t.closest && t.closest(".IZ65Hb-n0tgWb");
-    const isCreator = !isCard && (t.closest && (t.closest(".h1U9Be-xhiy4, .IZ65Hb-TBnied, .IZ65Hb-s2gQvd") || (t.innerText || "").includes("Take a note") || (t.innerText || "").includes("Ghi chú")));
+    const isCard = typeof t.closest === "function" && t.closest(".IZ65Hb-n0tgWb");
+    const isCreator = !isCard && (
+      (typeof t.closest === "function" && t.closest(".h1U9Be-xhiy4, .IZ65Hb-TBnied, .IZ65Hb-s2gQvd")) ||
+      text.includes("take a note") ||
+      text.includes("ghi chú")
+    );
 
     if (isClose) {
       console.log("%c[DOM Click] 🚪 CLOSE BUTTON CLICKED: " + getElSummary(t), "color: #ef4444; font-weight: bold;");
@@ -94,13 +107,18 @@ function initKeepDomMonitor() {
 
   // 2. Capture inputs (title & body typing)
   window.addEventListener("input", (e) => {
-    const t = e.target;
+    let t = e.target;
     if (!t) return;
-    const parentCard = t.closest && t.closest(".IZ65Hb-n0tgWb");
+    if (t.nodeType !== 1) {
+      t = t.parentElement;
+    }
+    if (!t || typeof t.getAttribute !== "function") return;
+
+    const parentCard = typeof t.closest === "function" && t.closest(".IZ65Hb-n0tgWb");
     if (parentCard) return;
 
     const isTitle = t.classList && (t.classList.contains("IZ65Hb-YPqjbf") || t.classList.contains("r4nke-YPqjbf"));
-    const isContent = t.getAttribute && (t.getAttribute("contenteditable") === "true");
+    const isContent = t.getAttribute("contenteditable") === "true";
 
     if (isTitle) {
       console.log("%c[DOM Input] 🏷️ CREATOR TITLE: \"" + (t.innerText || t.textContent || "").trim() + "\"", "color: #f59e0b; font-weight: bold;");
@@ -251,8 +269,8 @@ function getNoteCreatorElements() {
 
   // Close button scoped to creator container
   const closeBtn = Array.from(container.querySelectorAll("div[role='button'], button")).find((b) => {
-    const text = (b.innerText || b.getAttribute("aria-label") || "").trim().toLowerCase();
-    return text === "close" || text === "đóng" || b.classList.contains("IZ65Hb-TvD9Pc");
+    const text = (b.innerText || (typeof b.getAttribute === "function" ? b.getAttribute("aria-label") : "") || "").trim().toLowerCase();
+    return text === "close" || text === "đóng" || (b.classList && b.classList.contains("IZ65Hb-TvD9Pc"));
   });
 
   // Evaluate expanded state reliably:
@@ -386,9 +404,9 @@ async function saveAndCloseNote(readyElements) {
   const closeBtn = (currentEls && currentEls.closeBtn) ||
                    (container && container.querySelector(".IZ65Hb-TvD9Pc")) ||
                    Array.from(document.querySelectorAll(".IZ65Hb-TvD9Pc, div[role='button'], button")).find((b) => {
-                     if (b.closest(".IZ65Hb-n0tgWb, [role='dialog']")) return false;
-                     const text = (b.innerText || b.getAttribute("aria-label") || "").trim().toLowerCase();
-                     return b.classList.contains("IZ65Hb-TvD9Pc") || text === "close" || text === "đóng";
+                     if (b.closest && b.closest(".IZ65Hb-n0tgWb, [role='dialog']")) return false;
+                     const text = (b.innerText || (typeof b.getAttribute === "function" ? b.getAttribute("aria-label") : "") || "").trim().toLowerCase();
+                     return (b.classList && b.classList.contains("IZ65Hb-TvD9Pc")) || text === "close" || text === "đóng";
                    });
 
   if (closeBtn) {
