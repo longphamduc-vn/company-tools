@@ -44,7 +44,7 @@
    - **Multi-Select & Bulk YAML Export**: Tick individual API cards or table rows with checkboxes `[✓]` to export custom subsets with their complete upstream dependency graph to YAML/JSON.
    - **Targeted Multi-Format Exporters**:
      - **📦 Full Chain JSON**: Complete raw XML, parsed datasets, and lineage metadata graph for the chain.
-     - **✨ Compact YAML**: Human-readable structure with direct lineage mappings for docs/LLMs.
+     - **✨ Compact YAML**: Clean API specifications (index, method, URL, status, request and response parameters & datasets) for documentation and LLMs.
      - **📊 CSV Matrix**: Dependencies matrix scoped exclusively to this chain.
      - **📑 CSV Table Pack**: Summary, Payloads (with Data Origin), and Responses CSVs for this chain.
      - **One-Click Package**: Download complete bundle in one click.

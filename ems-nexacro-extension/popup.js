@@ -601,7 +601,7 @@
     }
     const chainResult = window.NexacroDependencyEngine.resolveDependencyChain(targets, computedLogs);
     handleExportChainYAML(chainResult);
-    showToast(`Exported ${targets.length} API(s) with ${chainResult.dependencyApis.length} dependencies to YAML`);
+    showToast(`Exported ${targets.length} API(s) (${chainResult.chainApis.length} total) to YAML`);
   }
 
   function exportSelectedToJson() {
@@ -1791,45 +1791,45 @@
     const params = parsed.parameters || {};
     const paramKeys = Object.keys(params);
     if (paramKeys.length > 0) {
-      out += '        params:\n';
+      out += '      params:\n';
       paramKeys.forEach((k) => {
         const val = typeof params[k] === 'object' && params[k] !== null ? params[k].value : params[k];
-        out += `          ${k}: ${formatYamlScalar(val)}\n`;
+        out += `        ${k}: ${formatYamlScalar(val)}\n`;
       });
     } else {
-      out += '        params: {}\n';
+      out += '      params: {}\n';
     }
 
     // 2. Datasets
     const datasets = parsed.datasets || {};
     const dsKeys = Object.keys(datasets);
     if (dsKeys.length > 0) {
-      out += '        datasets:\n';
+      out += '      datasets:\n';
       dsKeys.forEach((dsName) => {
         const ds = datasets[dsName];
         const colList = (ds.columns && ds.columns.length > 0)
           ? ds.columns.map((c) => (typeof c === 'object' && c !== null ? c.id : c))
           : (ds.rows && ds.rows.length > 0 ? Object.keys(ds.rows[0]) : []);
 
-        out += `          ${dsName}:\n`;
-        out += `            cols: [${colList.map(formatYamlScalar).join(', ')}]\n`;
-        out += `            count: ${(ds.rows || []).length}\n`;
+        out += `        ${dsName}:\n`;
+        out += `          cols: [${colList.map(formatYamlScalar).join(', ')}]\n`;
+        out += `          count: ${(ds.rows || []).length}\n`;
 
         if (ds.rows && ds.rows.length > 0) {
-          out += '            rows:\n';
+          out += '          rows:\n';
           ds.rows.forEach((row) => {
             const rowVals = colList.map((colId) => {
               const cellVal = row[colId];
               return formatYamlScalar(cellVal !== undefined ? cellVal : '');
             });
-            out += `              - [${rowVals.join(', ')}]\n`;
+            out += `            - [${rowVals.join(', ')}]\n`;
           });
         } else {
-          out += '            rows: []\n';
+          out += '          rows: []\n';
         }
       });
     } else {
-      out += '        datasets: {}\n';
+      out += '      datasets: {}\n';
     }
 
     return out;
@@ -1841,23 +1841,13 @@
       return;
     }
 
-    let yaml = '# ========================================================\n';
-    yaml += '# EMS Nexacro Interceptor & Dependency Engine - Compact YAML\n';
-    yaml += `# Exported: ${new Date().toISOString()}\n`;
-    yaml += `# Total Requests: ${computedLogs.length}\n`;
-    yaml += '# ========================================================\n\n';
-    yaml += 'meta:\n';
-    yaml += '  generator: "EMS Nexacro Interceptor & Dependency Engine"\n';
-    yaml += `  exportedAt: ${formatYamlScalar(new Date().toISOString())}\n`;
-    yaml += `  totalRequests: ${computedLogs.length}\n\n`;
-    yaml += 'apis:\n';
+    let yaml = 'apis:\n';
 
     computedLogs.forEach((item) => {
       yaml += `  - index: ${item.index}\n`;
       yaml += `    method: ${formatYamlScalar(item.method)}\n`;
       yaml += `    url: ${formatYamlScalar(item.url)}\n`;
       yaml += `    status: ${item.status}\n`;
-      yaml += `    durationMs: ${item.durationMs || 0}\n`;
 
       // Request
       yaml += '    request:';
@@ -1866,25 +1856,6 @@
       // Response
       yaml += '    response:';
       yaml += formatYamlSection(item.parsedResponse);
-
-      // Dependencies / Lineage
-      const deps = item.dependencies || [];
-      if (deps.length > 0) {
-        yaml += '    dependencies:\n';
-        deps.forEach((d) => {
-          const sourceApi = computedLogs.find((a) => a.id === d.sourceApiId);
-          const fromIdx = sourceApi ? sourceApi.index : (d.sourceApiIndex !== undefined ? d.sourceApiIndex : d.sourceApiId);
-          yaml += `      - target: ${formatYamlScalar(d.targetLocation || d.targetKey)}\n`;
-          yaml += `        fromApi: ${formatYamlScalar(fromIdx)}\n`;
-          yaml += `        source: ${formatYamlScalar(d.sourceXPath || d.sourceKey)}\n`;
-          if (d.targetValue !== undefined && d.targetValue !== '') {
-            yaml += `        value: ${formatYamlScalar(d.targetValue)}\n`;
-          }
-        });
-      } else {
-        yaml += '    dependencies: []\n';
-      }
-      yaml += '\n';
     });
 
     downloadFile(yaml, `nexacro_api_chain_${Date.now()}.yaml`, 'text/yaml;charset=utf-8;');
@@ -2163,71 +2134,20 @@
       return;
     }
 
-    const targetSet = new Set(chainResult.targetApis.map((t) => t.index));
     const targetIdx = chainResult.targetApis.map((a) => a.index).join('_') || 'selected';
 
-    let yaml = '# ========================================================\n';
-    yaml += '# EMS Nexacro Interceptor - API & Dependency Chain Export\n';
-    yaml += `# Target API(s): ${chainResult.targetApis.map((t) => `API #${t.index} [${t.method}] ${t.url}`).join(', ')}\n`;
-    yaml += `# Upstream Dependencies Count: ${chainResult.dependencyApis.length}\n`;
-    yaml += `# Total APIs in Chain: ${chainResult.chainApis.length}\n`;
-    yaml += `# Exported: ${new Date().toISOString()}\n`;
-    yaml += '# ========================================================\n\n';
-
-    yaml += 'meta:\n';
-    yaml += '  generator: "EMS Nexacro XML Interceptor & Dependency Engine"\n';
-    yaml += '  exportType: "API_WITH_DEPENDENCIES_CHAIN"\n';
-    yaml += `  exportedAt: ${formatYamlScalar(new Date().toISOString())}\n`;
-    yaml += `  totalRequestsInChain: ${chainResult.chainApis.length}\n`;
-    yaml += `  targetApis: [${chainResult.targetApis.map((t) => t.index).join(', ')}]\n`;
-    yaml += `  upstreamDependencies: [${chainResult.dependencyApis.map((d) => d.index).join(', ')}]\n`;
-    const chainSequenceStr = chainResult.chainApis.map((a) => `API #${a.index}`).join(' ➔ ');
-    yaml += `  chainFlow: ${formatYamlScalar(chainSequenceStr)}\n\n`;
-
-    if (chainResult.edges && chainResult.edges.length > 0) {
-      yaml += 'lineageEdges:\n';
-      chainResult.edges.forEach((edge) => {
-        yaml += `  - targetApi: ${edge.targetIndex}\n`;
-        yaml += `    targetField: ${formatYamlScalar(edge.targetKey)}\n`;
-        yaml += `    targetXPath: ${formatYamlScalar(edge.targetLocation)}\n`;
-        yaml += `    sourceApi: ${edge.sourceIndex}\n`;
-        yaml += `    sourceField: ${formatYamlScalar(edge.sourceKey)}\n`;
-        yaml += `    sourceXPath: ${formatYamlScalar(edge.sourceXPath)}\n`;
-        yaml += `    value: ${formatYamlScalar(edge.targetValue)}\n`;
-      });
-      yaml += '\n';
-    }
-
-    yaml += 'apis:\n';
+    let yaml = 'apis:\n';
     chainResult.chainApis.forEach((item) => {
       yaml += `  - index: ${item.index}\n`;
-      yaml += `    role: ${targetSet.has(item.index) ? 'target' : 'upstream_dependency'}\n`;
       yaml += `    method: ${formatYamlScalar(item.method)}\n`;
       yaml += `    url: ${formatYamlScalar(item.url)}\n`;
       yaml += `    status: ${item.status}\n`;
-      yaml += `    durationMs: ${item.durationMs || 0}\n`;
 
       yaml += '    request:';
       yaml += formatYamlSection(item.parsedRequest);
 
       yaml += '    response:';
       yaml += formatYamlSection(item.parsedResponse);
-
-      const deps = item.dependencies || [];
-      if (deps.length > 0) {
-        yaml += '    dependencies:\n';
-        deps.forEach((d) => {
-          yaml += `      - target: ${formatYamlScalar(d.targetLocation || d.targetKey)}\n`;
-          yaml += `        fromApi: ${formatYamlScalar(d.sourceApiNo || d.sourceApiId)}\n`;
-          yaml += `        source: ${formatYamlScalar(d.sourceXPath || d.sourceKey)}\n`;
-          if (d.targetValue !== undefined && d.targetValue !== '') {
-            yaml += `        value: ${formatYamlScalar(d.targetValue)}\n`;
-          }
-        });
-      } else {
-        yaml += '    dependencies: []\n';
-      }
-      yaml += '\n';
     });
 
     downloadFile(yaml, `nexacro_api_${targetIdx}_chain_${Date.now()}.yaml`, 'text/yaml;charset=utf-8;');
