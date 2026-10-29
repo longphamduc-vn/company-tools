@@ -10,6 +10,7 @@ Kho lưu trữ tập trung (Monorepo) các công cụ, tiện ích phần mềm 
 | :--- | :--- | :--- | :--- |
 | **SCADA-TraceLog** | [`scada-tracelog/`](./scada-tracelog) | Giám sát & tạo nhật ký thay đổi thông số máy SCADA (Change Log), bẫy lỗi mất dữ liệu do giới hạn 256 cột của Excel .xls cũ. | Python, Tkinter/TTK, Pandas |
 | **EMS Nexacro Extension** | [`ems-nexacro-extension/`](./ems-nexacro-extension) | Tiện ích mở rộng trình duyệt (Browser Extension) hỗ trợ tự động hóa và tối ưu giao diện EMS Nexacro. | JavaScript, Chrome Extensions API |
+| **Image Batch Translator** | [`image-batch-translator/`](./image-batch-translator) | Nhận diện chữ (OCR), dịch thuật hàng loạt theo vùng chọn, xóa chữ cũ với màu nền median, vẽ chữ dịch và tự động đổi tên file. | Python, Tkinter, Pillow, Pytesseract, Deep-Translator |
 
 ---
 
@@ -33,6 +34,20 @@ Mỗi dự án con được tổ chức độc lập trong thư mục riêng kè
 - Mở trình duyệt Chrome / Edge và truy cập `chrome://extensions/`.
 - Bật **Developer mode** (Chế độ dành cho nhà phát triển).
 - Chọn **Load unpacked** (Tải tiện ích đã giải nén) và trỏ tới thư mục `ems-nexacro-extension/`.
+
+### 3. Image Batch Translator (Dịch thuật ảnh & Đổi tên hàng loạt)
+- Di chuyển vào thư mục:
+  ```bash
+  cd image-batch-translator
+  ```
+- Cài đặt thư viện:
+  ```bash
+  pip install -r requirements.txt
+  ```
+- Khởi chạy ứng dụng:
+  ```bash
+  python image_batch_translator.py
+  ```
 
 ---
 
