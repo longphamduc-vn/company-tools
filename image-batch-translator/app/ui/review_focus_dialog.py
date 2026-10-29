@@ -2,8 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Review Focus Dialog (Human-in-the-Loop Quick Verification & ROI Focus).
-Combines the exact original UI design, shortcuts, and layout with
-instant, zero-lag auto-focus into the exact text bounding box position.
+100% English UI, keyboard-first navigation, instant zero-lag ROI focus.
 """
 
 import os
@@ -14,7 +13,6 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 
 from ..utils import compute_filename
-from ..extraction import auto_detect_bbox_for_image
 
 
 class ReviewFocusDialog:
@@ -22,14 +20,14 @@ class ReviewFocusDialog:
     Dedicated Human-in-the-Loop Review & Focus Dialog.
     Enables rapid manual verification and correction of OCR extraction outputs
     with keyboard shortcuts (Enter = Save & Next, Ctrl+Left = Prev, Esc = Close)
-    and instant ROI Focus into exact character coordinates.
+    and instant ROI Focus into exact character coordinates with zero lag.
     """
 
     def __init__(self, parent: tk.Tk, app, target_img_idx: int = None, target_rule_idx: int = None):
         self.parent = parent
         self.app = app
         self.win = tk.Toplevel(parent)
-        self.win.title("🎯 Review Focus - Soát Lỗi & Sửa Kết Quả Thủ Công")
+        self.win.title("🎯 Review Focus - Inspection & Manual Correction")
         self.win.geometry("1180x760")
         self.win.minsize(920, 650)
         self.win.transient(parent)
@@ -55,7 +53,7 @@ class ReviewFocusDialog:
         self.focus_mode_var = tk.BooleanVar(value=True)  # Auto-focus ROI enabled by default
         self.zoom_factor = 1.0
 
-        # Prevent canvas configure redraw lag
+        # Debounce canvas resize to prevent GUI lag
         self._last_cw = 0
         self._last_ch = 0
 
@@ -66,6 +64,7 @@ class ReviewFocusDialog:
         self._build_ui()
         self._load_current_image_data()
         self._bind_keys()
+        self.win.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _bind_keys(self):
         self.win.bind("<Return>", lambda e: self.on_save_and_next())
@@ -73,23 +72,23 @@ class ReviewFocusDialog:
         self.win.bind("<Alt-Left>", lambda e: self.on_prev())
         self.win.bind("<Control-Right>", lambda e: self.on_save_and_next())
         self.win.bind("<Alt-Right>", lambda e: self.on_save_and_next())
-        self.win.bind("<Escape>", lambda e: self.win.destroy())
+        self.win.bind("<Escape>", lambda e: self.on_close())
 
     def _build_ui(self):
-        # Top Header Bar (100% original layout)
+        # Top Header Bar (100% English UI)
         top_bar = ttk.Frame(self.win, padding="10 8")
         top_bar.pack(side=tk.TOP, fill=tk.X)
 
-        self.btn_prev = ttk.Button(top_bar, text="◀ Trước (Ctrl+←)", command=self.on_prev)
+        self.btn_prev = ttk.Button(top_bar, text="◀ Prev (Ctrl+←)", command=self.on_prev)
         self.btn_prev.pack(side=tk.LEFT, padx=3)
 
         self.lbl_progress = ttk.Label(
-            top_bar, text="Ảnh 1 / 1", font=("Segoe UI", 12, "bold"), foreground="#1e293b"
+            top_bar, text="Image 1 / 1", font=("Segoe UI", 12, "bold"), foreground="#1e293b"
         )
         self.lbl_progress.pack(side=tk.LEFT, padx=12)
 
         self.btn_next = ttk.Button(
-            top_bar, text="Tiếp theo ▶ (Enter / Ctrl+→)", style="Primary.TButton", command=self.on_save_and_next
+            top_bar, text="Next ▶ (Enter / Ctrl+→)", style="Primary.TButton", command=self.on_save_and_next
         )
         self.btn_next.pack(side=tk.LEFT, padx=3)
 
@@ -97,35 +96,35 @@ class ReviewFocusDialog:
 
         chk_filter = ttk.Checkbutton(
             top_bar,
-            text="⚠️ Chỉ duyệt ảnh có lỗi / rỗng (Filter Suspect/Empty)",
+            text="⚠️ Show errors & empty only (Filter Suspect/Empty)",
             variable=self.filter_issues_only_var,
             command=self._on_filter_toggled,
         )
         chk_filter.pack(side=tk.LEFT, padx=5)
 
-        ttk.Button(top_bar, text="Đóng (Esc)", command=self.win.destroy).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(top_bar, text="Close (Esc)", command=self.on_close).pack(side=tk.RIGHT, padx=5)
 
         # Paned Window (Left: Image Preview & Focus, Right: Editable Fields & Live Output)
         paned = ttk.PanedWindow(self.win, orient=tk.HORIZONTAL)
         paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
 
         # Left: Image Viewer with Focus Controls
-        left_box = ttk.LabelFrame(paned, text="Hình Ảnh Kiểm Tra (Visual Check)", padding=6)
+        left_box = ttk.LabelFrame(paned, text="Visual Inspection & Focus (Visual Check)", padding=6)
         paned.add(left_box, weight=6)
 
-        # Focus Toolbar
+        # Focus Viewport Toolbar
         f_tool = ttk.Frame(left_box, padding="2 2")
         f_tool.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
 
         chk_focus = ttk.Checkbutton(
             f_tool,
-            text="🎯 Focus Vị Trí",
+            text="🎯 Focus Position",
             variable=self.focus_mode_var,
             command=self._draw_image_on_canvas,
         )
         chk_focus.pack(side=tk.LEFT, padx=2)
 
-        ttk.Button(f_tool, text="🖼️ Toàn Cảnh", command=self._show_full_view).pack(side=tk.LEFT, padx=2)
+        ttk.Button(f_tool, text="🖼️ Full Image", command=self._show_full_view).pack(side=tk.LEFT, padx=2)
         ttk.Separator(f_tool, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=6)
 
         ttk.Button(f_tool, text="🔍 +", width=3, command=self._zoom_in).pack(side=tk.LEFT, padx=1)
@@ -142,8 +141,8 @@ class ReviewFocusDialog:
         self.canvas_img.pack(fill=tk.BOTH, expand=True)
         self.canvas_img.bind("<Configure>", self._on_canvas_configure)
 
-        # Right: Fields & Filename (100% original layout)
-        right_box = ttk.LabelFrame(paned, text="Trích Xuất & Sửa Ký Tự (Keyboard-First)", padding=10)
+        # Right: Fields & Filename (100% English UI)
+        right_box = ttk.LabelFrame(paned, text="Extracted Characters & Quick Edit (Keyboard-First)", padding=10)
         paned.add(right_box, weight=5)
 
         self.lbl_filename = ttk.Label(
@@ -156,7 +155,7 @@ class ReviewFocusDialog:
         self.fields_container.pack(fill=tk.BOTH, expand=True)
 
         # Live Filename Preview Box
-        preview_box = ttk.LabelFrame(right_box, text="🏷️ Xem Trước Tên File Mới Khi Đổi (Live Preview)", padding=8)
+        preview_box = ttk.LabelFrame(right_box, text="🏷️ New Filename Live Preview", padding=8)
         preview_box.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 0))
 
         self.lbl_new_name_preview = ttk.Label(
@@ -166,7 +165,7 @@ class ReviewFocusDialog:
 
         tip_lbl = ttk.Label(
             right_box,
-            text="💡 Mẹo: Nhấn Enter để Lưu và chuyển ngay sang ảnh tiếp theo mà không cần dùng chuột!\nNhấp chuột hoặc Tab vào ô nhập để tự động Focus vào vị trí chữ trên ảnh.",
+            text="💡 Tip: Press Enter to Save and jump immediately to the next image!\nClick or Tab into an input field to auto-focus on text position.",
             font=("Segoe UI", 8, "italic"),
             foreground="#64748b",
             wraplength=420,
@@ -210,7 +209,7 @@ class ReviewFocusDialog:
         ch = max(100, self.canvas_img.winfo_height())
         iw, ih = self.current_pil_img.size
 
-        # Identify active row data
+        # Identify active row data (Instant in-memory lookup)
         active_row = None
         for row_item, _, _, _ in self.field_entries:
             if row_item.get("rule_idx") == self.active_rule_idx:
@@ -221,27 +220,9 @@ class ReviewFocusDialog:
 
         bbox = active_row.get("bbox") if active_row else None
 
-        # On-demand fallback: only detect if missing and user is inspecting this single image
-        if not bbox and active_row:
-            rule_ref = (
-                self.app.rules[self.active_rule_idx]
-                if self.active_rule_idx < len(self.app.rules)
-                else None
-            )
-            if rule_ref:
-                bbox = auto_detect_bbox_for_image(
-                    self.current_pil_img,
-                    rule_ref,
-                    active_row.get("ocr_text", ""),
-                    prep_mode=self.app.preprocess_mode_var.get(),
-                    upscale=self.app.upscale_2x_var.get(),
-                )
-                if bbox:
-                    active_row["bbox"] = bbox
-
         self.canvas_img.delete("all")
 
-        # CASE 1: FOCUS MODE (ROI Zoom & Center)
+        # CASE 1: FOCUS MODE (Instant ROI Zoom & Neon Frame from RAM)
         if self.focus_mode_var.get() and bbox:
             bx1, by1, bx2, by2 = bbox
             bw = max(1, bx2 - bx1)
@@ -287,8 +268,8 @@ class ReviewFocusDialog:
                     tb_x1, tb_y1, tb_x2, tb_y2, outline="#10b981", width=2
                 )
 
-                # Floating Badge
-                tag_text = f"🎯 {active_row.get('field', 'Vị trí')}: {active_row.get('ocr_text', '')}"
+                # Floating Badge above Box
+                tag_text = f"🎯 {active_row.get('field', 'Field')}: {active_row.get('ocr_text', '')}"
                 self.canvas_img.create_rectangle(
                     tb_x1, tb_y1 - 24, tb_x1 + len(tag_text) * 8 + 14, tb_y1 - 3,
                     fill="#0f172a", outline="#0284c7", width=1
@@ -304,7 +285,7 @@ class ReviewFocusDialog:
                 )
                 return
 
-        # CASE 2: FULL IMAGE VIEW
+        # CASE 2: FULL IMAGE VIEW (or when bbox is not available)
         base_scale = min(cw / max(1, iw), ch / max(1, ih)) * 0.96
         scale = base_scale * self.zoom_factor
         nw = max(1, int(iw * scale))
@@ -331,7 +312,10 @@ class ReviewFocusDialog:
                 width = 3 if is_active else 1
                 self.canvas_img.create_rectangle(rx1, ry1, rx2, ry2, outline=color, width=width)
 
-        self.lbl_focus_info.config(text="🖼️ Toàn Cảnh", foreground="#0284c7")
+        if not bbox and active_row:
+            self.lbl_focus_info.config(text="🖼️ Full View (No position coordinates)", foreground="#f59e0b")
+        else:
+            self.lbl_focus_info.config(text="🖼️ Full View", foreground="#0284c7")
 
     def _load_current_image_data(self):
         if not self.unique_image_indices:
@@ -341,8 +325,8 @@ class ReviewFocusDialog:
         orig_filename = self.app.image_files[img_idx]
 
         total = len(self.unique_image_indices)
-        self.lbl_progress.config(text=f"Ảnh {self.current_idx_pointer + 1} / {total}")
-        self.lbl_filename.config(text=f"Tệp: {orig_filename}")
+        self.lbl_progress.config(text=f"Image {self.current_idx_pointer + 1} / {total}")
+        self.lbl_filename.config(text=f"File: {orig_filename}")
 
         # 1. Load Image
         img_path = os.path.join(self.app.folder_path, orig_filename)
@@ -396,26 +380,27 @@ class ReviewFocusDialog:
             ent.bind("<FocusIn>", make_focus_cb(rule_idx))
 
             # Bind key release to update status & filename preview live
-            def make_edit_cb(entry, status, rule_ref):
+            def make_edit_cb(entry, status, rule_ref, row_ref):
                 def callback(event=None):
                     val = entry.get().strip()
+                    row_ref["ocr_text"] = val
                     if not val:
-                        status.config(text="⚠️ RỖNG", foreground="#dc2626")
+                        status.config(text="⚠️ EMPTY", foreground="#dc2626")
                     elif rule_ref and rule_ref.get("type") == "regex" and rule_ref.get("pattern"):
                         try:
                             if re.search(rule_ref["pattern"], val):
-                                status.config(text="✅ HỢP LỆ", foreground="#059669")
+                                status.config(text="✅ VALID", foreground="#059669")
                             else:
-                                status.config(text="⚠️ KHÁC KHUÔN MẪU", foreground="#d97706")
+                                status.config(text="⚠️ PATTERN MISMATCH", foreground="#d97706")
                         except Exception:
-                            status.config(text="✅ ĐÃ NHẬP", foreground="#059669")
+                            status.config(text="✅ ENTERED", foreground="#059669")
                     else:
-                        status.config(text="✅ ĐÃ CÓ", foreground="#059669")
+                        status.config(text="✅ PRESENT", foreground="#059669")
                     self._update_live_filename_preview()
 
                 return callback
 
-            cb = make_edit_cb(ent, status_lbl, rule)
+            cb = make_edit_cb(ent, status_lbl, rule, row_item)
             ent.bind("<KeyRelease>", cb)
             cb()
 
@@ -451,40 +436,51 @@ class ReviewFocusDialog:
 
         self.lbl_new_name_preview.config(text=new_full_name)
 
+        # Real-time synchronization to main window results table!
+        for row_item, ent, _, _ in self.field_entries:
+            row_item["ocr_text"] = ent.get().strip()
+        self.app._recalculate_filenames_for_image(orig_filename, img_idx)
+
+    def save_current_edits(self):
+        """Commits all currently displayed field edits to results_data and updates the main table."""
+        if not self.unique_image_indices or not self.field_entries:
+            return
+        img_idx = self.unique_image_indices[self.current_idx_pointer]
+        orig_filename = self.app.image_files[img_idx]
+        for row_item, ent, _, _ in self.field_entries:
+            row_item["ocr_text"] = ent.get().strip()
+        self.app._recalculate_filenames_for_image(orig_filename, img_idx)
+
+    def on_close(self):
+        """Saves current edits before closing dialog and refreshes results table."""
+        self.save_current_edits()
+        if hasattr(self.app, "refresh_results_tree"):
+            self.app.refresh_results_tree()
+        self.win.destroy()
+
     def on_save_and_next(self):
         if not self.unique_image_indices:
             return
 
-        img_idx = self.unique_image_indices[self.current_idx_pointer]
-        orig_filename = self.app.image_files[img_idx]
+        self.save_current_edits()
 
-        # 1. Commit all edited entries
-        for row_item, ent, _, _ in self.field_entries:
-            row_item["ocr_text"] = ent.get().strip()
-
-        # 2. Recalculate filenames and update main treeview
-        self.app._recalculate_filenames_for_image(orig_filename, img_idx)
-
-        # 3. Advance to next
         next_ptr = self._find_next_pointer(direction=1)
         if next_ptr is not None:
             self.current_idx_pointer = next_ptr
             self._load_current_image_data()
         else:
+            if hasattr(self.app, "refresh_results_tree"):
+                self.app.refresh_results_tree()
             if self.filter_issues_only_var.get():
-                messagebox.showinfo("Hoàn Tất", "🎉 Tuyệt vời! Không còn ảnh nào bị lỗi hoặc rỗng.")
+                messagebox.showinfo("Completed", "🎉 Excellent! No more issues or empty fields found.")
             else:
-                messagebox.showinfo("Hoàn Tất", "🎉 Đã duyệt hết tất cả các ảnh trong danh sách!")
+                messagebox.showinfo("Completed", "🎉 All images have been reviewed!")
 
     def on_prev(self):
         if not self.unique_image_indices:
             return
 
-        img_idx = self.unique_image_indices[self.current_idx_pointer]
-        orig_filename = self.app.image_files[img_idx]
-        for row_item, ent, _, _ in self.field_entries:
-            row_item["ocr_text"] = ent.get().strip()
-        self.app._recalculate_filenames_for_image(orig_filename, img_idx)
+        self.save_current_edits()
 
         prev_ptr = self._find_next_pointer(direction=-1)
         if prev_ptr is not None:
@@ -504,7 +500,7 @@ class ReviewFocusDialog:
                     self.current_idx_pointer = next_ptr
                     self._load_current_image_data()
                 else:
-                    messagebox.showinfo("Thông Báo", "Tất cả ảnh đều đã có dữ liệu đầy đủ!")
+                    messagebox.showinfo("Notice", "No images with issues or empty values found.")
                     self.filter_issues_only_var.set(False)
 
     def _find_next_pointer(self, direction=1):

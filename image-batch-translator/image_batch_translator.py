@@ -28,7 +28,7 @@ from app.extraction import (
     extract_by_pattern,
     extract_by_box,
     find_bounding_box_for_rule,
-    auto_detect_bbox_for_image,
+    find_bounding_box_from_lens,
 )
 from app.ui.preprocess_dialog import PreprocessTestDialog
 from app.ui.review_focus_dialog import ReviewFocusDialog

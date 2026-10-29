@@ -45,6 +45,7 @@ from ..extraction import (
     extract_by_pattern,
     extract_by_box,
     find_bounding_box_for_rule,
+    find_bounding_box_from_lens,
 )
 from .preprocess_dialog import PreprocessTestDialog
 from .review_focus_dialog import ReviewFocusDialog
@@ -974,9 +975,11 @@ class SmartBatchExtractorApp:
                 try:
                     res = await lens.process_image(img, output_format="full_text")
                     full_text = res.get("ocr_text", "")
+                    word_data = res.get("word_data", [])
                 except Exception as e:
                     print(f"Google OCR error on {filename}: {e}", file=sys.stderr)
                     full_text = ""
+                    word_data = []
 
                 image_ocr_texts = []
                 image_bboxes = []
@@ -993,11 +996,13 @@ class SmartBatchExtractorApp:
                         extracted = ""
                     image_ocr_texts.append(extracted)
 
-                    # For box rules, compute pixel box; otherwise None (NO extra OCR in batch loop!)
-                    if r["type"] == "box" and r.get("box"):
-                        b = find_bounding_box_for_rule([], r, extracted, orig_size=raw_img.size)
-                    else:
-                        b = None
+                    # Extract Bounding Box directly from Google Lens word_data!
+                    b = find_bounding_box_from_lens(
+                        word_data,
+                        r,
+                        extracted,
+                        orig_size=raw_img.size,
+                    )
                     image_bboxes.append(b)
 
                 new_file_stem = compute_filename(self.template_var.get(), img_idx + 1, file_stem, image_ocr_texts)
@@ -1106,7 +1111,7 @@ class SmartBatchExtractorApp:
         self.root.after(0, self._on_scan_finished)
 
     def _insert_tree_row(self, row: dict):
-        self.res_tree.insert(
+        iid = self.res_tree.insert(
             "",
             "end",
             values=(
@@ -1117,6 +1122,7 @@ class SmartBatchExtractorApp:
                 row["new_name"],
             ),
         )
+        row["tree_iid"] = iid
 
     def _update_progress(self, pct: int, text: str):
         self.progress_bar["value"] = pct
@@ -1132,7 +1138,7 @@ class SmartBatchExtractorApp:
         messagebox.showinfo(
             "Extraction Completed",
             f"{status_txt}\nProcessed {len(self.image_files)} image(s).\n\n"
-            "💡 TIP: Bấm nút '🎯 Review Focus (Soát Lỗi)' hoặc nhấp đúp vào dòng để kiểm tra và sửa lỗi nhanh!",
+            "💡 TIP: Click '🎯 Review Focus' or double-click any row to inspect and manually correct values!",
         )
 
     # ========================================================================
@@ -1151,14 +1157,14 @@ class SmartBatchExtractorApp:
         if not self.results_data or not self.image_files:
             messagebox.showinfo(
                 "Review Focus",
-                "Chưa có dữ liệu trích xuất. Vui lòng bấm 'Extract Characters' trước khi soát lỗi.",
+                "No extraction data available yet. Please click 'Extract Characters' first.",
             )
             return
         ReviewFocusDialog(self.root, self, target_img_idx=target_img_idx, target_rule_idx=target_rule_idx)
 
     def on_open_preprocess_test_dialog(self):
         if not self.image_files:
-            messagebox.showinfo("Test Tiền Xử Lý", "Vui lòng chọn thư mục ảnh hoặc tải ảnh Demo trước.")
+            messagebox.showinfo("Preprocess Test", "Please select an image folder or load sample images first.")
             return
         PreprocessTestDialog(self.root, self)
 
@@ -1180,11 +1186,35 @@ class SmartBatchExtractorApp:
 
         tree_items = self.res_tree.get_children()
         for r_idx in row_indices:
-            self.results_data[r_idx]["new_name"] = updated_name
-            if r_idx < len(tree_items):
-                vals = list(self.res_tree.item(tree_items[r_idx], "values"))
-                vals[4] = updated_name
-                self.res_tree.item(tree_items[r_idx], values=vals)
+            row_item = self.results_data[r_idx]
+            row_item["new_name"] = updated_name
+            iid = row_item.get("tree_iid")
+            target_id = iid if (iid and self.res_tree.exists(iid)) else (tree_items[r_idx] if r_idx < len(tree_items) else None)
+            if target_id:
+                vals = (
+                    row_item["orig_file"],
+                    row_item["field"],
+                    row_item["var_tag"],
+                    row_item["ocr_text"],
+                    updated_name,
+                )
+                self.res_tree.item(target_id, values=vals)
+
+    def refresh_results_tree(self):
+        """Forces a full refresh of all rows in the results treeview."""
+        tree_items = self.res_tree.get_children()
+        for idx, row_item in enumerate(self.results_data):
+            iid = row_item.get("tree_iid")
+            target_id = iid if (iid and self.res_tree.exists(iid)) else (tree_items[idx] if idx < len(tree_items) else None)
+            if target_id:
+                vals = (
+                    row_item["orig_file"],
+                    row_item["field"],
+                    row_item["var_tag"],
+                    row_item["ocr_text"],
+                    row_item.get("new_name", ""),
+                )
+                self.res_tree.item(target_id, values=vals)
 
     def _on_template_or_format_changed(self, *args):
         if not self.results_data:

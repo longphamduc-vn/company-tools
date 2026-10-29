@@ -25,7 +25,7 @@ class PreprocessTestDialog:
         self.parent = parent
         self.app = app
         self.win = tk.Toplevel(parent)
-        self.win.title("🧪 Test Tiền Xử Lý & Quét Thử OCR (Image Preprocessing & OCR Test)")
+        self.win.title("🧪 Image Preprocessing & OCR Test Tuning")
         self.win.geometry("1100x750")
         self.win.minsize(900, 620)
         self.win.transient(parent)
@@ -56,14 +56,14 @@ class PreprocessTestDialog:
         top = ttk.Frame(self.win, padding="10 8")
         top.pack(side=tk.TOP, fill=tk.X)
 
-        ttk.Label(top, text="Chọn ảnh:", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Label(top, text="Select Image:", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(0, 4))
         self.img_combo = ttk.Combobox(top, values=self.app.image_files, state="readonly", width=24)
         if self.app.image_files:
             self.img_combo.current(self.current_img_idx)
         self.img_combo.pack(side=tk.LEFT, padx=(0, 10))
         self.img_combo.bind("<<ComboboxSelected>>", self._on_image_selected)
 
-        ttk.Label(top, text="Bộ lọc xử lý:", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(5, 4))
+        ttk.Label(top, text="Filter Mode:", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(5, 4))
         self.mode_combo = ttk.Combobox(
             top, textvariable=self.mode_var, values=PREPROCESS_MODES, state="readonly", width=34
         )
@@ -74,7 +74,7 @@ class PreprocessTestDialog:
             top, text="Upscale 2x", variable=self.upscale_var, command=self._update_preprocessed_preview
         ).pack(side=tk.LEFT, padx=(0, 10))
 
-        btn_run_test = ttk.Button(top, text="⚡ Quét Thử OCR", style="Primary.TButton", command=self._run_test_scan)
+        btn_run_test = ttk.Button(top, text="⚡ Run OCR Test", style="Primary.TButton", command=self._run_test_scan)
         btn_run_test.pack(side=tk.LEFT, padx=5)
 
         # Center: Side-by-side Image Previews
@@ -82,19 +82,19 @@ class PreprocessTestDialog:
         preview_paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
         # Left: Original
-        f_left = ttk.LabelFrame(preview_paned, text="Ảnh Gốc (Original Image)", padding=5)
+        f_left = ttk.LabelFrame(preview_paned, text="Original Image", padding=5)
         preview_paned.add(f_left, weight=1)
         self.lbl_orig = ttk.Label(f_left, text="No Image", anchor="center", background="#0f172a")
         self.lbl_orig.pack(fill=tk.BOTH, expand=True)
 
         # Right: Preprocessed
-        f_right = ttk.LabelFrame(preview_paned, text="Ảnh Sau Tiền Xử Lý (Preprocessed Image)", padding=5)
+        f_right = ttk.LabelFrame(preview_paned, text="Preprocessed Image", padding=5)
         preview_paned.add(f_right, weight=1)
         self.lbl_prep = ttk.Label(f_right, text="No Image", anchor="center", background="#0f172a")
         self.lbl_prep.pack(fill=tk.BOTH, expand=True)
 
         # Bottom: OCR Test Results & Actions
-        res_frame = ttk.LabelFrame(self.win, text="Kết Quả Quét Thử OCR & Trích Xuất Dữ Liệu", padding=8)
+        res_frame = ttk.LabelFrame(self.win, text="OCR Test Scan & Extraction Output", padding=8)
         res_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
 
         self.txt_ocr_output = tk.Text(
@@ -106,13 +106,13 @@ class PreprocessTestDialog:
         bot_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
         self.lbl_status = ttk.Label(
-            bot_bar, text="Chọn bộ lọc và bấm '⚡ Quét Thử OCR' để kiểm tra kết quả.", font=("Segoe UI", 9, "italic")
+            bot_bar, text="Select a filter mode and click '⚡ Run OCR Test' to inspect results.", font=("Segoe UI", 9, "italic")
         )
         self.lbl_status.pack(side=tk.LEFT)
 
-        ttk.Button(bot_bar, text="Đóng", command=self.win.destroy).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(bot_bar, text="Close", command=self.win.destroy).pack(side=tk.RIGHT, padx=4)
         ttk.Button(
-            bot_bar, text="✅ Áp Dụng Cấu Hình Này", style="Accent.TButton", command=self._apply_and_close
+            bot_bar, text="✅ Apply This Configuration", style="Accent.TButton", command=self._apply_and_close
         ).pack(side=tk.RIGHT, padx=4)
 
     def _on_image_selected(self, event=None):
@@ -133,7 +133,7 @@ class PreprocessTestDialog:
             self._update_original_preview()
             self._update_preprocessed_preview()
         except Exception as e:
-            self.lbl_status.config(text=f"Lỗi mở ảnh: {e}")
+            self.lbl_status.config(text=f"Error opening image: {e}")
 
     def _update_original_preview(self):
         if not self.orig_image:
@@ -161,14 +161,14 @@ class PreprocessTestDialog:
             self.prep_photo = ImageTk.PhotoImage(resized)
             self.lbl_prep.config(image=self.prep_photo, text="")
         except Exception as e:
-            self.lbl_status.config(text=f"Lỗi tiền xử lý ảnh: {e}")
+            self.lbl_status.config(text=f"Preprocessing error: {e}")
 
     def _run_test_scan(self):
         if not self.prep_image:
             return
-        self.lbl_status.config(text="Đang quét thử OCR... Xin vui lòng đợi...")
+        self.lbl_status.config(text="Running OCR test... Please wait...")
         self.txt_ocr_output.delete("1.0", tk.END)
-        self.txt_ocr_output.insert(tk.END, "⏳ Đang quét OCR trên ảnh tiền xử lý...\n")
+        self.txt_ocr_output.insert(tk.END, "⏳ Running OCR test on preprocessed image...\n")
 
         engine_name = self.app.ocr_engine_var.get()
 
@@ -185,7 +185,7 @@ class PreprocessTestDialog:
                     full_text = loop.run_until_complete(run_lens_full_text(self.prep_image))
                     lines = [l.strip() for l in full_text.splitlines() if l.strip()]
                 except Exception as e:
-                    full_text = f"Lỗi Google OCR: {e}"
+                    full_text = f"Google OCR error: {e}"
                 finally:
                     loop.close()
             elif HAVE_RAPIDOCR:
@@ -193,7 +193,7 @@ class PreprocessTestDialog:
                 if ocr_results:
                     lines = [line[1].strip() for line in ocr_results]
             else:
-                full_text = "Không tìm thấy OCR Engine khả dụng."
+                full_text = "No available OCR engine detected."
 
             elapsed = round(time.time() - t0, 3)
 
@@ -221,25 +221,25 @@ class PreprocessTestDialog:
         self.txt_ocr_output.delete("1.0", tk.END)
         out = []
         out.append(
-            f"⏱️ Quét hoàn tất trong {elapsed}s | Bộ lọc: {self.mode_var.get()} | Upscale 2x: {self.upscale_var.get()}"
+            f"⏱️ Scan completed in {elapsed}s | Filter: {self.mode_var.get()} | Upscale 2x: {self.upscale_var.get()}"
         )
         out.append("-" * 70)
-        out.append("🎯 DỮ LIỆU TRÍCH XUẤT THEO QUY TẮC:")
+        out.append("🎯 EXTRACTED DATA BY RULES:")
         if extracted_summary:
             out.extend(extracted_summary)
         else:
-            out.append("  (Chưa có quy tắc nào được định nghĩa)")
+            out.append("  (No rules defined)")
         out.append("-" * 70)
-        out.append("📄 TOÀN BỘ KÝ TỰ NHẬN DIỆN (FULL OCR TEXT):")
-        out.append(full_text if full_text.strip() else "(Không tìm thấy văn bản)")
+        out.append("📄 FULL RECOGNIZED OCR TEXT:")
+        out.append(full_text if full_text.strip() else "(No text detected)")
         self.txt_ocr_output.insert(tk.END, "\n".join(out))
-        self.lbl_status.config(text=f"✅ Quét xong trong {elapsed}s.")
+        self.lbl_status.config(text=f"✅ Scan finished in {elapsed}s.")
 
     def _apply_and_close(self):
         self.app.preprocess_mode_var.set(self.mode_var.get())
         self.app.upscale_2x_var.set(self.upscale_var.get())
         self.win.destroy()
         messagebox.showinfo(
-            "Đã Áp Dụng",
-            f"Đã cấu hình bộ lọc tiền xử lý: {self.mode_var.get()}\nUpscale 2x: {self.upscale_var.get()}",
+            "Configuration Applied",
+            f"Applied preprocessing filter: {self.mode_var.get()}\nUpscale 2x: {self.upscale_var.get()}",
         )

@@ -3,7 +3,7 @@
 """
 Extraction Algorithms & Bounding Box Localization.
 Supports Keyword Anchor Extraction, Regex Capturing Groups,
-Ratio Coordinate Bounding Boxes, and Automatic Text ROI Localization.
+Ratio Coordinate Bounding Boxes, RapidOCR Polygons, and Google Lens Word Geometry.
 """
 
 import re
@@ -99,7 +99,7 @@ def find_bounding_box_for_rule(
     proc_size: tuple = None,
 ) -> list:
     """
-    Locates the pixel bounding box [x1, y1, x2, y2] on the original image for a given rule.
+    Locates the pixel bounding box [x1, y1, x2, y2] on the original image from RapidOCR results.
     Maps coordinates from processed/upscaled image back to original image dimensions.
     """
     orig_w, orig_h = orig_size
@@ -123,7 +123,6 @@ def find_bounding_box_for_rule(
     if not ocr_results:
         return None
 
-    # Helper to convert polygon to bbox in original image coordinates
     def poly_to_orig_bbox(poly):
         xs = [pt[0] * scale_x for pt in poly]
         ys = [pt[1] * scale_y for pt in poly]
@@ -166,21 +165,20 @@ def find_bounding_box_for_rule(
     return None
 
 
-def auto_detect_bbox_for_image(
-    img_pil: Image.Image,
+def find_bounding_box_from_lens(
+    word_data: list,
     rule: dict,
     extracted_text: str,
-    prep_mode: str = "none",
-    upscale: bool = False,
-    engine=None,
+    orig_size: tuple,
 ) -> list:
     """
-    On-demand detection of field bounding box directly on an image.
-    Useful for Review Focus dialog when full-scan bboxes were not cached.
+    Locates pixel bounding box [x1, y1, x2, y2] on original image
+    directly from Google Lens word_data.
+    Zero-cost in-memory search!
     """
-    orig_w, orig_h = img_pil.size
+    orig_w, orig_h = orig_size
 
-    # Rule is coordinate box
+    # 1. If rule is coordinate box
     if rule.get("type") == "box" and rule.get("box"):
         b = rule["box"]
         return [
@@ -190,19 +188,89 @@ def auto_detect_bbox_for_image(
             int(round(b["ry2"] * orig_h)),
         ]
 
-    if not HAVE_RAPIDOCR:
+    if not word_data:
         return None
 
-    try:
-        prep_img = preprocess_for_ocr(img_pil, mode=prep_mode, upscale=upscale)
-        full_text, ocr_results = run_rapidocr(prep_img, engine=engine)
-        return find_bounding_box_for_rule(
-            ocr_results,
-            rule,
-            extracted_text,
-            orig_size=(orig_w, orig_h),
-            proc_size=prep_img.size,
-        )
-    except Exception as e:
-        print(f"Auto-detect bbox error: {e}", file=sys.stderr)
-        return None
+    def word_to_bbox(geo):
+        if not geo:
+            return None
+        cx = geo.get("center_x", 0)
+        cy = geo.get("center_y", 0)
+        w = geo.get("width", 0)
+        h = geo.get("height", 0)
+        coord_type = geo.get("coordinate_type", "NORMALIZED")
+
+        if coord_type == "NORMALIZED" or (cx <= 1.0 and cy <= 1.0 and w <= 1.0 and h <= 1.0):
+            px_cx, px_cy = cx * orig_w, cy * orig_h
+            px_w, px_h = w * orig_w, h * orig_h
+        else:
+            px_cx, px_cy, px_w, px_h = cx, cy, w, h
+
+        x1 = max(0, int(round(px_cx - px_w / 2)))
+        y1 = max(0, int(round(px_cy - px_h / 2)))
+        x2 = min(orig_w, int(round(px_cx + px_w / 2)))
+        y2 = min(orig_h, int(round(px_cy + px_h / 2)))
+        return [x1, y1, x2, y2]
+
+    def union_boxes(boxes):
+        valid = [b for b in boxes if b]
+        if not valid:
+            return None
+        return [
+            min(b[0] for b in valid),
+            min(b[1] for b in valid),
+            max(b[2] for b in valid),
+            max(b[3] for b in valid),
+        ]
+
+    target_clean = extracted_text.strip().lower() if extracted_text else ""
+    target_tokens = target_clean.split()
+
+    # Priority A: Exact token sequence match (e.g. "DLLLLLL1", "PXK-2026-001", "Bơm Cao Áp Schneider")
+    if target_tokens:
+        n_tokens = len(target_tokens)
+        for i in range(len(word_data) - n_tokens + 1):
+            window_tokens = [word_data[i + k].get("word", "").strip().lower() for k in range(n_tokens)]
+            if window_tokens == target_tokens:
+                boxes = [word_to_bbox(word_data[i + k].get("geometry")) for k in range(n_tokens)]
+                b = union_boxes(boxes)
+                if b:
+                    return b
+
+        # Substring token match inside any word
+        for w in word_data:
+            w_text = w.get("word", "").strip().lower()
+            if target_clean in w_text:
+                b = word_to_bbox(w.get("geometry"))
+                if b:
+                    return b
+
+    # Priority B: Keyword match (find keyword, take the words following it)
+    if rule.get("type") == "keyword" and rule.get("keyword"):
+        kw_tokens = rule["keyword"].strip().lower().split()
+        n_kw = len(kw_tokens)
+        for i in range(len(word_data) - n_kw + 1):
+            window_kw = [word_data[i + k].get("word", "").strip().lower() for k in range(n_kw)]
+            if window_kw == kw_tokens:
+                # Take words immediately following keyword
+                target_range = range(i + n_kw, min(len(word_data), i + n_kw + 4))
+                boxes = [word_to_bbox(word_data[idx].get("geometry")) for idx in target_range]
+                b = union_boxes(boxes)
+                if b:
+                    return b
+                return union_boxes([word_to_bbox(word_data[i + k].get("geometry")) for k in range(n_kw)])
+
+    # Priority C: Regex match
+    if rule.get("type") == "regex" and rule.get("pattern"):
+        pat = rule["pattern"].strip()
+        try:
+            for w in word_data:
+                w_text = w.get("word", "")
+                if re.search(pat, w_text):
+                    b = word_to_bbox(w.get("geometry"))
+                    if b:
+                        return b
+        except Exception:
+            pass
+
+    return None
