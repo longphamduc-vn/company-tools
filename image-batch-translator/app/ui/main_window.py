@@ -49,6 +49,7 @@ from ..extraction import (
 )
 from .preprocess_dialog import PreprocessTestDialog
 from .review_focus_dialog import ReviewFocusDialog
+from ..session_manager import save_session, has_saved_session, load_session, clear_session
 
 if HAVE_RAPIDOCR:
     from rapidocr_onnxruntime import RapidOCR
@@ -360,6 +361,13 @@ class SmartBatchExtractorApp:
         self.btn_csv = ttk.Button(action_bar, text="📊 Export CSV", command=self.on_export_csv)
         self.btn_csv.pack(side=tk.LEFT, padx=3)
 
+        self.btn_save_session = ttk.Button(
+            action_bar,
+            text="💾 Save Session",
+            command=self.on_manual_save_session,
+        )
+        self.btn_save_session.pack(side=tk.LEFT, padx=3)
+
         self.btn_cancel = ttk.Button(action_bar, text="⏹️ Stop", command=self.on_stop_processing, state="disabled")
         self.btn_cancel.pack(side=tk.LEFT, padx=3)
 
@@ -576,6 +584,21 @@ class SmartBatchExtractorApp:
         self.sample_combo.current(0)
         self.load_sample_image(self.image_files[0])
         self._update_status(f"Loaded {len(self.image_files)} image(s) from {self.folder_path}")
+
+        # Check for saved session recovery from previous run/crash
+        if has_saved_session(self.folder_path):
+            saved_data = load_session(self.folder_path)
+            if saved_data and saved_data.get("results_data"):
+                n_items = len(saved_data["results_data"])
+                last_saved = saved_data.get("last_saved", "Recent")
+                restore = messagebox.askyesno(
+                    "Restore Saved Session?",
+                    f"📂 Found saved extraction session for {n_items} records in this folder!\n\n"
+                    f"Last Saved: {last_saved}\n\n"
+                    "Would you like to restore your previous results & manual corrections?",
+                )
+                if restore:
+                    self._restore_session_data(saved_data)
 
     def load_sample_image(self, filename: str):
         img_path = os.path.join(self.folder_path, filename)
@@ -1174,6 +1197,7 @@ class SmartBatchExtractorApp:
         self.progress_lbl.config(text="Complete" if not self.stop_requested else "Stopped")
         self._update_status(status_txt)
         self._update_table_summary_label()
+        self._auto_save_session()
         messagebox.showinfo(
             "Extraction Completed",
             f"{status_txt}\nProcessed {len(self.image_files)} image(s).\n\n"
@@ -1242,6 +1266,7 @@ class SmartBatchExtractorApp:
                 )
                 self.res_tree.item(target_id, values=vals, tags=(tag,))
         self._update_table_summary_label()
+        self._auto_save_session()
 
     def refresh_results_tree(self):
         """Forces a full refresh of all rows in the results treeview."""
@@ -1262,6 +1287,7 @@ class SmartBatchExtractorApp:
                 )
                 self.res_tree.item(target_id, values=vals, tags=(tag,))
         self._update_table_summary_label()
+        self._auto_save_session()
 
     def _apply_table_filter(self):
         filter_issues = self.filter_issues_var.get()
@@ -1299,6 +1325,77 @@ class SmartBatchExtractorApp:
                 images_seen[fn] = row["img_idx"]
         for fn, img_idx in images_seen.items():
             self._recalculate_filenames_for_image(fn, img_idx)
+
+    # ========================================================================
+    # SESSION PERSISTENCE & CRASH RECOVERY
+    # ========================================================================
+    def _auto_save_session(self):
+        """Safeguards current extraction results, edits, and configs to disk to prevent data loss on crash."""
+        if not self.folder_path or not self.results_data:
+            return
+        try:
+            save_session(
+                folder_path=self.folder_path,
+                rules=self.rules,
+                template=self.template_var.get(),
+                format_val=self.format_var.get(),
+                preprocess_mode=self.preprocess_mode_var.get(),
+                upscale_2x=self.upscale_2x_var.get(),
+                ocr_engine=self.ocr_engine_var.get(),
+                results_data=self.results_data,
+            )
+        except Exception as e:
+            print("Auto-save session error:", e)
+
+    def _restore_session_data(self, data: dict):
+        """Restores results_data, treeview, and configs from a saved session."""
+        self.results_data = data.get("results_data", [])
+        if "template" in data:
+            self.template_var.set(data["template"])
+        if "format" in data:
+            self.format_var.set(data["format"])
+        if "preprocess_mode" in data:
+            self.preprocess_mode_var.set(data["preprocess_mode"])
+        if "upscale_2x" in data:
+            self.upscale_2x_var.set(data["upscale_2x"])
+
+        # Clear existing treeview rows and re-insert restored rows
+        for item in self.res_tree.get_children():
+            self.res_tree.delete(item)
+
+        for row in self.results_data:
+            self._insert_tree_row(row)
+
+        self._update_table_summary_label()
+        self._update_status(f"Restored session ({len(self.results_data)} records loaded from cache).")
+        messagebox.showinfo(
+            "Session Restored",
+            f"🎉 Successfully restored {len(self.results_data)} records with all previous manual corrections!\n\nYou can continue reviewing or export to Excel.",
+        )
+
+    def on_manual_save_session(self):
+        """User-triggered manual save of current session."""
+        if not self.results_data:
+            messagebox.showinfo("Save Session", "No extraction data to save yet. Run extraction first.")
+            return
+
+        success = save_session(
+            folder_path=self.folder_path,
+            rules=self.rules,
+            template=self.template_var.get(),
+            format_val=self.format_var.get(),
+            preprocess_mode=self.preprocess_mode_var.get(),
+            upscale_2x=self.upscale_2x_var.get(),
+            ocr_engine=self.ocr_engine_var.get(),
+            results_data=self.results_data,
+        )
+        if success:
+            messagebox.showinfo(
+                "Session Saved",
+                "✅ Session successfully saved to disk!\n\nYour extraction results, manual corrections, and configurations are safely preserved.",
+            )
+        else:
+            messagebox.showwarning("Save Session", "Could not save session file. Please check folder permissions.")
 
     # ========================================================================
     # EXPORT EXCEL & CSV

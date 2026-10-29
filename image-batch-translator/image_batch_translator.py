@@ -30,6 +30,8 @@ from app.extraction import (
     find_bounding_box_for_rule,
     find_bounding_box_from_lens,
 )
+from app.excel_export import export_results_to_excel, HAVE_OPENPYXL
+from app.session_manager import save_session, has_saved_session, load_session, clear_session
 from app.ui.preprocess_dialog import PreprocessTestDialog
 from app.ui.review_focus_dialog import ReviewFocusDialog
 from app.ui.main_window import SmartBatchExtractorApp

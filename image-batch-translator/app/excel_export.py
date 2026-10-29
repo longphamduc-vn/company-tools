@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Excel Exporter with Embedded Images & Extraction Data.
+Excel Exporter with Embedded High-Resolution Images & Extraction Data.
 Generates polished, professional Excel (.xlsx) workbooks containing:
-- Embedded image thumbnails with ROI bounding box highlights
+- Embedded crystal-clear Focus ROI crops (2x Retina DPI using Lanczos resampling)
 - Original filename, field name, variable tag
 - Extracted characters and status (Valid, Empty, Manual Edit)
 - Computed new filename
@@ -30,7 +30,7 @@ def export_results_to_excel(
     progress_callback=None,
 ) -> bool:
     """
-    Exports results_data to a rich Excel spreadsheet with embedded images.
+    Exports results_data to a rich Excel spreadsheet with embedded high-resolution images.
     
     Args:
         results_data: List of dicts with keys (orig_file, field, var_tag, ocr_text, new_name, bbox, etc.)
@@ -98,11 +98,11 @@ def export_results_to_excel(
         ws["A2"].alignment = align_left
         ws.row_dimensions[2].height = 18
 
-        # 2. Table Headers
+        # 2. Table Headers (Column C widened to 32 to accommodate crisp high-res preview)
         headers = [
             ("A", "No.", 6, align_center),
             ("B", "Original File", 24, align_left),
-            ("C", "Image Preview", 24, align_center),
+            ("C", "Focus ROI / Preview", 32, align_center),
             ("D", "Field", 16, align_left),
             ("E", "Tag", 8, align_center),
             ("F", "Extracted Characters", 30, align_left),
@@ -124,7 +124,10 @@ def export_results_to_excel(
 
         # 3. Populate Rows
         current_excel_row = 5
-        thumb_w, thumb_h = 150, 72
+        # Cell display limits inside Excel (points)
+        disp_max_w, disp_max_h = 220, 68
+        # High-DPI render limits (2x Retina density for razor-sharp text)
+        render_w, render_h = disp_max_w * 2, disp_max_h * 2
 
         for idx, row in enumerate(results_data):
             if progress_callback:
@@ -150,8 +153,8 @@ def export_results_to_excel(
 
             row_fill = fill_even if (idx % 2 == 0) else fill_odd
 
-            # Set Excel Row Height to fit thumbnail cleanly
-            ws.row_dimensions[current_excel_row].height = 62
+            # Set Excel Row Height to fit high-DPI image cleanly (74 pt)
+            ws.row_dimensions[current_excel_row].height = 74
 
             # Col A: Index
             c_a = ws[f"A{current_excel_row}"]
@@ -169,7 +172,7 @@ def export_results_to_excel(
             c_b.alignment = align_left
             c_b.border = cell_border
 
-            # Col C: Image Preview Thumbnail
+            # Col C: High-Resolution Focus ROI / Image Preview
             c_c = ws[f"C{current_excel_row}"]
             c_c.value = ""
             c_c.fill = row_fill
@@ -183,27 +186,56 @@ def export_results_to_excel(
                         img_rgb = raw_img.convert("RGB")
                         orig_w, orig_h = img_rgb.size
 
-                        # Draw bounding box on thumbnail if available
+                        # HIGH-QUALITY STRATEGY:
+                        # 1. If bbox is available: CROP the Focus ROI with comfortable margins!
+                        #    This ensures text characters are huge, crisp, and 100% legible in Excel.
+                        # 2. If bbox is not available: High-resolution full image thumbnail.
                         if bbox and len(bbox) == 4:
                             bx1, by1, bx2, by2 = bbox
-                            # Draw vivid neon rectangle on image copy
-                            draw = ImageDraw.Draw(img_rgb)
-                            line_w = max(2, int(min(orig_w, orig_h) / 150))
-                            draw.rectangle([bx1, by1, bx2, by2], outline="#00ff66", width=line_w)
+                            bw = max(1, bx2 - bx1)
+                            bh = max(1, by2 - by1)
 
-                        # Generate thumbnail preserving aspect ratio
-                        scale = min(thumb_w / orig_w, thumb_h / orig_h)
-                        nw = max(1, int(orig_w * scale))
-                        nh = max(1, int(orig_h * scale))
-                        thumb = img_rgb.resize((nw, nh), Image.Resampling.BILINEAR)
+                            # 35% margin on X, 40% margin on Y to give surrounding context
+                            pad_x = max(35, int(bw * 0.35))
+                            pad_y = max(20, int(bh * 0.40))
+
+                            cx1 = max(0, bx1 - pad_x)
+                            cy1 = max(0, by1 - pad_y)
+                            cx2 = min(orig_w, bx2 + pad_x)
+                            cy2 = min(orig_h, by2 + pad_y)
+
+                            crop_img = img_rgb.crop((cx1, cy1, cx2, cy2))
+                            cw, ch = crop_img.size
+
+                            # Draw glowing focus border around detected text on crop
+                            draw = ImageDraw.Draw(crop_img)
+                            tb_x1 = max(0, bx1 - cx1)
+                            tb_y1 = max(0, by1 - cy1)
+                            tb_x2 = min(cw, bx2 - cx1)
+                            tb_y2 = min(ch, by2 - cy1)
+                            draw.rectangle([tb_x1 - 1, tb_y1 - 1, tb_x2 + 1, tb_y2 + 1], outline="#0284c7", width=2)
+                            draw.rectangle([tb_x1, tb_y1, tb_x2, tb_y2], outline="#10b981", width=2)
+
+                            # 2x Retina Lanczos Resampling
+                            scale = min(render_w / cw, render_h / ch)
+                            nw = max(1, int(round(cw * scale)))
+                            nh = max(1, int(round(ch * scale)))
+                            thumb = crop_img.resize((nw, nh), Image.Resampling.LANCZOS)
+                        else:
+                            # Full Image 2x Retina Lanczos Resampling
+                            scale = min(render_w / orig_w, render_h / orig_h)
+                            nw = max(1, int(round(orig_w * scale)))
+                            nh = max(1, int(round(orig_h * scale)))
+                            thumb = img_rgb.resize((nw, nh), Image.Resampling.LANCZOS)
 
                         thumb_filename = f"thumb_{idx}_{orig_filename}.png"
                         thumb_path = os.path.join(temp_dir, thumb_filename)
-                        thumb.save(thumb_path, format="PNG")
+                        thumb.save(thumb_path, format="PNG", optimize=True)
 
                         xl_img = OpenpyxlImage(thumb_path)
-                        xl_img.width = nw
-                        xl_img.height = nh
+                        # Set display dimensions to 1/2 of rendered resolution for 2x Retina sharpness
+                        xl_img.width = int(round(nw / 2.0))
+                        xl_img.height = int(round(nh / 2.0))
                         ws.add_image(xl_img, f"C{current_excel_row}")
                 except Exception as e:
                     c_c.value = f"(No preview: {e})"
