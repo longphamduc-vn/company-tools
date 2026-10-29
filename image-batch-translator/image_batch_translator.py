@@ -1,27 +1,31 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Image Batch Translator & Smart Renamer
-=======================================
+Image Batch Character Extractor & Smart Renamer
+================================================
 A cross-platform desktop application written in Python (Tkinter GUI).
-Translate text in batches of images sharing the same layout structure,
-paint over old text with median background color, render translated text,
-and export renamed image files according to customizable templates.
+Specialized in extracting text/characters from fixed regions across batches of images
+(using Google Lens OCR or offline RapidOCR - NO Tesseract required).
+Provides batch file renaming based on extracted text, data table inspection,
+CSV export, and optional image inpainting.
 
 Dependencies:
     - Pillow (PIL)
-    - pytesseract
-    - deep-translator
+    - chrome-lens-py (Google Lens Cloud AI OCR)
+    - rapidocr-onnxruntime (Local Offline OCR Engine)
+    - deep-translator (Optional Translation Engine)
     - tkinter (built into standard Python)
 """
 
 import sys
 import os
 import re
+import csv
 import json
 import time
 import shutil
 import platform
+import asyncio
 import threading
 import statistics
 import unicodedata
@@ -33,19 +37,29 @@ from string import Formatter
 MISSING_PACKAGES = []
 
 try:
-    from PIL import Image, ImageTk, ImageDraw, ImageFont, ImageOps
+    from PIL import Image, ImageTk, ImageDraw, ImageFont
 except ImportError:
     MISSING_PACKAGES.append("pillow")
 
+HAVE_LENS = False
 try:
-    import pytesseract
+    from chrome_lens_py import LensAPI
+    HAVE_LENS = True
 except ImportError:
-    MISSING_PACKAGES.append("pytesseract")
+    MISSING_PACKAGES.append("chrome-lens-py")
+
+HAVE_RAPIDOCR = False
+try:
+    from rapidocr_onnxruntime import RapidOCR
+    import numpy as np
+    HAVE_RAPIDOCR = True
+except ImportError:
+    pass  # Optional offline fallback
 
 try:
     from deep_translator import GoogleTranslator
 except ImportError:
-    MISSING_PACKAGES.append("deep-translator")
+    pass  # Optional if translation is toggled
 
 try:
     import tkinter as tk
@@ -60,13 +74,12 @@ except ImportError:
     )
     sys.exit(1)
 
-if MISSING_PACKAGES:
+if not HAVE_LENS and not HAVE_RAPIDOCR:
     missing_str = " ".join(MISSING_PACKAGES)
-    pip_cmd = f"pip install {missing_str}"
     error_msg = (
         f"Missing required Python libraries: {', '.join(MISSING_PACKAGES)}\n\n"
-        f"Please install them by opening your terminal / command prompt and running:\n\n"
-        f"    {pip_cmd}\n"
+        f"Please install them by opening your terminal and running:\n\n"
+        f"    pip install pillow chrome-lens-py rapidocr-onnxruntime deep-translator\n"
     )
     print(error_msg, file=sys.stderr)
     root = tk.Tk()
@@ -81,77 +94,22 @@ if MISSING_PACKAGES:
 # ============================================================================
 SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tiff", ".tif")
 
-# Language mapping: Display Name -> {tesseract OCR code, deep-translator code}
 LANGUAGES = {
-    "English": {"ocr": "eng", "trans": "en"},
-    "Vietnamese": {"ocr": "vie", "trans": "vi"},
-    "Chinese (Simplified)": {"ocr": "chi_sim", "trans": "zh-CN"},
-    "Chinese (Traditional)": {"ocr": "chi_tra", "trans": "zh-TW"},
-    "Japanese": {"ocr": "jpn", "trans": "ja"},
-    "Korean": {"ocr": "kor", "trans": "ko"},
-    "Russian": {"ocr": "rus", "trans": "ru"},
-    "French": {"ocr": "fra", "trans": "fr"},
-    "German": {"ocr": "deu", "trans": "de"},
-    "Spanish": {"ocr": "spa", "trans": "es"},
-    "Thai": {"ocr": "tha", "trans": "th"},
+    "Auto Detect": "auto",
+    "Vietnamese": "vi",
+    "English": "en",
+    "Chinese (Simplified)": "zh-CN",
+    "Chinese (Traditional)": "zh-TW",
+    "Japanese": "ja",
+    "Korean": "ko",
+    "Russian": "ru",
+    "French": "fr",
+    "German": "de",
+    "Spanish": "es",
+    "Thai": "th",
 }
 
-PSM_OPTIONS = [
-    "6 - Single uniform block of text (Default)",
-    "3 - Fully automatic page segmentation",
-    "4 - Single column of text of variable sizes",
-    "7 - Treat image as a single text line",
-    "11 - Sparse text: find as much text as possible",
-    "12 - Sparse text with OSD",
-    "1 - Automatic page segmentation with OSD",
-]
-
-DEFAULT_NAME_TEMPLATE = "{index:03d}_{t1}"
-
-
-def auto_detect_tesseract() -> str:
-    """Automatically detect Tesseract-OCR binary path across OSes."""
-    # 1. Check if already in PATH
-    which_path = shutil.which("tesseract")
-    if which_path and os.path.exists(which_path):
-        return which_path
-
-    current_os = platform.system()
-    candidates = []
-
-    if current_os == "Windows":
-        prog_files = os.environ.get("ProgramFiles", r"C:\Program Files")
-        prog_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
-        local_app = os.environ.get("LOCALAPPDATA", "")
-        candidates = [
-            os.path.join(prog_files, "Tesseract-OCR", "tesseract.exe"),
-            os.path.join(prog_files_x86, "Tesseract-OCR", "tesseract.exe"),
-            os.path.join(local_app, "Programs", "Tesseract-OCR", "tesseract.exe"),
-            r"C:\Tesseract-OCR\tesseract.exe",
-        ]
-    elif current_os == "Darwin":  # macOS
-        candidates = [
-            "/opt/homebrew/bin/tesseract",
-            "/usr/local/bin/tesseract",
-            "/usr/bin/tesseract",
-        ]
-    else:  # Linux / Unix
-        candidates = [
-            "/usr/bin/tesseract",
-            "/usr/local/bin/tesseract",
-            "/opt/tesseract/bin/tesseract",
-        ]
-
-    for p in candidates:
-        if p and os.path.isfile(p):
-            return p
-    return ""
-
-
-# Initialize Tesseract path if found
-detected_tesseract = auto_detect_tesseract()
-if detected_tesseract:
-    pytesseract.pytesseract.tesseract_cmd = detected_tesseract
+DEFAULT_NAME_TEMPLATE = "{o1}_{o2}"
 
 
 def find_default_font() -> str:
@@ -197,14 +155,9 @@ def natural_sort_key(s: str):
 
 
 def sanitize_filename(filename: str, max_length: int = 120) -> str:
-    """
-    Sanitize filename while preserving Unicode/Vietnamese diacritics.
-    Removes invalid characters: \\ / : * ? " < > | and newlines.
-    """
+    """Sanitize filename while preserving Unicode/Vietnamese diacritics."""
     filename = unicodedata.normalize("NFC", str(filename))
-    # Replace invalid chars with underscore
     cleaned = re.sub(r'[\\/:*?"<>|\r\n\t]', "_", filename)
-    # Collapse consecutive whitespace and underscores
     cleaned = re.sub(r"\s+", " ", cleaned).strip(". ")
     cleaned = re.sub(r"_+", "_", cleaned)
     if not cleaned:
@@ -234,8 +187,7 @@ def compute_filename(template: str, index: int, orig_stem: str, ocr_texts: list,
     try:
         raw_formatted = Formatter().vformat(template, (), SafeFormatDict(format_vars))
     except Exception:
-        # Fallback if invalid template format
-        raw_formatted = f"{index:03d}_{orig_stem}"
+        raw_formatted = f"{orig_stem}_renamed"
 
     return sanitize_filename(raw_formatted)
 
@@ -255,9 +207,7 @@ def get_unique_output_path(output_dir: str, base_name: str, ext: str, used_names
 
 
 def get_box_median_color(img: Image.Image, box: tuple) -> tuple:
-    """
-    Computes the median RGB color of the pixels along the border of `box` = (x1, y1, x2, y2).
-    """
+    """Computes median RGB color of border pixels around box = (x1, y1, x2, y2)."""
     x1, y1, x2, y2 = box
     w, h = img.size
     x1 = max(0, min(x1, w - 1))
@@ -266,11 +216,9 @@ def get_box_median_color(img: Image.Image, box: tuple) -> tuple:
     y2 = max(y1 + 1, min(y2, h))
 
     border_pixels = []
-    # Top and bottom edges
     for x in range(x1, x2):
         border_pixels.append(img.getpixel((x, y1)))
         border_pixels.append(img.getpixel((x, y2 - 1)))
-    # Left and right edges
     for y in range(y1, y2):
         border_pixels.append(img.getpixel((x1, y)))
         border_pixels.append(img.getpixel((x2 - 1, y)))
@@ -309,13 +257,7 @@ def fit_and_draw_text(
     padding: int = 4,
     bg_color: tuple = None,
 ):
-    """
-    Renders text inside `box` = (x1, y1, x2, y2):
-    - Automatically wraps text into multiple lines.
-    - Decreases font size until text fits inside box width & height.
-    - Centers text horizontally and vertically.
-    - Text color is calculated based on background color brightness.
-    """
+    """Renders text inside box with auto-wrapping and auto-scaling."""
     x1, y1, x2, y2 = box
     box_w = max(1, x2 - x1)
     box_h = max(1, y2 - y1)
@@ -326,7 +268,6 @@ def fit_and_draw_text(
     if not cleaned_text:
         return
 
-    # Start font size based on box height (clamped)
     font_size = max(8, min(80, int(box_h * 0.75)))
     min_font_size = 8
 
@@ -354,7 +295,6 @@ def fit_and_draw_text(
         line_height = int(font_size * 1.25)
         lines = []
 
-        # Process each paragraph
         for paragraph in cleaned_text.splitlines():
             words = paragraph.split(" ")
             curr_line = ""
@@ -368,10 +308,8 @@ def fit_and_draw_text(
                     if curr_line:
                         lines.append(curr_line)
                         curr_line = word
-                        # Check if single word exceeds avail_w
                         wb = draw.textbbox((0, 0), word, font=font)
                         if (wb[2] - wb[0]) > avail_w:
-                            # Break word character by character
                             chunk = ""
                             for char in word:
                                 test_c = chunk + char
@@ -384,7 +322,6 @@ def fit_and_draw_text(
                                     chunk = char
                             curr_line = chunk
                     else:
-                        # Even first word exceeds width
                         chunk = ""
                         for char in word:
                             test_c = chunk + char
@@ -400,7 +337,6 @@ def fit_and_draw_text(
                 lines.append(curr_line)
 
         total_h = len(lines) * line_height
-        # Check if all lines fit within available width and total height
         all_lines_fit_w = True
         for l in lines:
             bb = draw.textbbox((0, 0), l, font=font)
@@ -414,18 +350,13 @@ def fit_and_draw_text(
         best_total_h = total_h
 
         if all_lines_fit_w and total_h <= avail_h:
-            break  # Fits perfectly
+            break
 
         font_size -= 2
 
-    # Draw centered
-    # Calculate background color of box to pick contrasting text color
     if bg_color is None:
         target_img = getattr(draw, "_image", None)
-        if target_img:
-            med_bg = get_box_median_color(target_img, box)
-        else:
-            med_bg = (255, 255, 255)
+        med_bg = get_box_median_color(target_img, box) if target_img else (255, 255, 255)
     else:
         med_bg = bg_color
 
@@ -446,11 +377,10 @@ def fit_and_draw_text(
 class BatchImageTranslatorApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Batch Image OCR, Translator & Renamer")
-        self.root.geometry("1260x820")
+        self.root.title("Image Batch Character Extractor & Smart Renamer")
+        self.root.geometry("1280x830")
         self.root.minsize(1050, 700)
 
-        # Apply clean theme
         self.style = ttk.Style()
         try:
             self.style.theme_use("clam")
@@ -469,43 +399,38 @@ class BatchImageTranslatorApp:
         self.sample_offset_x = 0
         self.sample_offset_y = 0
 
-        # Regions: list of dicts: {"rx1": float, "ry1": float, "rx2": float, "ry2": float}
         self.regions = []
         self.selected_region_idx = -1
 
-        # Interactive drawing state
         self.drag_start_x = 0
         self.drag_start_y = 0
         self.active_rect_id = None
 
-        # Data & Caching
-        self.translation_cache = {}  # {source_text: translated_text}
-        # Table data: list of dicts: {filename, region_idx, ocr_text, translation, new_name}
+        self.translation_cache = {}
         self.results_data = []
 
-        # Configuration variables
-        self.source_lang_var = tk.StringVar(value="English")
+        # Configurations
+        self.ocr_engine_var = tk.StringVar(value="Google Lens (Cloud AI - High Accuracy)" if HAVE_LENS else "RapidOCR (Local Offline)")
+        self.enable_translate_var = tk.BooleanVar(value=False)
+        self.source_lang_var = tk.StringVar(value="Auto Detect")
         self.target_lang_var = tk.StringVar(value="Vietnamese")
-        self.psm_var = tk.StringVar(value=PSM_OPTIONS[0])
         self.template_var = tk.StringVar(value=DEFAULT_NAME_TEMPLATE)
+        self.export_mode_var = tk.StringVar(value="Copy & Rename Original (High Quality)")
         self.format_var = tk.StringVar(value="Keep original")
         self.output_folder_var = tk.StringVar(value="")
         self.font_path_var = tk.StringVar(value=find_default_font())
-        self.tesseract_cmd_var = tk.StringVar(value=detected_tesseract)
 
+        # Reactive trace for live table updating
         self.template_var.trace_add("write", self._on_template_or_format_changed)
         self.format_var.trace_add("write", self._on_template_or_format_changed)
 
-        # Processing Threading & Cancellation
         self.is_processing = False
         self.stop_requested = False
 
-        # Build UI
         self._build_ui()
-        self._update_status("Ready. Please select an image folder to get started.")
+        self._update_status("Ready. Click 'Choose Folder' or 'Load Demo Images' to begin.")
 
     def _init_theme_styles(self):
-        """Configure ttk colors and modern aesthetics."""
         self.style.configure(".", font=("Segoe UI", 9))
         self.style.configure("TLabel", font=("Segoe UI", 9))
         self.style.configure("TButton", font=("Segoe UI", 9), padding=5)
@@ -517,16 +442,18 @@ class BatchImageTranslatorApp:
         self.style.map("Accent.TButton", background=[("active", "#047857")])
 
     def _build_ui(self):
-        """Constructs the comprehensive user interface."""
         # Top Header Bar
         top_bar = ttk.Frame(self.root, padding="10 8")
         top_bar.pack(side=tk.TOP, fill=tk.X)
 
-        title_lbl = ttk.Label(top_bar, text="Batch Image Translator & Renamer", style="Title.TLabel")
+        title_lbl = ttk.Label(top_bar, text="Batch Character Extractor & Renamer", style="Title.TLabel")
         title_lbl.pack(side=tk.LEFT, padx=(0, 15))
 
         btn_open = ttk.Button(top_bar, text="📁 Choose Folder...", command=self.on_choose_folder)
         btn_open.pack(side=tk.LEFT, padx=3)
+
+        btn_demo = ttk.Button(top_bar, text="✨ Load Demo Images", command=self.on_load_demo_images)
+        btn_demo.pack(side=tk.LEFT, padx=3)
 
         btn_save_cfg = ttk.Button(top_bar, text="💾 Save Config", command=self.on_save_config)
         btn_save_cfg.pack(side=tk.LEFT, padx=3)
@@ -534,23 +461,18 @@ class BatchImageTranslatorApp:
         btn_load_cfg = ttk.Button(top_bar, text="📂 Load Config", command=self.on_load_config)
         btn_load_cfg.pack(side=tk.LEFT, padx=3)
 
-        btn_tess = ttk.Button(top_bar, text="⚙️ Tesseract Settings", command=self.on_tesseract_settings)
-        btn_tess.pack(side=tk.LEFT, padx=3)
-
         self.folder_disp_lbl = ttk.Label(top_bar, text="No folder selected", foreground="#64748b")
         self.folder_disp_lbl.pack(side=tk.RIGHT, padx=5)
 
-        # Main Split View (PanedWindow)
         paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         paned.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 5))
 
         # ====================================================================
-        # LEFT PANE: Canvas, Sample Image, Region Drawing & Region Editor
+        # LEFT PANE: Canvas, Regions, Coordinates
         # ====================================================================
         left_frame = ttk.Frame(paned, padding=5)
         paned.add(left_frame, weight=5)
 
-        # Sample Image Selection Bar
         sample_bar = ttk.Frame(left_frame)
         sample_bar.pack(fill=tk.X, pady=(0, 4))
 
@@ -559,15 +481,12 @@ class BatchImageTranslatorApp:
         self.sample_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         self.sample_combo.bind("<<ComboboxSelected>>", self.on_sample_combo_selected)
 
-        btn_prev = ttk.Button(sample_bar, text="◀", width=3, command=self.on_prev_sample)
-        btn_prev.pack(side=tk.LEFT, padx=2)
-        btn_next = ttk.Button(sample_bar, text="▶", width=3, command=self.on_next_sample)
-        btn_next.pack(side=tk.LEFT, padx=2)
+        ttk.Button(sample_bar, text="◀", width=3, command=self.on_prev_sample).pack(side=tk.LEFT, padx=2)
+        ttk.Button(sample_bar, text="▶", width=3, command=self.on_next_sample).pack(side=tk.LEFT, padx=2)
 
         self.img_info_lbl = ttk.Label(sample_bar, text="", foreground="#64748b")
         self.img_info_lbl.pack(side=tk.RIGHT, padx=4)
 
-        # Canvas Frame with scrollbars & responsive resize
         canvas_container = ttk.Frame(left_frame, borderwidth=1, relief="solid")
         canvas_container.pack(fill=tk.BOTH, expand=True)
 
@@ -578,235 +497,262 @@ class BatchImageTranslatorApp:
         self.canvas.bind("<B1-Motion>", self.on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
 
-        # Region Management Controls (Below Canvas)
-        reg_ctrl_frame = ttk.LabelFrame(left_frame, text="Defined Regions (Text Boxes)", padding=6)
+        reg_ctrl_frame = ttk.LabelFrame(left_frame, text="Extraction Regions (Drag mouse on image)", padding=6)
         reg_ctrl_frame.pack(fill=tk.X, pady=(6, 0))
 
-        # Treeview for regions
-        cols = ("id", "pixels", "ratios")
+        cols = ("id", "pixels", "ratios", "var")
         self.reg_tree = ttk.Treeview(reg_ctrl_frame, columns=cols, show="headings", height=4, selectmode="browse")
         self.reg_tree.heading("id", text="#")
         self.reg_tree.heading("pixels", text="Pixel Coords [X1, Y1, X2, Y2]")
-        self.reg_tree.heading("ratios", text="Relative Ratios [RX1, RY1, RX2, RY2]")
+        self.reg_tree.heading("ratios", text="Relative Ratios")
+        self.reg_tree.heading("var", text="Template Var")
         self.reg_tree.column("id", width=35, anchor="center")
-        self.reg_tree.column("pixels", width=200, anchor="w")
-        self.reg_tree.column("ratios", width=240, anchor="w")
+        self.reg_tree.column("pixels", width=190, anchor="w")
+        self.reg_tree.column("ratios", width=160, anchor="w")
+        self.reg_tree.column("var", width=90, anchor="center")
 
         reg_scroll = ttk.Scrollbar(reg_ctrl_frame, orient="vertical", command=self.reg_tree.yview)
         self.reg_tree.configure(yscrollcommand=reg_scroll.set)
         self.reg_tree.pack(side=tk.TOP, fill=tk.X, expand=True)
         self.reg_tree.bind("<<TreeviewSelect>>", self.on_region_selected)
 
-        # Region manual edit bar
         edit_bar = ttk.Frame(reg_ctrl_frame)
         edit_bar.pack(fill=tk.X, pady=(5, 0))
 
-        ttk.Label(edit_bar, text="Manual Edit: X1:").pack(side=tk.LEFT)
+        ttk.Label(edit_bar, text="X1:").pack(side=tk.LEFT)
         self.ent_x1 = ttk.Entry(edit_bar, width=5)
-        self.ent_x1.pack(side=tk.LEFT, padx=2)
-
+        self.ent_x1.pack(side=tk.LEFT, padx=1)
         ttk.Label(edit_bar, text="Y1:").pack(side=tk.LEFT)
         self.ent_y1 = ttk.Entry(edit_bar, width=5)
-        self.ent_y1.pack(side=tk.LEFT, padx=2)
-
+        self.ent_y1.pack(side=tk.LEFT, padx=1)
         ttk.Label(edit_bar, text="X2:").pack(side=tk.LEFT)
         self.ent_x2 = ttk.Entry(edit_bar, width=5)
-        self.ent_x2.pack(side=tk.LEFT, padx=2)
-
+        self.ent_x2.pack(side=tk.LEFT, padx=1)
         ttk.Label(edit_bar, text="Y2:").pack(side=tk.LEFT)
         self.ent_y2 = ttk.Entry(edit_bar, width=5)
-        self.ent_y2.pack(side=tk.LEFT, padx=2)
+        self.ent_y2.pack(side=tk.LEFT, padx=1)
 
-        btn_update_reg = ttk.Button(edit_bar, text="Apply Coords", command=self.on_update_region_coords)
-        btn_update_reg.pack(side=tk.LEFT, padx=4)
-
-        btn_del_reg = ttk.Button(edit_bar, text="❌ Delete Region", command=self.on_delete_region)
-        btn_del_reg.pack(side=tk.LEFT, padx=3)
-
-        btn_clear_reg = ttk.Button(edit_bar, text="🗑️ Clear All", command=self.on_clear_regions)
-        btn_clear_reg.pack(side=tk.LEFT, padx=3)
-
-        # Tip note
-        ttk.Label(
-            reg_ctrl_frame,
-            text="💡 Tip: Click and drag on the image above to define text regions. Click any region to select/edit.",
-            foreground="#64748b",
-            font=("Segoe UI", 8, "italic"),
-        ).pack(side=tk.TOP, anchor="w", pady=(4, 0))
+        ttk.Button(edit_bar, text="Apply Coords", command=self.on_update_region_coords).pack(side=tk.LEFT, padx=3)
+        ttk.Button(edit_bar, text="❌ Delete", command=self.on_delete_region).pack(side=tk.LEFT, padx=2)
+        ttk.Button(edit_bar, text="🗑️ Clear All", command=self.on_clear_regions).pack(side=tk.LEFT, padx=2)
 
         # ====================================================================
-        # RIGHT PANE: Settings, Actions, Progress & Results Treeview Table
+        # RIGHT PANE: Settings, Actions, Results
         # ====================================================================
         right_frame = ttk.Frame(paned, padding=5)
         paned.add(right_frame, weight=6)
 
-        # 1. Settings Box
-        settings_box = ttk.LabelFrame(right_frame, text="Options & Configuration", padding=8)
+        settings_box = ttk.LabelFrame(right_frame, text="Extraction & Renaming Configuration", padding=8)
         settings_box.pack(fill=tk.X, pady=(0, 6))
 
-        # Row 1: Languages & PSM
+        # Row 1: OCR Engine & Translation Toggle
         r1 = ttk.Frame(settings_box)
         r1.pack(fill=tk.X, pady=2)
 
-        ttk.Label(r1, text="Source Lang:").pack(side=tk.LEFT)
-        self.combo_src = ttk.Combobox(
-            r1, textvariable=self.source_lang_var, values=list(LANGUAGES.keys()), state="readonly", width=15
+        ttk.Label(r1, text="OCR Engine:").pack(side=tk.LEFT)
+        engine_options = []
+        if HAVE_LENS:
+            engine_options.append("Google Lens (Cloud AI - High Accuracy)")
+        if HAVE_RAPIDOCR:
+            engine_options.append("RapidOCR (Local Offline)")
+        if not engine_options:
+            engine_options.append("No OCR Engine Available")
+
+        self.combo_engine = ttk.Combobox(
+            r1, textvariable=self.ocr_engine_var, values=engine_options, state="readonly", width=34
         )
-        self.combo_src.pack(side=tk.LEFT, padx=(3, 10))
+        self.combo_engine.pack(side=tk.LEFT, padx=(3, 15))
 
-        ttk.Label(r1, text="Target Lang:").pack(side=tk.LEFT)
-        self.combo_tgt = ttk.Combobox(
-            r1, textvariable=self.target_lang_var, values=list(LANGUAGES.keys()), state="readonly", width=15
+        self.chk_trans = ttk.Checkbutton(
+            r1,
+            text="Also Translate Text (Optional)",
+            variable=self.enable_translate_var,
+            command=self._on_toggle_translate,
         )
-        self.combo_tgt.pack(side=tk.LEFT, padx=(3, 10))
+        self.chk_trans.pack(side=tk.LEFT, padx=5)
 
-        ttk.Label(r1, text="PSM:").pack(side=tk.LEFT)
-        self.combo_psm = ttk.Combobox(r1, textvariable=self.psm_var, values=PSM_OPTIONS, state="readonly", width=25)
-        self.combo_psm.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=3)
+        # Row 1b: Language options (shown if translation enabled)
+        self.trans_frame = ttk.Frame(settings_box)
+        ttk.Label(self.trans_frame, text="Source:").pack(side=tk.LEFT)
+        ttk.Combobox(self.trans_frame, textvariable=self.source_lang_var, values=list(LANGUAGES.keys()), state="readonly", width=14).pack(side=tk.LEFT, padx=3)
+        ttk.Label(self.trans_frame, text="Target:").pack(side=tk.LEFT, padx=(10, 0))
+        target_keys = [k for k in LANGUAGES.keys() if k != "Auto Detect"]
+        ttk.Combobox(self.trans_frame, textvariable=self.target_lang_var, values=target_keys, state="readonly", width=14).pack(side=tk.LEFT, padx=3)
 
-        # Row 2: Font selection & Output Format
+        # Row 2: Name Template & Quick Insert Pills
         r2 = ttk.Frame(settings_box)
-        r2.pack(fill=tk.X, pady=2)
+        r2.pack(fill=tk.X, pady=4)
 
-        ttk.Label(r2, text="Render Font:").pack(side=tk.LEFT)
-        self.font_lbl = ttk.Label(r2, text="Default Font", foreground="#2563eb", width=22, anchor="w")
-        self.font_lbl.pack(side=tk.LEFT, padx=3)
-        self._update_font_display_label()
+        ttk.Label(r2, text="Rename Template:").pack(side=tk.LEFT)
+        ttk.Entry(r2, textvariable=self.template_var, width=24).pack(side=tk.LEFT, padx=4)
 
-        btn_font = ttk.Button(r2, text="Choose Font (TTF/OTF)...", command=self.on_choose_font)
-        btn_font.pack(side=tk.LEFT, padx=(0, 15))
+        ttk.Label(r2, text="Insert:", foreground="#64748b").pack(side=tk.LEFT, padx=(5, 2))
+        for var_tag in ["{o1}", "{o2}", "{o3}", "{name}", "{index:03d}"]:
+            ttk.Button(
+                r2, text=var_tag, width=len(var_tag) + 1, command=lambda v=var_tag: self._insert_template_tag(v)
+            ).pack(side=tk.LEFT, padx=1)
 
-        ttk.Label(r2, text="Output Format:").pack(side=tk.LEFT)
-        combo_fmt = ttk.Combobox(
-            r2, textvariable=self.format_var, values=["Keep original", "png", "jpg"], state="readonly", width=14
-        )
-        combo_fmt.pack(side=tk.LEFT, padx=3)
-
-        # Row 3: Name Template & Helper buttons
+        # Row 3: Export Mode & Output Folder
         r3 = ttk.Frame(settings_box)
         r3.pack(fill=tk.X, pady=2)
 
-        ttk.Label(r3, text="Name Template:").pack(side=tk.LEFT)
-        ent_template = ttk.Entry(r3, textvariable=self.template_var, width=28)
-        ent_template.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+        ttk.Label(r3, text="Export Mode:").pack(side=tk.LEFT)
+        combo_exp_mode = ttk.Combobox(
+            r3,
+            textvariable=self.export_mode_var,
+            values=[
+                "Copy & Rename Original (High Quality)",
+                "Inpaint & Stamp Text onto Image",
+            ],
+            state="readonly",
+            width=32,
+        )
+        combo_exp_mode.pack(side=tk.LEFT, padx=(3, 10))
 
-        # Template helper insertion pills
-        ttk.Label(r3, text="Insert:", foreground="#64748b").pack(side=tk.LEFT, padx=(5, 2))
-        for var_tag in ["{index:03d}", "{name}", "{t1}", "{t2}", "{o1}"]:
-            btn_tag = ttk.Button(
-                r3,
-                text=var_tag,
-                width=len(var_tag) + 1,
-                command=lambda v=var_tag: self._insert_template_tag(v),
-            )
-            btn_tag.pack(side=tk.LEFT, padx=1)
+        ttk.Label(r3, text="Format:").pack(side=tk.LEFT)
+        ttk.Combobox(
+            r3, textvariable=self.format_var, values=["Keep original", "png", "jpg"], state="readonly", width=13
+        ).pack(side=tk.LEFT, padx=2)
 
         # Row 4: Output Folder
         r4 = ttk.Frame(settings_box)
         r4.pack(fill=tk.X, pady=2)
-
         ttk.Label(r4, text="Output Folder:").pack(side=tk.LEFT)
         self.ent_out_folder = ttk.Entry(r4, textvariable=self.output_folder_var)
         self.ent_out_folder.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+        ttk.Button(r4, text="Browse...", command=self.on_browse_output_folder).pack(side=tk.LEFT)
 
-        btn_out_browse = ttk.Button(r4, text="Browse...", command=self.on_browse_output_folder)
-        btn_out_browse.pack(side=tk.LEFT)
-
-        # 2. Action Controls & Progress Bar
+        # Actions Toolbar
         action_bar = ttk.Frame(right_frame)
         action_bar.pack(fill=tk.X, pady=(2, 6))
 
         self.btn_scan = ttk.Button(
             action_bar,
-            text="🚀 Scan OCR + Translate",
+            text="🔍 Extract Characters (OCR)",
             style="Primary.TButton",
-            command=self.on_start_scan_and_translate,
+            command=self.on_start_extract_characters,
         )
-        self.btn_scan.pack(side=tk.LEFT, padx=(0, 6))
-
-        self.btn_preview = ttk.Button(action_bar, text="👁️ Preview Selected", command=self.on_preview_selected)
-        self.btn_preview.pack(side=tk.LEFT, padx=4)
+        self.btn_scan.pack(side=tk.LEFT, padx=(0, 5))
 
         self.btn_export = ttk.Button(
             action_bar,
-            text="💾 Export New Images",
+            text="📁 Export & Rename Images",
             style="Accent.TButton",
             command=self.on_start_export_images,
         )
-        self.btn_export.pack(side=tk.LEFT, padx=4)
+        self.btn_export.pack(side=tk.LEFT, padx=3)
+
+        self.btn_csv = ttk.Button(action_bar, text="📊 Export CSV", command=self.on_export_csv)
+        self.btn_csv.pack(side=tk.LEFT, padx=3)
+
+        self.btn_preview = ttk.Button(action_bar, text="👁️ Preview", command=self.on_preview_selected)
+        self.btn_preview.pack(side=tk.LEFT, padx=3)
 
         self.btn_cancel = ttk.Button(action_bar, text="⏹️ Stop", command=self.on_stop_processing, state="disabled")
-        self.btn_cancel.pack(side=tk.LEFT, padx=4)
+        self.btn_cancel.pack(side=tk.LEFT, padx=3)
 
-        # Progress bar & label
         self.progress_bar = ttk.Progressbar(action_bar, mode="determinate")
         self.progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 5))
-
-        self.progress_lbl = ttk.Label(action_bar, text="Idle", foreground="#64748b", width=14, anchor="e")
+        self.progress_lbl = ttk.Label(action_bar, text="Idle", foreground="#64748b", width=12, anchor="e")
         self.progress_lbl.pack(side=tk.RIGHT)
 
-        # 3. Results Table (Treeview)
-        table_frame = ttk.LabelFrame(right_frame, text="Results & Translation Data (Double-click to edit)", padding=6)
+        # Results Table
+        table_frame = ttk.LabelFrame(right_frame, text="Extracted Characters & Renaming Preview (Double-click to edit)", padding=6)
         table_frame.pack(fill=tk.BOTH, expand=True)
 
-        res_cols = ("orig_file", "region", "ocr_text", "translation", "new_name")
+        res_cols = ("orig_file", "region", "var_tag", "ocr_text", "new_name")
         self.res_tree = ttk.Treeview(table_frame, columns=res_cols, show="headings", selectmode="browse")
-
         self.res_tree.heading("orig_file", text="Original File")
         self.res_tree.heading("region", text="Region")
-        self.res_tree.heading("ocr_text", text="OCR Text (Double-click to edit)")
-        self.res_tree.heading("translation", text="Translation (Double-click to edit)")
+        self.res_tree.heading("var_tag", text="Tag")
+        self.res_tree.heading("ocr_text", text="Extracted Characters (Double-click to edit)")
         self.res_tree.heading("new_name", text="New Filename")
 
         self.res_tree.column("orig_file", width=140, anchor="w")
         self.res_tree.column("region", width=55, anchor="center")
-        self.res_tree.column("ocr_text", width=180, anchor="w")
-        self.res_tree.column("translation", width=190, anchor="w")
-        self.res_tree.column("new_name", width=180, anchor="w")
+        self.res_tree.column("var_tag", width=55, anchor="center")
+        self.res_tree.column("ocr_text", width=240, anchor="w")
+        self.res_tree.column("new_name", width=230, anchor="w")
 
         v_scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.res_tree.yview)
         h_scroll = ttk.Scrollbar(table_frame, orient="horizontal", command=self.res_tree.xview)
         self.res_tree.configure(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
-
         self.res_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         h_scroll.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # Inline Editing on double-click
         self.res_tree.bind("<Double-1>", self.on_tree_double_click)
 
-        # Bottom Status Bar
+        # Status Bar
         self.status_bar = ttk.Frame(self.root, padding="6 3")
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-
         self.status_msg_lbl = ttk.Label(self.status_bar, text="Ready", font=("Segoe UI", 8))
         self.status_msg_lbl.pack(side=tk.LEFT)
-
-        self.status_tess_lbl = ttk.Label(
+        self.status_engine_lbl = ttk.Label(
             self.status_bar,
-            text=f"Tesseract: {'Found' if detected_tesseract else 'Not Configured'}",
-            foreground="#16a34a" if detected_tesseract else "#dc2626",
+            text="Engine: Google Lens / RapidOCR (Zero Tesseract)",
+            foreground="#16a34a",
             font=("Segoe UI", 8, "bold"),
         )
-        self.status_tess_lbl.pack(side=tk.RIGHT, padx=10)
+        self.status_engine_lbl.pack(side=tk.RIGHT, padx=10)
+
+    def _on_toggle_translate(self):
+        if self.enable_translate_var.get():
+            self.trans_frame.pack(fill=tk.X, pady=2)
+        else:
+            self.trans_frame.pack_forget()
 
     def _insert_template_tag(self, tag: str):
         curr = self.template_var.get()
         self.template_var.set(curr + tag)
 
-    def _update_font_display_label(self):
-        fpath = self.font_path_var.get()
-        if fpath and os.path.exists(fpath):
-            name = os.path.basename(fpath)
-            self.font_lbl.config(text=name, foreground="#2563eb")
-        else:
-            self.font_lbl.config(text="System Default", foreground="#64748b")
-
     def _update_status(self, msg: str):
         self.status_msg_lbl.config(text=msg)
 
     # ========================================================================
-    # FOLDER & SAMPLE IMAGE HANDLING
+    # DEMO / SAMPLE IMAGES
+    # ========================================================================
+    def on_load_demo_images(self):
+        """Loads bundled sample images and configures regions automatically."""
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        demo_dir = os.path.join(base_dir, "sample_images")
+        if not os.path.isdir(demo_dir):
+            messagebox.showinfo("Demo Images", "Sample images directory not found.")
+            return
+
+        self.folder_path = demo_dir
+        self.folder_disp_lbl.config(text=demo_dir)
+
+        files = sorted([f for f in os.listdir(demo_dir) if f.lower().endswith(SUPPORTED_EXTENSIONS)], key=natural_sort_key)
+        if not files:
+            messagebox.showinfo("Demo Images", "No images in sample folder.")
+            return
+
+        self.image_files = files
+        self.output_folder_var.set(os.path.join(demo_dir, "output"))
+        self.sample_combo["values"] = self.image_files
+        self.current_sample_idx = 0
+        self.sample_combo.current(0)
+        self.load_sample_image(self.image_files[0])
+
+        # Predefine 3 standard regions for the demo images:
+        # 1. Mã phiếu (190, 130, 480, 175) -> ratios (0.2375, 0.26, 0.6, 0.35)
+        # 2. Tên hàng (190, 200, 680, 245)  -> ratios (0.2375, 0.40, 0.85, 0.49)
+        # 3. Trạng thái (190, 340, 480, 385)-> ratios (0.2375, 0.68, 0.60, 0.77)
+        self.regions = [
+            {"rx1": 0.2375, "ry1": 0.26, "rx2": 0.6, "ry2": 0.35},
+            {"rx1": 0.2375, "ry1": 0.40, "rx2": 0.85, "ry2": 0.49},
+            {"rx1": 0.2375, "ry1": 0.68, "rx2": 0.60, "ry2": 0.77},
+        ]
+        self.selected_region_idx = 0
+        self.template_var.set("{o1}_{o2}")
+        self.redraw_canvas()
+        self._refresh_region_tree()
+        self._update_status(f"Loaded 3 demo images with 3 predefined regions. Click 'Extract Characters' to test!")
+        messagebox.showinfo("Demo Loaded", "Successfully loaded 3 sample warehouse tickets with 3 predefined extraction regions!\nClick 'Extract Characters (OCR)' to run.")
+
+    # ========================================================================
+    # FOLDER & SAMPLE IMAGE
     # ========================================================================
     def on_choose_folder(self):
         folder = filedialog.askdirectory(title="Choose Image Folder")
@@ -816,7 +762,6 @@ class BatchImageTranslatorApp:
         self.folder_path = os.path.abspath(folder)
         self.folder_disp_lbl.config(text=self.folder_path)
 
-        # Find all supported images and sort in natural order
         files = []
         for entry in os.listdir(self.folder_path):
             full_p = os.path.join(self.folder_path, entry)
@@ -827,22 +772,13 @@ class BatchImageTranslatorApp:
         self.image_files = files
 
         if not self.image_files:
-            messagebox.showwarning(
-                "No Images Found",
-                f"No supported images ({', '.join(SUPPORTED_EXTENSIONS)}) found in:\n{self.folder_path}",
-            )
+            messagebox.showwarning("No Images", f"No supported images found in:\n{self.folder_path}")
             return
 
-        # Set default output folder
-        default_out = os.path.join(self.folder_path, "output")
-        self.output_folder_var.set(default_out)
-
-        # Update Sample Combobox
+        self.output_folder_var.set(os.path.join(self.folder_path, "output"))
         self.sample_combo["values"] = self.image_files
         self.current_sample_idx = 0
         self.sample_combo.current(0)
-
-        # Load sample image
         self.load_sample_image(self.image_files[0])
         self._update_status(f"Loaded {len(self.image_files)} image(s) from {self.folder_path}")
 
@@ -850,13 +786,10 @@ class BatchImageTranslatorApp:
         img_path = os.path.join(self.folder_path, filename)
         if not os.path.isfile(img_path):
             return
-
         try:
             self.sample_image = Image.open(img_path).convert("RGB")
             orig_w, orig_h = self.sample_image.size
-            self.img_info_lbl.config(
-                text=f"{orig_w}x{orig_h} px | {self.current_sample_idx + 1}/{len(self.image_files)}"
-            )
+            self.img_info_lbl.config(text=f"{orig_w}x{orig_h} px | {self.current_sample_idx + 1}/{len(self.image_files)}")
             self.redraw_canvas()
             self._refresh_region_tree()
         except Exception as e:
@@ -864,7 +797,7 @@ class BatchImageTranslatorApp:
 
     def on_sample_combo_selected(self, event=None):
         idx = self.sample_combo.current()
-        if idx >= 0 and idx < len(self.image_files):
+        if 0 <= idx < len(self.image_files):
             self.current_sample_idx = idx
             self.load_sample_image(self.image_files[idx])
 
@@ -883,20 +816,19 @@ class BatchImageTranslatorApp:
         self.load_sample_image(self.image_files[self.current_sample_idx])
 
     # ========================================================================
-    # CANVAS & REGION DRAWING LOGIC
+    # CANVAS & REGION DRAWING
     # ========================================================================
     def on_canvas_configure(self, event=None):
         if self.sample_image:
             self.redraw_canvas()
 
     def redraw_canvas(self):
-        """Redraws the sample image scaled to fit canvas, along with all regions."""
         self.canvas.delete("all")
         if not self.sample_image:
             self.canvas.create_text(
                 self.canvas.winfo_width() // 2,
                 self.canvas.winfo_height() // 2,
-                text="Please choose a folder to display the sample image",
+                text="Please choose a folder or click 'Load Demo Images'",
                 fill="#94a3b8",
                 font=("Segoe UI", 12),
             )
@@ -906,73 +838,47 @@ class BatchImageTranslatorApp:
         canvas_h = max(10, self.canvas.winfo_height())
         orig_w, orig_h = self.sample_image.size
 
-        # Compute scaling factor to fit within canvas
         scale = min(canvas_w / orig_w, canvas_h / orig_h)
         self.sample_scale = scale
-
         disp_w = max(1, int(orig_w * scale))
         disp_h = max(1, int(orig_h * scale))
 
         self.sample_offset_x = (canvas_w - disp_w) // 2
         self.sample_offset_y = (canvas_h - disp_h) // 2
 
-        # Resize image for display
         resized = self.sample_image.resize((disp_w, disp_h), Image.Resampling.BILINEAR)
         self.sample_photo = ImageTk.PhotoImage(resized)
 
-        self.canvas.create_image(
-            self.sample_offset_x,
-            self.sample_offset_y,
-            anchor="nw",
-            image=self.sample_photo,
-        )
+        self.canvas.create_image(self.sample_offset_x, self.sample_offset_y, anchor="nw", image=self.sample_photo)
 
-        # Draw all saved regions
         for idx, reg in enumerate(self.regions):
             self._draw_region_on_canvas(idx, reg)
 
     def _draw_region_on_canvas(self, idx: int, reg: dict):
         orig_w, orig_h = self.sample_image.size
-        # Relative to screen coordinates
         cx1 = self.sample_offset_x + reg["rx1"] * orig_w * self.sample_scale
         cy1 = self.sample_offset_y + reg["ry1"] * orig_h * self.sample_scale
         cx2 = self.sample_offset_x + reg["rx2"] * orig_w * self.sample_scale
         cy2 = self.sample_offset_y + reg["ry2"] * orig_h * self.sample_scale
 
         is_selected = idx == self.selected_region_idx
-        border_color = "#eab308" if is_selected else "#06b6d4"  # Gold if selected, cyan otherwise
+        border_color = "#eab308" if is_selected else "#06b6d4"
         width = 3 if is_selected else 2
 
-        # Draw rectangle
-        self.canvas.create_rectangle(
-            cx1, cy1, cx2, cy2, outline=border_color, width=width, tags=f"region_{idx}"
-        )
+        self.canvas.create_rectangle(cx1, cy1, cx2, cy2, outline=border_color, width=width, tags=f"region_{idx}")
 
-        # Draw badge with region number
-        badge_w = 20
+        badge_txt = f"# {idx+1} [{{o{idx+1}}}]"
+        badge_w = 55
         badge_h = 18
-        bx1 = cx1
-        by1 = max(self.sample_offset_y, cy1 - badge_h)
-        bx2 = bx1 + badge_w
-        by2 = by1 + badge_h
-
-        self.canvas.create_rectangle(
-            bx1, by1, bx2, by2, fill=border_color, outline="", tags=f"region_{idx}"
-        )
-        self.canvas.create_text(
-            (bx1 + bx2) / 2,
-            (by1 + by2) / 2,
-            text=f"#{idx + 1}",
-            fill="#0f172a",
-            font=("Segoe UI", 9, "bold"),
-            tags=f"region_{idx}",
-        )
+        bx1, by1 = cx1, max(self.sample_offset_y, cy1 - badge_h)
+        bx2, by2 = bx1 + badge_w, by1 + badge_h
+        self.canvas.create_rectangle(bx1, by1, bx2, by2, fill=border_color, outline="", tags=f"region_{idx}")
+        self.canvas.create_text((bx1 + bx2) / 2, (by1 + by2) / 2, text=badge_txt, fill="#0f172a", font=("Segoe UI", 8, "bold"), tags=f"region_{idx}")
 
     def on_canvas_press(self, event):
         if not self.sample_image:
             return
 
-        # Check if user clicked on an existing region
         orig_w, orig_h = self.sample_image.size
         clicked_reg_idx = -1
         for idx in reversed(range(len(self.regions))):
@@ -989,14 +895,11 @@ class BatchImageTranslatorApp:
             self._select_region(clicked_reg_idx)
             return
 
-        # Start drawing a new region
         self.drag_start_x = event.x
         self.drag_start_y = event.y
         if self.active_rect_id:
             self.canvas.delete(self.active_rect_id)
-        self.active_rect_id = self.canvas.create_rectangle(
-            event.x, event.y, event.x, event.y, outline="#f59e0b", width=2, dash=(4, 4)
-        )
+        self.active_rect_id = self.canvas.create_rectangle(event.x, event.y, event.x, event.y, outline="#f59e0b", width=2, dash=(4, 4))
 
     def on_canvas_drag(self, event):
         if self.active_rect_id:
@@ -1009,20 +912,15 @@ class BatchImageTranslatorApp:
         self.canvas.delete(self.active_rect_id)
         self.active_rect_id = None
 
-        # Check drag distance
         dx = abs(event.x - self.drag_start_x)
         dy = abs(event.y - self.drag_start_y)
         if dx < 6 or dy < 6:
-            return  # Ignored accidental small click
+            return
 
         orig_w, orig_h = self.sample_image.size
-        # Canvas to image coords
-        sx1 = min(self.drag_start_x, event.x)
-        sy1 = min(self.drag_start_y, event.y)
-        sx2 = max(self.drag_start_x, event.x)
-        sy2 = max(self.drag_start_y, event.y)
+        sx1, sy1 = min(self.drag_start_x, event.x), min(self.drag_start_y, event.y)
+        sx2, sy2 = max(self.drag_start_x, event.x), max(self.drag_start_y, event.y)
 
-        # Clamp to image area
         ix1 = max(0.0, min(float(orig_w), (sx1 - self.sample_offset_x) / self.sample_scale))
         iy1 = max(0.0, min(float(orig_h), (sy1 - self.sample_offset_y) / self.sample_scale))
         ix2 = max(0.0, min(float(orig_w), (sx2 - self.sample_offset_x) / self.sample_scale))
@@ -1031,16 +929,12 @@ class BatchImageTranslatorApp:
         if ix2 - ix1 < 4 or iy2 - iy1 < 4:
             return
 
-        # Convert to relative ratios [0.0 - 1.0]
-        rx1 = round(ix1 / orig_w, 4)
-        ry1 = round(iy1 / orig_h, 4)
-        rx2 = round(ix2 / orig_w, 4)
-        ry2 = round(iy2 / orig_h, 4)
+        rx1, ry1 = round(ix1 / orig_w, 4), round(iy1 / orig_h, 4)
+        rx2, ry2 = round(ix2 / orig_w, 4), round(iy2 / orig_h, 4)
 
         new_reg = {"rx1": rx1, "ry1": ry1, "rx2": rx2, "ry2": ry2}
         self.regions.append(new_reg)
         self.selected_region_idx = len(self.regions) - 1
-
         self.redraw_canvas()
         self._refresh_region_tree()
         self._populate_manual_edit_entries(new_reg)
@@ -1048,7 +942,6 @@ class BatchImageTranslatorApp:
     def _select_region(self, idx: int):
         self.selected_region_idx = idx
         self.redraw_canvas()
-        # Highlight in treeview
         if 0 <= idx < len(self.regions):
             items = self.reg_tree.get_children()
             if idx < len(items):
@@ -1057,7 +950,6 @@ class BatchImageTranslatorApp:
             self._populate_manual_edit_entries(self.regions[idx])
 
     def _refresh_region_tree(self):
-        """Updates the region treeview list."""
         for item in self.reg_tree.get_children():
             self.reg_tree.delete(item)
 
@@ -1065,14 +957,13 @@ class BatchImageTranslatorApp:
         orig_h = self.sample_image.size[1] if self.sample_image else 1
 
         for idx, reg in enumerate(self.regions):
-            px1 = int(round(reg["rx1"] * orig_w))
-            py1 = int(round(reg["ry1"] * orig_h))
-            px2 = int(round(reg["rx2"] * orig_w))
-            py2 = int(round(reg["ry2"] * orig_h))
-            px_str = f"({px1}, {py1}) to ({px2}, {py2})"
-            ratio_str = f"[{reg['rx1']:.3f}, {reg['ry1']:.3f}, {reg['rx2']:.3f}, {reg['ry2']:.3f}]"
+            px1, py1 = int(round(reg["rx1"] * orig_w)), int(round(reg["ry1"] * orig_h))
+            px2, py2 = int(round(reg["rx2"] * orig_w)), int(round(reg["ry2"] * orig_h))
+            px_str = f"({px1}, {py1}) - ({px2}, {py2})"
+            ratio_str = f"[{reg['rx1']:.2f}, {reg['ry1']:.2f}, {reg['rx2']:.2f}, {reg['ry2']:.2f}]"
+            var_str = f"{{o{idx+1}}}"
 
-            iid = self.reg_tree.insert("", "end", values=(f"#{idx+1}", px_str, ratio_str))
+            iid = self.reg_tree.insert("", "end", values=(f"#{idx+1}", px_str, ratio_str, var_str))
             if idx == self.selected_region_idx:
                 self.reg_tree.selection_set(iid)
 
@@ -1090,17 +981,14 @@ class BatchImageTranslatorApp:
         if not self.sample_image:
             return
         orig_w, orig_h = self.sample_image.size
-        x1 = int(round(reg["rx1"] * orig_w))
-        y1 = int(round(reg["ry1"] * orig_h))
-        x2 = int(round(reg["rx2"] * orig_w))
-        y2 = int(round(reg["ry2"] * orig_h))
+        x1, y1 = int(round(reg["rx1"] * orig_w)), int(round(reg["ry1"] * orig_h))
+        x2, y2 = int(round(reg["rx2"] * orig_w)), int(round(reg["ry2"] * orig_h))
 
         for ent, val in [(self.ent_x1, x1), (self.ent_y1, y1), (self.ent_x2, x2), (self.ent_y2, y2)]:
             ent.delete(0, tk.END)
             ent.insert(0, str(val))
 
     def on_update_region_coords(self):
-        """Applies manual pixel coordinates to the currently selected region."""
         if self.selected_region_idx < 0 or self.selected_region_idx >= len(self.regions):
             messagebox.showinfo("Select Region", "Please select a region to edit.")
             return
@@ -1108,19 +996,15 @@ class BatchImageTranslatorApp:
             return
 
         try:
-            x1 = int(self.ent_x1.get().strip())
-            y1 = int(self.ent_y1.get().strip())
-            x2 = int(self.ent_x2.get().strip())
-            y2 = int(self.ent_y2.get().strip())
+            x1, y1 = int(self.ent_x1.get().strip()), int(self.ent_y1.get().strip())
+            x2, y2 = int(self.ent_x2.get().strip()), int(self.ent_y2.get().strip())
         except ValueError:
             messagebox.showerror("Invalid Input", "Please enter integer pixel numbers for X1, Y1, X2, Y2.")
             return
 
         orig_w, orig_h = self.sample_image.size
-        nx1 = max(0, min(orig_w, min(x1, x2)))
-        ny1 = max(0, min(orig_h, min(y1, y2)))
-        nx2 = max(0, min(orig_w, max(x1, x2)))
-        ny2 = max(0, min(orig_h, max(y1, y2)))
+        nx1, ny1 = max(0, min(orig_w, min(x1, x2))), max(0, min(orig_h, min(y1, y2)))
+        nx2, ny2 = max(0, min(orig_w, max(x1, x2))), max(0, min(orig_h, max(y1, y2)))
 
         if nx2 - nx1 < 4 or ny2 - ny1 < 4:
             messagebox.showerror("Invalid Size", "Region must be at least 4x4 pixels.")
@@ -1152,27 +1036,20 @@ class BatchImageTranslatorApp:
             self.redraw_canvas()
             self._refresh_region_tree()
 
-    # ========================================================================
-    # CONFIGURATION SAVE & LOAD (JSON)
-    # ========================================================================
     def on_save_config(self):
-        fpath = filedialog.asksaveasfilename(
-            title="Save Configuration",
-            defaultextension=".json",
-            filetypes=[("JSON Files", "*.json")],
-        )
+        fpath = filedialog.asksaveasfilename(title="Save Configuration", defaultextension=".json", filetypes=[("JSON Files", "*.json")])
         if not fpath:
             return
 
         cfg = {
             "regions": self.regions,
+            "ocr_engine": self.ocr_engine_var.get(),
+            "enable_translate": self.enable_translate_var.get(),
             "source_lang": self.source_lang_var.get(),
             "target_lang": self.target_lang_var.get(),
-            "psm": self.psm_var.get(),
             "name_template": self.template_var.get(),
+            "export_mode": self.export_mode_var.get(),
             "output_format": self.format_var.get(),
-            "font_path": self.font_path_var.get(),
-            "tesseract_cmd": self.tesseract_cmd_var.get(),
         }
 
         try:
@@ -1183,10 +1060,7 @@ class BatchImageTranslatorApp:
             messagebox.showerror("Save Error", f"Failed to save configuration:\n{e}")
 
     def on_load_config(self):
-        fpath = filedialog.askopenfilename(
-            title="Load Configuration",
-            filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")],
-        )
+        fpath = filedialog.askopenfilename(title="Load Configuration", filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")])
         if not fpath:
             return
 
@@ -1198,28 +1072,27 @@ class BatchImageTranslatorApp:
                 self.regions = cfg["regions"]
                 self.selected_region_idx = 0 if self.regions else -1
 
+            if "ocr_engine" in cfg:
+                self.ocr_engine_var.set(cfg["ocr_engine"])
+
+            if "enable_translate" in cfg:
+                self.enable_translate_var.set(cfg["enable_translate"])
+                self._on_toggle_translate()
+
             if "source_lang" in cfg and cfg["source_lang"] in LANGUAGES:
                 self.source_lang_var.set(cfg["source_lang"])
 
             if "target_lang" in cfg and cfg["target_lang"] in LANGUAGES:
                 self.target_lang_var.set(cfg["target_lang"])
 
-            if "psm" in cfg:
-                self.psm_var.set(cfg["psm"])
-
             if "name_template" in cfg:
                 self.template_var.set(cfg["name_template"])
 
+            if "export_mode" in cfg:
+                self.export_mode_var.set(cfg["export_mode"])
+
             if "output_format" in cfg:
                 self.format_var.set(cfg["output_format"])
-
-            if "font_path" in cfg and os.path.exists(cfg["font_path"]):
-                self.font_path_var.set(cfg["font_path"])
-                self._update_font_display_label()
-
-            if "tesseract_cmd" in cfg and cfg["tesseract_cmd"]:
-                self.tesseract_cmd_var.set(cfg["tesseract_cmd"])
-                pytesseract.pytesseract.tesseract_cmd = cfg["tesseract_cmd"]
 
             self.redraw_canvas()
             self._refresh_region_tree()
@@ -1227,125 +1100,39 @@ class BatchImageTranslatorApp:
         except Exception as e:
             messagebox.showerror("Load Error", f"Failed to load configuration:\n{e}")
 
-    def on_choose_font(self):
-        fpath = filedialog.askopenfilename(
-            title="Choose TTF/OTF Font",
-            filetypes=[("Font Files", "*.ttf;*.otf;*.ttc"), ("All Files", "*.*")],
-        )
-        if fpath:
-            self.font_path_var.set(fpath)
-            self._update_font_display_label()
-
     def on_browse_output_folder(self):
         folder = filedialog.askdirectory(title="Select Output Folder")
         if folder:
             self.output_folder_var.set(os.path.abspath(folder))
 
-    def on_tesseract_settings(self):
-        """Dialog to configure and test the Tesseract-OCR binary path."""
-        win = tk.Toplevel(self.root)
-        win.title("Tesseract-OCR Settings")
-        win.geometry("540x210")
-        win.resizable(False, False)
-        win.transient(self.root)
-        win.grab_set()
-
-        ttk.Label(
-            win,
-            text="Specify the path to the Tesseract executable:",
-            style="Header.TLabel",
-        ).pack(anchor="w", padx=15, pady=(15, 5))
-
-        f_entry = ttk.Frame(win)
-        f_entry.pack(fill=tk.X, padx=15, pady=5)
-
-        tess_entry = ttk.Entry(f_entry, textvariable=self.tesseract_cmd_var)
-        tess_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-
-        def browse_tess():
-            curr_os = platform.system()
-            patterns = [("Executable", "*.exe" if curr_os == "Windows" else "*")]
-            p = filedialog.askopenfilename(title="Select Tesseract Executable", filetypes=patterns)
-            if p:
-                self.tesseract_cmd_var.set(p)
-
-        ttk.Button(f_entry, text="Browse...", command=browse_tess).pack(side=tk.RIGHT)
-
-        test_result_lbl = ttk.Label(win, text="", font=("Segoe UI", 9))
-        test_result_lbl.pack(anchor="w", padx=15, pady=5)
-
-        def test_tess():
-            cmd = self.tesseract_cmd_var.get().strip()
-            pytesseract.pytesseract.tesseract_cmd = cmd
-            try:
-                ver = pytesseract.get_tesseract_version()
-                test_result_lbl.config(
-                    text=f"✅ Tesseract version {ver} is working properly!",
-                    foreground="#16a34a",
-                )
-                self.status_tess_lbl.config(text="Tesseract: Working", foreground="#16a34a")
-            except Exception as e:
-                test_result_lbl.config(
-                    text=f"❌ Failed: {str(e)[:70]}",
-                    foreground="#dc2626",
-                )
-                self.status_tess_lbl.config(text="Tesseract: Error", foreground="#dc2626")
-
-        btn_bar = ttk.Frame(win)
-        btn_bar.pack(fill=tk.X, padx=15, pady=10)
-
-        ttk.Button(btn_bar, text="Test Connection", command=test_tess).pack(side=tk.LEFT)
-        ttk.Button(btn_bar, text="Save & Close", command=win.destroy).pack(side=tk.RIGHT)
-
     # ========================================================================
-    # OCR & TRANSLATION ENGINE (BACKGROUND THREAD)
+    # CHARACTER EXTRACTION (OCR)
     # ========================================================================
-    def on_start_scan_and_translate(self):
+    def on_start_extract_characters(self):
         if not self.image_files:
-            messagebox.showwarning("No Images", "Please open an image folder first.")
+            messagebox.showwarning("No Images", "Please open an image folder or click 'Load Demo Images' first.")
             return
 
         if not self.regions:
-            messagebox.showwarning(
-                "No Regions",
-                "Please draw at least one text region box on the sample image first.",
-            )
-            return
-
-        # Check Tesseract path
-        tess_cmd = self.tesseract_cmd_var.get().strip()
-        if tess_cmd:
-            pytesseract.pytesseract.tesseract_cmd = tess_cmd
-
-        try:
-            pytesseract.get_tesseract_version()
-        except Exception:
-            resp = messagebox.askyesno(
-                "Tesseract Not Found",
-                "Tesseract-OCR was not found or failed to execute.\n"
-                "Would you like to configure the Tesseract path now?",
-            )
-            if resp:
-                self.on_tesseract_settings()
+            messagebox.showwarning("No Regions", "Please draw at least one region on the image first.")
             return
 
         self.is_processing = True
         self.stop_requested = False
         self._toggle_ui_state(False)
 
-        # Clear existing table data
         for item in self.res_tree.get_children():
             self.res_tree.delete(item)
         self.results_data.clear()
 
-        # Start thread
-        thread = threading.Thread(target=self._scan_and_translate_worker, daemon=True)
+        thread = threading.Thread(target=self._extract_worker, daemon=True)
         thread.start()
 
     def _toggle_ui_state(self, enabled: bool):
         state = "normal" if enabled else "disabled"
         self.btn_scan.config(state=state)
         self.btn_export.config(state=state)
+        self.btn_csv.config(state=state)
         self.btn_preview.config(state=state)
         self.btn_cancel.config(state="normal" if not enabled else "disabled")
 
@@ -1354,23 +1141,113 @@ class BatchImageTranslatorApp:
             self.stop_requested = True
             self._update_status("Stopping process... Please wait.")
 
-    def _scan_and_translate_worker(self):
+    def _extract_worker(self):
+        chosen_engine = self.ocr_engine_var.get()
+        if "Google" in chosen_engine and HAVE_LENS:
+            asyncio.run(self._async_google_extract())
+        elif HAVE_RAPIDOCR:
+            self._sync_rapidocr_extract()
+        elif HAVE_LENS:
+            asyncio.run(self._async_google_extract())
+        else:
+            self.root.after(0, messagebox.showerror, "No Engine", "Neither Google Lens nor RapidOCR is available.")
+            self.is_processing = False
+            self._toggle_ui_state(True)
+
+    async def _async_google_extract(self):
         total_images = len(self.image_files)
-        src_lang_name = self.source_lang_var.get()
-        tgt_lang_name = self.target_lang_var.get()
+        do_translate = self.enable_translate_var.get()
+        src_code = LANGUAGES.get(self.source_lang_var.get(), "auto")
+        tgt_code = LANGUAGES.get(self.target_lang_var.get(), "vi")
 
-        ocr_lang = LANGUAGES[src_lang_name]["ocr"]
-        trans_src = LANGUAGES[src_lang_name]["trans"]
-        trans_tgt = LANGUAGES[tgt_lang_name]["trans"]
+        lens = LensAPI()
+        try:
+            for img_idx, filename in enumerate(self.image_files):
+                if self.stop_requested:
+                    break
 
-        # Parse PSM parameter
-        psm_str = self.psm_var.get()
-        psm_match = re.match(r"^(\d+)", psm_str)
-        psm_val = psm_match.group(1) if psm_match else "6"
-        tess_config = f"--psm {psm_val}"
+                pct = int(((img_idx + 1) / total_images) * 100)
+                self.root.after(0, self._update_progress, pct, f"{img_idx + 1}/{total_images}")
+                self.root.after(0, self._update_status, f"Extracting characters ({img_idx + 1}/{total_images}): {filename}...")
 
-        # Initialize GoogleTranslator instance
-        translator = GoogleTranslator(source=trans_src, target=trans_tgt)
+                img_path = os.path.join(self.folder_path, filename)
+                try:
+                    img = Image.open(img_path).convert("RGB")
+                except Exception as e:
+                    print(f"Error opening image {filename}: {e}", file=sys.stderr)
+                    continue
+
+                orig_w, orig_h = img.size
+                file_stem = os.path.splitext(filename)[0]
+
+                image_ocr_texts = []
+                image_trans_texts = []
+
+                for r_idx, reg in enumerate(self.regions):
+                    if self.stop_requested:
+                        break
+
+                    x1 = int(round(reg["rx1"] * orig_w))
+                    y1 = int(round(reg["ry1"] * orig_h))
+                    x2 = int(round(reg["rx2"] * orig_w))
+                    y2 = int(round(reg["ry2"] * orig_h))
+                    x1 = max(0, min(orig_w - 1, x1))
+                    y1 = max(0, min(orig_h - 1, y1))
+                    x2 = max(x1 + 1, min(orig_w, x2))
+                    y2 = max(y1 + 1, min(orig_h, y2))
+
+                    crop_img = img.crop((x1, y1, x2, y2))
+
+                    try:
+                        res = await lens.process_image(
+                            crop_img,
+                            source_translation_language=src_code if src_code != "auto" else None,
+                            target_translation_language=tgt_code if do_translate else None,
+                        )
+                        ocr_text = res.get("ocr_text", "").strip()
+                        trans_text = res.get("translated_text", "").strip() if do_translate else ocr_text
+                    except Exception as e:
+                        print(f"Extraction error: {e}", file=sys.stderr)
+                        ocr_text = ""
+                        trans_text = ""
+
+                    image_ocr_texts.append(ocr_text)
+                    image_trans_texts.append(trans_text)
+
+                new_file_stem = compute_filename(
+                    self.template_var.get(),
+                    img_idx + 1,
+                    file_stem,
+                    image_ocr_texts,
+                    image_trans_texts,
+                )
+                orig_ext = os.path.splitext(filename)[1].lstrip(".")
+                chosen_fmt = self.format_var.get().lower()
+                final_ext = "png" if "png" in chosen_fmt else ("jpg" if "jpg" in chosen_fmt else orig_ext)
+                new_full_name = f"{new_file_stem}.{final_ext}"
+
+                for r_idx in range(len(self.regions)):
+                    row_data = {
+                        "orig_file": filename,
+                        "region": f"#{r_idx + 1}",
+                        "var_tag": f"{{o{r_idx + 1}}}",
+                        "region_idx": r_idx,
+                        "img_idx": img_idx,
+                        "ocr_text": image_ocr_texts[r_idx],
+                        "translation": image_trans_texts[r_idx],
+                        "new_name": new_full_name,
+                    }
+                    self.results_data.append(row_data)
+                    self.root.after(0, self._insert_tree_row, row_data)
+
+        finally:
+            await lens.aclose()
+
+        self.root.after(0, self._on_scan_finished)
+
+    def _sync_rapidocr_extract(self):
+        total_images = len(self.image_files)
+        engine = RapidOCR()
 
         for img_idx, filename in enumerate(self.image_files):
             if self.stop_requested:
@@ -1378,7 +1255,7 @@ class BatchImageTranslatorApp:
 
             pct = int(((img_idx + 1) / total_images) * 100)
             self.root.after(0, self._update_progress, pct, f"{img_idx + 1}/{total_images}")
-            self.root.after(0, self._update_status, f"Scanning ({img_idx + 1}/{total_images}): {filename}...")
+            self.root.after(0, self._update_status, f"RapidOCR extracting ({img_idx + 1}/{total_images}): {filename}...")
 
             img_path = os.path.join(self.folder_path, filename)
             try:
@@ -1391,101 +1268,55 @@ class BatchImageTranslatorApp:
             file_stem = os.path.splitext(filename)[0]
 
             image_ocr_texts = []
-            image_trans_texts = []
 
-            # Process each region
             for r_idx, reg in enumerate(self.regions):
                 if self.stop_requested:
                     break
 
-                # Compute pixel coordinates
                 x1 = int(round(reg["rx1"] * orig_w))
                 y1 = int(round(reg["ry1"] * orig_h))
                 x2 = int(round(reg["rx2"] * orig_w))
                 y2 = int(round(reg["ry2"] * orig_h))
-
-                # Clamp coords
                 x1 = max(0, min(orig_w - 1, x1))
                 y1 = max(0, min(orig_h - 1, y1))
                 x2 = max(x1 + 1, min(orig_w, x2))
                 y2 = max(y1 + 1, min(orig_h, y2))
 
                 crop_img = img.crop((x1, y1, x2, y2))
-
-                # OCR Preprocessing: Grayscale -> Autocontrast -> Upscale if short
                 try:
-                    gray = crop_img.convert("L")
-                    enhanced = ImageOps.autocontrast(gray)
-                    if crop_img.height < 60:
-                        factor = max(2.0, 60.0 / max(1, crop_img.height))
-                        nw = int(round(crop_img.width * factor))
-                        nh = int(round(crop_img.height * factor))
-                        enhanced = enhanced.resize((nw, nh), Image.Resampling.LANCZOS)
-
-                    ocr_raw = pytesseract.image_to_string(enhanced, lang=ocr_lang, config=tess_config)
-                    ocr_text = ocr_raw.strip()
+                    res, _ = engine(np.array(crop_img))
+                    ocr_text = " ".join([line[1] for line in res]).strip() if res else ""
                 except Exception as e:
-                    ocr_text = f"[OCR Error: {str(e)[:30]}]"
+                    ocr_text = ""
 
                 image_ocr_texts.append(ocr_text)
 
-                # Translation with caching & error handling
-                if not ocr_text or ocr_text.startswith("[OCR Error"):
-                    translated_text = ""
-                elif ocr_text in self.translation_cache:
-                    translated_text = self.translation_cache[ocr_text]
-                else:
-                    try:
-                        translated_text = translator.translate(ocr_text)
-                        if translated_text:
-                            self.translation_cache[ocr_text] = translated_text
-                        else:
-                            translated_text = ocr_text
-                    except Exception as e:
-                        # Graceful fallback: retry once or save error text
-                        time.sleep(0.4)
-                        try:
-                            translated_text = translator.translate(ocr_text)
-                            self.translation_cache[ocr_text] = translated_text
-                        except Exception as e2:
-                            print(f"Translation error on '{ocr_text}': {e2}", file=sys.stderr)
-                            translated_text = ocr_text  # Fallback to original text
-
-                image_trans_texts.append(translated_text)
-
-            # Compute new filename
             new_file_stem = compute_filename(
                 self.template_var.get(),
                 img_idx + 1,
                 file_stem,
                 image_ocr_texts,
-                image_trans_texts,
+                image_ocr_texts,
             )
             orig_ext = os.path.splitext(filename)[1].lstrip(".")
             chosen_fmt = self.format_var.get().lower()
-            if "png" in chosen_fmt:
-                final_ext = "png"
-            elif "jpg" in chosen_fmt:
-                final_ext = "jpg"
-            else:
-                final_ext = orig_ext
+            final_ext = "png" if "png" in chosen_fmt else ("jpg" if "jpg" in chosen_fmt else orig_ext)
             new_full_name = f"{new_file_stem}.{final_ext}"
 
-            # Append to results data
             for r_idx in range(len(self.regions)):
                 row_data = {
                     "orig_file": filename,
                     "region": f"#{r_idx + 1}",
+                    "var_tag": f"{{o{r_idx + 1}}}",
                     "region_idx": r_idx,
                     "img_idx": img_idx,
                     "ocr_text": image_ocr_texts[r_idx],
-                    "translation": image_trans_texts[r_idx],
+                    "translation": image_ocr_texts[r_idx],
                     "new_name": new_full_name,
                 }
                 self.results_data.append(row_data)
                 self.root.after(0, self._insert_tree_row, row_data)
 
-        # Worker finished
         self.root.after(0, self._on_scan_finished)
 
     def _insert_tree_row(self, row: dict):
@@ -1495,8 +1326,8 @@ class BatchImageTranslatorApp:
             values=(
                 row["orig_file"],
                 row["region"],
+                row["var_tag"],
                 row["ocr_text"],
-                row["translation"],
                 row["new_name"],
             ),
         )
@@ -1509,16 +1340,15 @@ class BatchImageTranslatorApp:
         self.is_processing = False
         self._toggle_ui_state(True)
         self.progress_bar["value"] = 100
-        status_txt = "Stopped by user." if self.stop_requested else "Scan & Translation complete!"
+        status_txt = "Stopped by user." if self.stop_requested else "Character extraction complete!"
         self.progress_lbl.config(text="Complete" if not self.stop_requested else "Stopped")
         self._update_status(status_txt)
-        messagebox.showinfo("Scan Completed", f"{status_txt}\nProcessed {len(self.image_files)} image(s).")
+        messagebox.showinfo("Extraction Completed", f"{status_txt}\nProcessed {len(self.image_files)} image(s).")
 
     # ========================================================================
     # INLINE EDITING IN TREEVIEW TABLE
     # ========================================================================
     def on_tree_double_click(self, event):
-        """Allows direct inline editing of OCR Text and Translation cells."""
         region = self.res_tree.identify_region(event.x, event.y)
         if region != "cell":
             return
@@ -1529,15 +1359,14 @@ class BatchImageTranslatorApp:
             return
 
         col_idx = int(column.replace("#", "")) - 1
-        # Only allow editing OCR Text (col 2) and Translation (col 3)
-        if col_idx not in (2, 3):
+        # Only allow editing Extracted Text (col 3)
+        if col_idx != 3:
             return
 
         x, y, w, h = self.res_tree.bbox(item, column)
         current_values = list(self.res_tree.item(item, "values"))
         current_text = current_values[col_idx]
 
-        # Create inline floating Entry
         edit_entry = ttk.Entry(self.res_tree)
         edit_entry.place(x=x, y=y, width=w, height=h)
         edit_entry.insert(0, current_text)
@@ -1551,20 +1380,11 @@ class BatchImageTranslatorApp:
             current_values[col_idx] = new_text
             self.res_tree.item(item, values=current_values)
 
-            # Update results_data and recalculate new filename
             item_idx = self.res_tree.index(item)
             if 0 <= item_idx < len(self.results_data):
-                if col_idx == 2:
-                    self.results_data[item_idx]["ocr_text"] = new_text
-                elif col_idx == 3:
-                    self.results_data[item_idx]["translation"] = new_text
+                self.results_data[item_idx]["ocr_text"] = new_text
+                self.results_data[item_idx]["translation"] = new_text
 
-                # Update translation cache if translation changed
-                ocr_k = self.results_data[item_idx]["ocr_text"]
-                if col_idx == 3 and ocr_k:
-                    self.translation_cache[ocr_k] = new_text
-
-                # Recompute filenames for this image
                 target_filename = self.results_data[item_idx]["orig_file"]
                 img_idx = self.results_data[item_idx]["img_idx"]
                 self._recalculate_filenames_for_image(target_filename, img_idx)
@@ -1574,9 +1394,7 @@ class BatchImageTranslatorApp:
         edit_entry.bind("<Escape>", lambda e: edit_entry.destroy())
 
     def _recalculate_filenames_for_image(self, filename: str, img_idx: int):
-        """Recalculates new name for all rows of a given image and updates the table."""
         orig_stem = os.path.splitext(filename)[0]
-        # Gather all OCR and translations for this image
         ocr_texts = []
         trans_texts = []
         row_indices = []
@@ -1597,12 +1415,7 @@ class BatchImageTranslatorApp:
 
         orig_ext = os.path.splitext(filename)[1].lstrip(".")
         chosen_fmt = self.format_var.get().lower()
-        if "png" in chosen_fmt:
-            final_ext = "png"
-        elif "jpg" in chosen_fmt:
-            final_ext = "jpg"
-        else:
-            final_ext = orig_ext
+        final_ext = "png" if "png" in chosen_fmt else ("jpg" if "jpg" in chosen_fmt else orig_ext)
         updated_name = f"{new_stem}.{final_ext}"
 
         tree_items = self.res_tree.get_children()
@@ -1614,7 +1427,6 @@ class BatchImageTranslatorApp:
                 self.res_tree.item(tree_items[r_idx], values=vals)
 
     def _on_template_or_format_changed(self, *args):
-        """Live updates all rows in results table when template or format changes."""
         if not self.results_data:
             return
         images_seen = {}
@@ -1626,10 +1438,33 @@ class BatchImageTranslatorApp:
             self._recalculate_filenames_for_image(fn, img_idx)
 
     # ========================================================================
-    # PREVIEW WINDOW
+    # PREVIEW & EXPORT CSV
     # ========================================================================
+    def on_export_csv(self):
+        """Exports the extracted character table to a CSV file."""
+        if not self.results_data:
+            messagebox.showinfo("Export CSV", "No extracted data available to export. Please run extraction first.")
+            return
+
+        fpath = filedialog.asksaveasfilename(
+            title="Save Extracted Characters CSV",
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
+        )
+        if not fpath:
+            return
+
+        try:
+            with open(fpath, "w", newline="", encoding="utf-8-sig") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["Original File", "Region", "Tag", "Extracted Characters", "New Filename"])
+                for row in self.results_data:
+                    writer.writerow([row["orig_file"], row["region"], row["var_tag"], row["ocr_text"], row["new_name"]])
+            messagebox.showinfo("CSV Exported", f"Successfully exported extracted data to:\n{fpath}")
+        except Exception as e:
+            messagebox.showerror("CSV Error", f"Failed to export CSV:\n{e}")
+
     def on_preview_selected(self):
-        """Renders and previews the output image for the selected row."""
         selected = self.res_tree.selection()
         if selected:
             item_idx = self.res_tree.index(selected[0])
@@ -1645,29 +1480,21 @@ class BatchImageTranslatorApp:
             messagebox.showerror("Preview Error", f"Unable to generate preview for {target_filename}")
             return
 
-        # Open Preview Modal Window
         prev_win = tk.Toplevel(self.root)
         prev_win.title(f"Preview Output: {target_filename}")
         prev_win.geometry("900x700")
 
-        lbl_hdr = ttk.Label(
-            prev_win,
-            text=f"Preview of rendered output image: {target_filename}",
-            style="Header.TLabel",
-        )
+        lbl_hdr = ttk.Label(prev_win, text=f"Preview of output image: {target_filename}", style="Header.TLabel")
         lbl_hdr.pack(anchor="w", padx=10, pady=8)
 
         p_canvas = tk.Canvas(prev_win, bg="#0f172a", highlightthickness=0)
         p_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
-        # Scale image to fit preview canvas
         def fit_preview(evt=None):
-            cw = max(50, p_canvas.winfo_width())
-            ch = max(50, p_canvas.winfo_height())
+            cw, ch = max(50, p_canvas.winfo_width()), max(50, p_canvas.winfo_height())
             iw, ih = rendered_img.size
             sc = min(cw / iw, ch / ih, 1.0)
-            dw = max(1, int(iw * sc))
-            dh = max(1, int(ih * sc))
+            dw, dh = max(1, int(iw * sc)), max(1, int(ih * sc))
 
             resized = rendered_img.resize((dw, dh), Image.Resampling.BILINEAR)
             prev_win._photo = ImageTk.PhotoImage(resized)
@@ -1678,12 +1505,6 @@ class BatchImageTranslatorApp:
         fit_preview()
 
     def _render_output_image(self, filename: str) -> Image.Image:
-        """
-        Creates the output image:
-        - Clones the original image.
-        - Paints over old text regions with the median border color.
-        - Draws the translated text with word wrapping and auto-font reduction.
-        """
         img_path = os.path.join(self.folder_path, filename)
         if not os.path.isfile(img_path):
             return None
@@ -1696,11 +1517,10 @@ class BatchImageTranslatorApp:
         draw = ImageDraw.Draw(out_img)
         orig_w, orig_h = out_img.size
 
-        # Find translated texts for this file from results_data (or fallback to empty)
-        file_translations = {}
+        file_texts = {}
         for row in self.results_data:
             if row["orig_file"] == filename:
-                file_translations[row["region_idx"]] = row["translation"]
+                file_texts[row["region_idx"]] = row["ocr_text"]
 
         font_path = self.font_path_var.get()
 
@@ -1709,26 +1529,17 @@ class BatchImageTranslatorApp:
             y1 = int(round(reg["ry1"] * orig_h))
             x2 = int(round(reg["rx2"] * orig_w))
             y2 = int(round(reg["ry2"] * orig_h))
-
-            # Clamp coordinates
-            x1 = max(0, min(orig_w - 1, x1))
-            y1 = max(0, min(orig_h - 1, y1))
-            x2 = max(x1 + 1, min(orig_w, x2))
-            y2 = max(y1 + 1, min(orig_h, y2))
+            x1, y1 = max(0, min(orig_w - 1, x1)), max(0, min(orig_h - 1, y1))
+            x2, y2 = max(x1 + 1, min(orig_w, x2)), max(y1 + 1, min(orig_h, y2))
 
             box = (x1, y1, x2, y2)
-
-            # 1. Compute median color of border pixels
             median_color = get_box_median_color(out_img, box)
-
-            # 2. Paint over the old text region
             draw.rectangle(box, fill=median_color)
 
-            # 3. Draw translated text
-            translated_text = file_translations.get(idx, f"Region #{idx+1}")
+            txt = file_texts.get(idx, f"Region #{idx+1}")
             fit_and_draw_text(
                 draw,
-                translated_text,
+                txt,
                 box,
                 font_path=font_path,
                 padding=4,
@@ -1738,15 +1549,15 @@ class BatchImageTranslatorApp:
         return out_img
 
     # ========================================================================
-    # EXPORT NEW IMAGES (BACKGROUND THREAD)
+    # EXPORT & RENAME IMAGES
     # ========================================================================
     def on_start_export_images(self):
         if not self.image_files:
             messagebox.showwarning("No Images", "Please open an image folder first.")
             return
 
-        if not self.regions:
-            messagebox.showwarning("No Regions", "Please define at least one text region first.")
+        if not self.results_data:
+            messagebox.showwarning("Not Extracted", "Please click 'Extract Characters' first so new filenames can be computed.")
             return
 
         out_folder = self.output_folder_var.get().strip()
@@ -1772,11 +1583,11 @@ class BatchImageTranslatorApp:
         total_images = len(self.image_files)
         used_filenames = set()
 
-        # Build map of new filenames from results_data if scanned
         filename_map = {}
         for row in self.results_data:
             filename_map[row["orig_file"]] = row["new_name"]
 
+        chosen_mode = self.export_mode_var.get()
         chosen_format = self.format_var.get().lower()
 
         for idx, filename in enumerate(self.image_files):
@@ -1787,37 +1598,36 @@ class BatchImageTranslatorApp:
             self.root.after(0, self._update_progress, pct, f"{idx + 1}/{total_images}")
             self.root.after(0, self._update_status, f"Exporting ({idx + 1}/{total_images}): {filename}...")
 
-            rendered_img = self._render_output_image(filename)
-            if not rendered_img:
-                continue
-
-            # Determine output filename
+            orig_path = os.path.join(self.folder_path, filename)
             orig_stem = os.path.splitext(filename)[0]
             orig_ext = os.path.splitext(filename)[1].lstrip(".")
 
-            if "png" in chosen_format:
-                save_ext = "png"
-            elif "jpg" in chosen_format:
-                save_ext = "jpg"
-            else:
-                save_ext = orig_ext
+            save_ext = "png" if "png" in chosen_format else ("jpg" if "jpg" in chosen_format else orig_ext)
 
             if filename in filename_map:
                 base_stem = os.path.splitext(filename_map[filename])[0]
             else:
                 base_stem = compute_filename(self.template_var.get(), idx + 1, orig_stem, [], [])
 
-            # Generate collision-free path
             final_path = get_unique_output_path(out_folder, base_stem, save_ext, used_filenames)
 
-            # Save image
             try:
-                if save_ext in ("jpg", "jpeg"):
-                    rendered_img.save(final_path, format="JPEG", quality=95)
+                if "Copy & Rename Original" in chosen_mode and save_ext.lower() == orig_ext.lower():
+                    # Fast exact bit-for-bit file copy
+                    shutil.copy2(orig_path, final_path)
                 else:
-                    rendered_img.save(final_path, format="PNG")
+                    # Inpaint or format conversion
+                    if "Inpaint" in chosen_mode:
+                        rendered_img = self._render_output_image(filename)
+                    else:
+                        rendered_img = Image.open(orig_path).convert("RGB")
+
+                    if save_ext in ("jpg", "jpeg"):
+                        rendered_img.save(final_path, format="JPEG", quality=95)
+                    else:
+                        rendered_img.save(final_path, format="PNG")
             except Exception as e:
-                print(f"Error saving image to {final_path}: {e}", file=sys.stderr)
+                print(f"Error exporting image to {final_path}: {e}", file=sys.stderr)
 
         self.root.after(0, self._on_export_finished, out_folder)
 
@@ -1832,13 +1642,12 @@ class BatchImageTranslatorApp:
         if not self.stop_requested:
             res = messagebox.askyesno(
                 "Export Complete",
-                f"Successfully exported images to:\n{out_folder}\n\nWould you like to open the output folder now?",
+                f"Successfully exported renamed images to:\n{out_folder}\n\nWould you like to open the output folder now?",
             )
             if res:
                 self._open_in_file_manager(out_folder)
 
     def _open_in_file_manager(self, folder: str):
-        """Cross-platform folder opening."""
         current_os = platform.system()
         try:
             if current_os == "Windows":
