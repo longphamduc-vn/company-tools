@@ -349,6 +349,14 @@ class SmartBatchExtractorApp:
         )
         self.btn_export.pack(side=tk.LEFT, padx=3)
 
+        self.btn_excel = ttk.Button(
+            action_bar,
+            text="📗 Export Excel (Images)",
+            style="Accent.TButton",
+            command=self.on_export_excel,
+        )
+        self.btn_excel.pack(side=tk.LEFT, padx=3)
+
         self.btn_csv = ttk.Button(action_bar, text="📊 Export CSV", command=self.on_export_csv)
         self.btn_csv.pack(side=tk.LEFT, padx=3)
 
@@ -368,8 +376,28 @@ class SmartBatchExtractorApp:
         )
         table_frame.pack(fill=tk.BOTH, expand=True)
 
+        tbl_top = ttk.Frame(table_frame)
+        tbl_top.pack(fill=tk.X, pady=(0, 4))
+
+        self.filter_issues_var = tk.BooleanVar(value=False)
+        chk_filter_issues = ttk.Checkbutton(
+            tbl_top,
+            text="⚠️ Show Empty / Errors Only",
+            variable=self.filter_issues_var,
+            command=self._apply_table_filter,
+        )
+        chk_filter_issues.pack(side=tk.LEFT, padx=2)
+
+        self.lbl_table_summary = ttk.Label(
+            tbl_top, text="", font=("Segoe UI", 9, "bold"), foreground="#64748b"
+        )
+        self.lbl_table_summary.pack(side=tk.RIGHT, padx=4)
+
+        tree_box = ttk.Frame(table_frame)
+        tree_box.pack(fill=tk.BOTH, expand=True)
+
         res_cols = ("orig_file", "field", "var_tag", "ocr_text", "new_name")
-        self.res_tree = ttk.Treeview(table_frame, columns=res_cols, show="headings", selectmode="browse")
+        self.res_tree = ttk.Treeview(tree_box, columns=res_cols, show="headings", selectmode="browse")
         self.res_tree.heading("orig_file", text="Original File")
         self.res_tree.heading("field", text="Field")
         self.res_tree.heading("var_tag", text="Tag")
@@ -382,8 +410,13 @@ class SmartBatchExtractorApp:
         self.res_tree.column("ocr_text", width=230, anchor="w")
         self.res_tree.column("new_name", width=230, anchor="w")
 
-        v_scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.res_tree.yview)
-        h_scroll = ttk.Scrollbar(table_frame, orient="horizontal", command=self.res_tree.xview)
+        # Visual status tags for rows
+        self.res_tree.tag_configure("empty_row", foreground="#dc2626")
+        self.res_tree.tag_configure("valid_row", foreground="#0f172a")
+        self.res_tree.tag_configure("manual_row", foreground="#0284c7")
+
+        v_scroll = ttk.Scrollbar(tree_box, orient="vertical", command=self.res_tree.yview)
+        h_scroll = ttk.Scrollbar(tree_box, orient="horizontal", command=self.res_tree.xview)
         self.res_tree.configure(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
         self.res_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
@@ -1111,6 +1144,9 @@ class SmartBatchExtractorApp:
         self.root.after(0, self._on_scan_finished)
 
     def _insert_tree_row(self, row: dict):
+        ocr_val = row.get("ocr_text", "")
+        display_text = ocr_val if ocr_val.strip() else "⚠️ [EMPTY / NOT DETECTED]"
+        tag = "empty_row" if not ocr_val.strip() else ("manual_row" if row.get("manual_edited") else "valid_row")
         iid = self.res_tree.insert(
             "",
             "end",
@@ -1118,11 +1154,13 @@ class SmartBatchExtractorApp:
                 row["orig_file"],
                 row["field"],
                 row["var_tag"],
-                row["ocr_text"],
+                display_text,
                 row["new_name"],
             ),
+            tags=(tag,),
         )
         row["tree_iid"] = iid
+        self._update_table_summary_label()
 
     def _update_progress(self, pct: int, text: str):
         self.progress_bar["value"] = pct
@@ -1135,6 +1173,7 @@ class SmartBatchExtractorApp:
         status_txt = "Stopped by user." if self.stop_requested else "Extraction completed!"
         self.progress_lbl.config(text="Complete" if not self.stop_requested else "Stopped")
         self._update_status(status_txt)
+        self._update_table_summary_label()
         messagebox.showinfo(
             "Extraction Completed",
             f"{status_txt}\nProcessed {len(self.image_files)} image(s).\n\n"
@@ -1191,14 +1230,18 @@ class SmartBatchExtractorApp:
             iid = row_item.get("tree_iid")
             target_id = iid if (iid and self.res_tree.exists(iid)) else (tree_items[r_idx] if r_idx < len(tree_items) else None)
             if target_id:
+                ocr_val = row_item.get("ocr_text", "")
+                display_text = ocr_val if ocr_val.strip() else "⚠️ [EMPTY / NOT DETECTED]"
+                tag = "empty_row" if not ocr_val.strip() else ("manual_row" if row_item.get("manual_edited") else "valid_row")
                 vals = (
                     row_item["orig_file"],
                     row_item["field"],
                     row_item["var_tag"],
-                    row_item["ocr_text"],
+                    display_text,
                     updated_name,
                 )
-                self.res_tree.item(target_id, values=vals)
+                self.res_tree.item(target_id, values=vals, tags=(tag,))
+        self._update_table_summary_label()
 
     def refresh_results_tree(self):
         """Forces a full refresh of all rows in the results treeview."""
@@ -1207,14 +1250,44 @@ class SmartBatchExtractorApp:
             iid = row_item.get("tree_iid")
             target_id = iid if (iid and self.res_tree.exists(iid)) else (tree_items[idx] if idx < len(tree_items) else None)
             if target_id:
+                ocr_val = row_item.get("ocr_text", "")
+                display_text = ocr_val if ocr_val.strip() else "⚠️ [EMPTY / NOT DETECTED]"
+                tag = "empty_row" if not ocr_val.strip() else ("manual_row" if row_item.get("manual_edited") else "valid_row")
                 vals = (
                     row_item["orig_file"],
                     row_item["field"],
                     row_item["var_tag"],
-                    row_item["ocr_text"],
+                    display_text,
                     row_item.get("new_name", ""),
                 )
-                self.res_tree.item(target_id, values=vals)
+                self.res_tree.item(target_id, values=vals, tags=(tag,))
+        self._update_table_summary_label()
+
+    def _apply_table_filter(self):
+        filter_issues = self.filter_issues_var.get()
+        for row in self.results_data:
+            iid = row.get("tree_iid")
+            if not iid:
+                continue
+            is_empty = not row.get("ocr_text", "").strip()
+            if filter_issues and not is_empty:
+                if self.res_tree.exists(iid):
+                    self.res_tree.detach(iid)
+            else:
+                if not self.res_tree.exists(iid):
+                    self.res_tree.reattach(iid, "", "end")
+        self._update_table_summary_label()
+
+    def _update_table_summary_label(self):
+        total = len(self.results_data)
+        if total == 0:
+            self.lbl_table_summary.config(text="")
+            return
+        empty_count = sum(1 for r in self.results_data if not r.get("ocr_text", "").strip())
+        valid_count = total - empty_count
+        self.lbl_table_summary.config(
+            text=f"Total: {total} | ✅ Valid: {valid_count} | ⚠️ Empty: {empty_count}"
+        )
 
     def _on_template_or_format_changed(self, *args):
         if not self.results_data:
@@ -1226,6 +1299,64 @@ class SmartBatchExtractorApp:
                 images_seen[fn] = row["img_idx"]
         for fn, img_idx in images_seen.items():
             self._recalculate_filenames_for_image(fn, img_idx)
+
+    # ========================================================================
+    # EXPORT EXCEL & CSV
+    # ========================================================================
+    def on_export_excel(self):
+        if not self.results_data:
+            messagebox.showinfo("Export Excel", "No data to export. Please run extraction first.")
+            return
+
+        fpath = filedialog.asksaveasfilename(
+            title="Save Excel Report with Embedded Images",
+            defaultextension=".xlsx",
+            filetypes=[("Excel Files", "*.xlsx")],
+            initialfile="Batch_OCR_Extraction_Report.xlsx",
+        )
+        if not fpath:
+            return
+
+        from ..excel_export import export_results_to_excel, HAVE_OPENPYXL
+        if not HAVE_OPENPYXL:
+            messagebox.showerror(
+                "Export Excel",
+                "openpyxl library is required for Excel export.\nPlease install it with: pip install openpyxl",
+            )
+            return
+
+        self._update_status("Exporting Excel report with embedded images...")
+        self.progress_bar["value"] = 0
+        self.progress_lbl.config(text="Exporting...")
+
+        def progress_cb(cur, total):
+            pct = int((cur / max(1, total)) * 100)
+            self.root.after(0, lambda: self._update_progress(pct, f"Excel {cur}/{total}"))
+
+        def worker():
+            try:
+                export_results_to_excel(
+                    results_data=self.results_data,
+                    folder_path=self.folder_path,
+                    output_filepath=fpath,
+                    progress_callback=progress_cb,
+                )
+                self.root.after(0, lambda: self._on_excel_exported(fpath))
+            except Exception as e:
+                self.root.after(0, lambda err=e: messagebox.showerror("Export Error", f"Failed to export Excel:\n{err}"))
+                self.root.after(0, lambda: self._update_status("Excel export failed."))
+
+        import threading
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_excel_exported(self, fpath: str):
+        self.progress_bar["value"] = 100
+        self.progress_lbl.config(text="Complete")
+        self._update_status(f"Excel report saved: {os.path.basename(fpath)}")
+        messagebox.showinfo(
+            "Excel Export Completed",
+            f"🎉 Successfully exported Excel report with embedded images to:\n\n{fpath}",
+        )
 
     # ========================================================================
     # EXPORT CSV & BATCH IMAGES

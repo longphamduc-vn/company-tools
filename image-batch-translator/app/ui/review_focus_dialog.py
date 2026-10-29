@@ -12,7 +12,10 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 
+from ..config import HAVE_LENS, HAVE_RAPIDOCR
 from ..utils import compute_filename
+from ..ocr_engine import preprocess_for_ocr, run_rapidocr, run_lens_full_text
+from ..extraction import extract_by_keyword, extract_by_pattern
 
 
 class ReviewFocusDialog:
@@ -56,6 +59,11 @@ class ReviewFocusDialog:
         # Debounce canvas resize to prevent GUI lag
         self._last_cw = 0
         self._last_ch = 0
+
+        # Manual Focus Drag State & Canvas Mapping
+        self._drag_start = None
+        self._drag_rect_id = None
+        self._canvas_mapping = {}
 
         self.field_entries = []  # list of (row_dict, ttk.Entry, lbl_status, rule_dict)
         self.current_pil_img = None
@@ -125,7 +133,11 @@ class ReviewFocusDialog:
         chk_focus.pack(side=tk.LEFT, padx=2)
 
         ttk.Button(f_tool, text="🖼️ Full Image", command=self._show_full_view).pack(side=tk.LEFT, padx=2)
-        ttk.Separator(f_tool, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=6)
+        ttk.Separator(f_tool, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=4)
+
+        ttk.Button(f_tool, text="⚡ Scan ROI", style="Accent.TButton", command=self.on_scan_selected_roi).pack(side=tk.LEFT, padx=2)
+        ttk.Button(f_tool, text="🔄 Reset Box", command=self._on_reset_box).pack(side=tk.LEFT, padx=2)
+        ttk.Separator(f_tool, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=4)
 
         ttk.Button(f_tool, text="🔍 +", width=3, command=self._zoom_in).pack(side=tk.LEFT, padx=1)
         ttk.Button(f_tool, text="🔍 -", width=3, command=self._zoom_out).pack(side=tk.LEFT, padx=1)
@@ -136,10 +148,13 @@ class ReviewFocusDialog:
         )
         self.lbl_focus_info.pack(side=tk.RIGHT, padx=4)
 
-        # Canvas
-        self.canvas_img = tk.Canvas(left_box, bg="#0f172a", highlightthickness=0)
+        # Canvas with crosshair cursor for intuitive drag-selection
+        self.canvas_img = tk.Canvas(left_box, bg="#0f172a", highlightthickness=0, cursor="crosshair")
         self.canvas_img.pack(fill=tk.BOTH, expand=True)
         self.canvas_img.bind("<Configure>", self._on_canvas_configure)
+        self.canvas_img.bind("<ButtonPress-1>", self._on_canvas_press)
+        self.canvas_img.bind("<B1-Motion>", self._on_canvas_drag)
+        self.canvas_img.bind("<ButtonRelease-1>", self._on_canvas_release)
 
         # Right: Fields & Filename (100% English UI)
         right_box = ttk.LabelFrame(paned, text="Extracted Characters & Quick Edit (Keyboard-First)", padding=10)
@@ -254,6 +269,13 @@ class ReviewFocusDialog:
                 oy = (ch - nh) // 2
                 self.canvas_img.create_image(ox, oy, anchor=tk.NW, image=self.current_tk_img)
 
+                # Store mapping for mouse interactions
+                self._canvas_mapping = {
+                    "ox": ox, "oy": oy, "scale": scale,
+                    "cx1": cx1, "cy1": cy1, "iw": iw, "ih": ih,
+                    "mode": "focus",
+                }
+
                 # Map text box coordinates to canvas
                 tb_x1 = ox + (bx1 - cx1) * scale
                 tb_y1 = oy + (by1 - cy1) * scale
@@ -269,7 +291,8 @@ class ReviewFocusDialog:
                 )
 
                 # Floating Badge above Box
-                tag_text = f"🎯 {active_row.get('field', 'Field')}: {active_row.get('ocr_text', '')}"
+                badge_type = "✂️ Manual Focus" if active_row.get("manual_bbox") else "🎯 Auto Focus"
+                tag_text = f"{badge_type}: {active_row.get('ocr_text', '')}"
                 self.canvas_img.create_rectangle(
                     tb_x1, tb_y1 - 24, tb_x1 + len(tag_text) * 8 + 14, tb_y1 - 3,
                     fill="#0f172a", outline="#0284c7", width=1
@@ -280,7 +303,7 @@ class ReviewFocusDialog:
                 )
 
                 self.lbl_focus_info.config(
-                    text=f"🎯 Focus: {active_row.get('field')} ({int(scale * 100)}%)",
+                    text=f"🎯 Focus: {active_row.get('field')} ({int(scale * 100)}%) | Drag on image to adjust box",
                     foreground="#10b981",
                 )
                 return
@@ -298,6 +321,13 @@ class ReviewFocusDialog:
         oy = (ch - nh) // 2
         self.canvas_img.create_image(ox, oy, anchor=tk.NW, image=self.current_tk_img)
 
+        # Store mapping for mouse interactions
+        self._canvas_mapping = {
+            "ox": ox, "oy": oy, "scale": scale,
+            "cx1": 0, "cy1": 0, "iw": iw, "ih": ih,
+            "mode": "full",
+        }
+
         # Highlight boxes for fields on full image
         for row_item, _, _, _ in self.field_entries:
             b = row_item.get("bbox")
@@ -313,9 +343,173 @@ class ReviewFocusDialog:
                 self.canvas_img.create_rectangle(rx1, ry1, rx2, ry2, outline=color, width=width)
 
         if not bbox and active_row:
-            self.lbl_focus_info.config(text="🖼️ Full View (No position coordinates)", foreground="#f59e0b")
+            self.lbl_focus_info.config(
+                text="💡 No position detected! Click & drag on image to set Manual Focus Box",
+                foreground="#f59e0b",
+            )
         else:
-            self.lbl_focus_info.config(text="🖼️ Full View", foreground="#0284c7")
+            self.lbl_focus_info.config(text="🖼️ Full View (Drag on image to create focus box)", foreground="#0284c7")
+
+    def _get_active_row(self):
+        for row_item, _, _, _ in self.field_entries:
+            if row_item.get("rule_idx") == self.active_rule_idx:
+                return row_item
+        if self.field_entries:
+            return self.field_entries[0][0]
+        return None
+
+    def _canvas_to_img_coords(self, cx, cy):
+        m = self._canvas_mapping
+        if not m:
+            return 0, 0
+        scale = max(1e-6, m.get("scale", 1.0))
+        ox, oy = m.get("ox", 0), m.get("oy", 0)
+        cx1, cy1 = m.get("cx1", 0), m.get("cy1", 0)
+        img_x = int(round(cx1 + (cx - ox) / scale))
+        img_y = int(round(cy1 + (cy - oy) / scale))
+        img_x = max(0, min(m.get("iw", 1000), img_x))
+        img_y = max(0, min(m.get("ih", 1000), img_y))
+        return img_x, img_y
+
+    def _on_canvas_press(self, event):
+        if not self.current_pil_img:
+            return
+        self._drag_start = (event.x, event.y)
+        if self._drag_rect_id:
+            try:
+                self.canvas_img.delete(self._drag_rect_id)
+            except Exception:
+                pass
+            self._drag_rect_id = None
+
+    def _on_canvas_drag(self, event):
+        if not self._drag_start:
+            return
+        x0, y0 = self._drag_start
+        x1, y1 = event.x, event.y
+        if not self._drag_rect_id:
+            self._drag_rect_id = self.canvas_img.create_rectangle(
+                x0, y0, x1, y1, outline="#f59e0b", width=2, dash=(4, 2)
+            )
+        else:
+            self.canvas_img.coords(self._drag_rect_id, x0, y0, x1, y1)
+
+    def _on_canvas_release(self, event):
+        if not self._drag_start:
+            return
+        x0, y0 = self._drag_start
+        x1, y1 = event.x, event.y
+        self._drag_start = None
+        if self._drag_rect_id:
+            try:
+                self.canvas_img.delete(self._drag_rect_id)
+            except Exception:
+                pass
+            self._drag_rect_id = None
+
+        if abs(x1 - x0) >= 10 and abs(y1 - y0) >= 8:
+            ix0, iy0 = self._canvas_to_img_coords(x0, y0)
+            ix1, iy1 = self._canvas_to_img_coords(x1, y1)
+            bx1, bx2 = min(ix0, ix1), max(ix0, ix1)
+            by1, by2 = min(iy0, iy1), max(iy0, iy1)
+
+            if (bx2 - bx1) >= 5 and (by2 - by1) >= 5:
+                active_row = self._get_active_row()
+                if active_row:
+                    active_row["bbox"] = [bx1, by1, bx2, by2]
+                    active_row["manual_bbox"] = True
+                    self.focus_mode_var.set(True)
+                    self._draw_image_on_canvas()
+                    self.lbl_focus_info.config(
+                        text=f"✂️ Manual Box set: [{bx1},{by1},{bx2},{by2}] | Click '⚡ Scan ROI' or edit text",
+                        foreground="#f59e0b",
+                    )
+
+    def on_scan_selected_roi(self):
+        """Runs OCR on the currently focused or manually drawn ROI."""
+        active_row = self._get_active_row()
+        if not active_row or not self.current_pil_img:
+            return
+        bbox = active_row.get("bbox")
+        if not bbox:
+            messagebox.showinfo("Scan ROI", "Please drag a box on the image first to define text ROI.")
+            return
+
+        bx1, by1, bx2, by2 = bbox
+        if (bx2 - bx1) < 5 or (by2 - by1) < 5:
+            return
+
+        crop_img = self.current_pil_img.crop((bx1, by1, bx2, by2))
+        prep_crop = preprocess_for_ocr(crop_img, mode=self.app.preprocess_mode_var.get(), upscale=True)
+
+        self.lbl_focus_info.config(text="⏳ Scanning selected ROI...", foreground="#0284c7")
+        self.win.update_idletasks()
+
+        rule_idx = active_row.get("rule_idx", 0)
+        rule = self.app.rules[rule_idx] if rule_idx < len(self.app.rules) else None
+        engine_name = self.app.ocr_engine_var.get()
+
+        def do_scan():
+            detected_text = ""
+            full_text = ""
+            try:
+                if "Google" in engine_name and HAVE_LENS:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    try:
+                        full_text = loop.run_until_complete(run_lens_full_text(prep_crop))
+                    except Exception as e:
+                        print("Lens crop scan error:", e)
+                    finally:
+                        loop.close()
+                elif HAVE_RAPIDOCR:
+                    full_text, _ = run_rapidocr(prep_crop)
+
+                if rule and rule.get("type") == "regex" and rule.get("pattern"):
+                    detected_text = extract_by_pattern(full_text, rule["pattern"])
+                elif rule and rule.get("type") == "keyword" and rule.get("keyword"):
+                    detected_text = extract_by_keyword(full_text, rule["keyword"])
+
+                if not detected_text and full_text.strip():
+                    lines = [l.strip() for l in full_text.splitlines() if l.strip()]
+                    if lines:
+                        detected_text = lines[0]
+            except Exception as e:
+                print("Error scanning ROI:", e)
+
+            def on_done():
+                if detected_text:
+                    for r_item, ent, status_lbl, r_rule in self.field_entries:
+                        if r_item is active_row:
+                            ent.delete(0, tk.END)
+                            ent.insert(0, detected_text)
+                            active_row["manual_edited"] = True
+                            active_row["ocr_text"] = detected_text
+                            self.lbl_focus_info.config(
+                                text=f"✅ ROI Scan Succeeded: '{detected_text}'",
+                                foreground="#10b981",
+                            )
+                            self._update_live_filename_preview()
+                            break
+                else:
+                    self.lbl_focus_info.config(
+                        text="⚠️ No text detected in selection. Type text manually below.",
+                        foreground="#dc2626",
+                    )
+
+            self.win.after(0, on_done)
+
+        import threading
+        threading.Thread(target=do_scan, daemon=True).start()
+
+    def _on_reset_box(self):
+        active_row = self._get_active_row()
+        if active_row:
+            active_row["bbox"] = None
+            active_row["manual_bbox"] = False
+        self.focus_mode_var.set(False)
+        self._draw_image_on_canvas()
+        self.lbl_focus_info.config(text="🔄 Box reset to full view. Drag on image to create new box.", foreground="#64748b")
 
     def _load_current_image_data(self):
         if not self.unique_image_indices:
