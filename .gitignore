@@ -15,12 +15,14 @@ dist/
 # Virtual Environments
 .env
 .venv
+.build_venv/
 env/
 venv/
 
 # PyInstaller
 *.manifest
 *.spec
+!image-batch-translator/image_batch_translator.spec
 
 # Unit test / coverage
 .tox/
