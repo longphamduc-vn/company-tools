@@ -3,13 +3,14 @@
 """
 OCR Engine Interfaces & Preprocessing Algorithms.
 Supports RapidOCR (local offline) and Google Lens (cloud AI).
-Includes CLAHE, Invert, Otsu Binarization, and Lanczos Upscaling.
+Includes Singleton RapidOCR Engine to eliminate reload latency.
 """
 
 import sys
 import asyncio
 from PIL import Image, ImageOps, ImageFilter
 import numpy as np
+
 from .config import HAVE_CV2, HAVE_RAPIDOCR, HAVE_LENS
 
 if HAVE_CV2:
@@ -20,6 +21,17 @@ if HAVE_RAPIDOCR:
 
 if HAVE_LENS:
     from chrome_lens_py import LensAPI
+
+# Global cached Singleton RapidOCR instance to prevent redundant ONNX model reloads
+_RAPIDOCR_SINGLETON = None
+
+
+def get_rapidocr_engine():
+    """Returns cached singleton RapidOCR instance or initializes it once."""
+    global _RAPIDOCR_SINGLETON
+    if _RAPIDOCR_SINGLETON is None and HAVE_RAPIDOCR:
+        _RAPIDOCR_SINGLETON = RapidOCR()
+    return _RAPIDOCR_SINGLETON
 
 
 def preprocess_for_ocr(img_pil: Image.Image, mode: str = "none", upscale: bool = False) -> Image.Image:
@@ -92,7 +104,7 @@ def preprocess_for_ocr(img_pil: Image.Image, mode: str = "none", upscale: bool =
 
 def run_rapidocr(img_pil: Image.Image, engine=None):
     """
-    Executes RapidOCR on a PIL image.
+    Executes RapidOCR on a PIL image using the cached engine.
     Returns:
         (full_text: str, ocr_results: list)
         where ocr_results is a list of [box, text, confidence]
@@ -101,11 +113,12 @@ def run_rapidocr(img_pil: Image.Image, engine=None):
         return "", []
 
     if engine is None:
-        engine = RapidOCR()
+        engine = get_rapidocr_engine()
+        if engine is None:
+            engine = RapidOCR()
 
     try:
         img_arr = np.array(img_pil)
-
         res, _ = engine(img_arr)
         if not res:
             return "", []

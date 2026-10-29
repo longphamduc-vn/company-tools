@@ -2,8 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Main Application Window: SmartBatchExtractorApp.
-Combines Folder Selection, Sample Canvas, Rule Manager (Keyword / Regex / Box),
-Batch Processing Workers, and Review Focus Launchers.
+100% Original English UI, Original Theme Colors, and High-Speed OCR Pipeline.
 """
 
 import os
@@ -18,6 +17,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
+import numpy as np
 
 from ..config import (
     APP_TITLE,
@@ -35,20 +35,22 @@ from ..utils import (
     compute_filename,
     get_unique_output_path,
 )
-from ..ocr_engine import preprocess_for_ocr, run_rapidocr, run_lens_full_text
+from ..ocr_engine import (
+    preprocess_for_ocr,
+    get_rapidocr_engine,
+    run_lens_full_text,
+)
 from ..extraction import (
     extract_by_keyword,
     extract_by_pattern,
     extract_by_box,
     find_bounding_box_for_rule,
-    auto_detect_bbox_for_image,
 )
 from .preprocess_dialog import PreprocessTestDialog
 from .review_focus_dialog import ReviewFocusDialog
 
 if HAVE_RAPIDOCR:
     from rapidocr_onnxruntime import RapidOCR
-    import numpy as np
 
 if HAVE_LENS:
     from chrome_lens_py import LensAPI
@@ -57,7 +59,7 @@ if HAVE_LENS:
 class SmartBatchExtractorApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title(f"{APP_TITLE} (v{APP_VERSION})")
+        self.root.title("Smart Batch Character Extractor & Renamer (Crop-Resilient)")
         self.root.geometry("1300x850")
         self.root.minsize(1080, 720)
 
@@ -73,6 +75,10 @@ class SmartBatchExtractorApp:
         self.sample_scale = 1.0
         self.sample_offset_x = 0
         self.sample_offset_y = 0
+
+        # Debounce canvas resize
+        self._last_cw = 0
+        self._last_ch = 0
 
         # Interactive drawing state
         self.drag_start_x = 0
@@ -108,37 +114,32 @@ class SmartBatchExtractorApp:
         self.stop_requested = False
 
         self._build_ui()
-        self._update_status("Sẵn sàng. Chọn thư mục hoặc bấm '✨ Demo Nhãn Hàng' / '🔍 Demo GlassID' để bắt đầu.")
+        self._update_status("Ready. Click 'Choose Folder' or 'Load Demo Images' to begin.")
 
     def _build_ui(self):
         # Top Header Bar
         top_bar = ttk.Frame(self.root, padding="10 8")
         top_bar.pack(side=tk.TOP, fill=tk.X)
 
-        title_lbl = ttk.Label(
-            top_bar,
-            text="Batch Character Extractor & Renamer",
-            font=("Segoe UI", 12, "bold"),
-            foreground="#0f172a",
-        )
+        title_lbl = ttk.Label(top_bar, text="Batch Character Extractor & Renamer", style="Title.TLabel")
         title_lbl.pack(side=tk.LEFT, padx=(0, 15))
 
-        btn_open = ttk.Button(top_bar, text="📁 Chọn Thư Mục...", command=self.on_choose_folder)
+        btn_open = ttk.Button(top_bar, text="📁 Choose Folder...", command=self.on_choose_folder)
         btn_open.pack(side=tk.LEFT, padx=3)
 
-        btn_demo = ttk.Button(top_bar, text="✨ Demo Nhãn Hàng", command=self.on_load_demo_images)
+        btn_demo = ttk.Button(top_bar, text="✨ Load Demo Images", command=self.on_load_demo_images)
         btn_demo.pack(side=tk.LEFT, padx=3)
 
-        btn_glass = ttk.Button(top_bar, text="🔍 Demo GlassID", command=self.on_load_glass_demo)
+        btn_glass = ttk.Button(top_bar, text="🔍 GlassID Demo", command=self.on_load_glass_demo)
         btn_glass.pack(side=tk.LEFT, padx=3)
 
-        btn_save_cfg = ttk.Button(top_bar, text="💾 Lưu Quy Tắc", command=self.on_save_config)
+        btn_save_cfg = ttk.Button(top_bar, text="💾 Save Rules", command=self.on_save_config)
         btn_save_cfg.pack(side=tk.LEFT, padx=3)
 
-        btn_load_cfg = ttk.Button(top_bar, text="📂 Nạp Quy Tắc", command=self.on_load_config)
+        btn_load_cfg = ttk.Button(top_bar, text="📂 Load Rules", command=self.on_load_config)
         btn_load_cfg.pack(side=tk.LEFT, padx=3)
 
-        self.folder_disp_lbl = ttk.Label(top_bar, text="Chưa chọn thư mục", foreground="#64748b")
+        self.folder_disp_lbl = ttk.Label(top_bar, text="No folder selected", foreground="#64748b")
         self.folder_disp_lbl.pack(side=tk.RIGHT, padx=5)
 
         paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
@@ -154,15 +155,15 @@ class SmartBatchExtractorApp:
         sample_bar = ttk.Frame(left_frame)
         sample_bar.pack(fill=tk.X, pady=(0, 4))
 
-        ttk.Label(sample_bar, text="Ảnh Mẫu:", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=(0, 4))
-        self.sample_combo = ttk.Combobox(sample_bar, state="readonly", width=28)
+        ttk.Label(sample_bar, text="Sample Image:", style="Header.TLabel").pack(side=tk.LEFT, padx=(0, 4))
+        self.sample_combo = ttk.Combobox(sample_bar, state="readonly", width=30)
         self.sample_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         self.sample_combo.bind("<<ComboboxSelected>>", self.on_sample_combo_selected)
 
         ttk.Button(sample_bar, text="◀", width=3, command=self.on_prev_sample).pack(side=tk.LEFT, padx=1)
         ttk.Button(sample_bar, text="▶", width=3, command=self.on_next_sample).pack(side=tk.LEFT, padx=1)
 
-        btn_detect = ttk.Button(sample_bar, text="🔎 Nhận Diện Text", command=self.on_auto_detect_sample_text)
+        btn_detect = ttk.Button(sample_bar, text="🔎 Auto Detect Text", command=self.on_auto_detect_sample_text)
         btn_detect.pack(side=tk.LEFT, padx=(4, 2))
 
         # Canvas with crosshair
@@ -176,19 +177,17 @@ class SmartBatchExtractorApp:
         self.canvas.bind("<B1-Motion>", self.on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
 
-        # Extraction Rules List
-        rule_box = ttk.LabelFrame(
-            left_frame, text="Quy Tắc Trích Xuất (Chống lệch & Chống ảnh bị cắt xén)", padding=6
-        )
+        # Extraction Rules List (Handles Keywords, Regex, and Coordinates)
+        rule_box = ttk.LabelFrame(left_frame, text="Extraction Rules (Resilient to Cropping & Shifts)", padding=6)
         rule_box.pack(fill=tk.X, pady=(6, 0))
 
         cols = ("id", "var", "name", "method", "criteria")
         self.rule_tree = ttk.Treeview(rule_box, columns=cols, show="headings", height=4, selectmode="browse")
         self.rule_tree.heading("id", text="#")
         self.rule_tree.heading("var", text="Tag")
-        self.rule_tree.heading("name", text="Tên Trường")
-        self.rule_tree.heading("method", text="Cách Thức")
-        self.rule_tree.heading("criteria", text="Từ Khóa / Regex / Tọa Độ")
+        self.rule_tree.heading("name", text="Field Name")
+        self.rule_tree.heading("method", text="Method")
+        self.rule_tree.heading("criteria", text="Keyword / Pattern / Coords")
 
         self.rule_tree.column("id", width=30, anchor="center")
         self.rule_tree.column("var", width=50, anchor="center")
@@ -205,25 +204,25 @@ class SmartBatchExtractorApp:
         edit_bar = ttk.Frame(rule_box)
         edit_bar.pack(fill=tk.X, pady=(5, 0))
 
-        ttk.Label(edit_bar, text="Trường:").pack(side=tk.LEFT)
+        ttk.Label(edit_bar, text="Field:").pack(side=tk.LEFT)
         self.ent_rule_name = ttk.Entry(edit_bar, width=10)
         self.ent_rule_name.pack(side=tk.LEFT, padx=2)
 
-        ttk.Label(edit_bar, text="Loại:").pack(side=tk.LEFT)
+        ttk.Label(edit_bar, text="Type:").pack(side=tk.LEFT)
         self.rule_type_combo = ttk.Combobox(
             edit_bar, values=["keyword", "regex", "box"], state="readonly", width=8
         )
         self.rule_type_combo.set("keyword")
         self.rule_type_combo.pack(side=tk.LEFT, padx=2)
 
-        ttk.Label(edit_bar, text="Giá trị:").pack(side=tk.LEFT)
+        ttk.Label(edit_bar, text="Value:").pack(side=tk.LEFT)
         self.ent_rule_val = ttk.Entry(edit_bar, width=14)
         self.ent_rule_val.pack(side=tk.LEFT, padx=2)
 
-        ttk.Button(edit_bar, text="➕ Thêm", command=self.on_add_rule).pack(side=tk.LEFT, padx=2)
-        ttk.Button(edit_bar, text="💾 Sửa", command=self.on_update_rule).pack(side=tk.LEFT, padx=2)
-        ttk.Button(edit_bar, text="❌ Xóa", command=self.on_delete_rule).pack(side=tk.LEFT, padx=2)
-        ttk.Button(edit_bar, text="🗑️ Xóa hết", command=self.on_clear_rules).pack(side=tk.LEFT, padx=2)
+        ttk.Button(edit_bar, text="➕ Add Rule", command=self.on_add_rule).pack(side=tk.LEFT, padx=2)
+        ttk.Button(edit_bar, text="💾 Update", command=self.on_update_rule).pack(side=tk.LEFT, padx=2)
+        ttk.Button(edit_bar, text="❌ Delete", command=self.on_delete_rule).pack(side=tk.LEFT, padx=2)
+        ttk.Button(edit_bar, text="🗑️ Clear", command=self.on_clear_rules).pack(side=tk.LEFT, padx=2)
 
         # ====================================================================
         # RIGHT PANE: Settings, Batch Actions, Results Table
@@ -231,7 +230,7 @@ class SmartBatchExtractorApp:
         right_frame = ttk.Frame(paned, padding=5)
         paned.add(right_frame, weight=6)
 
-        settings_box = ttk.LabelFrame(right_frame, text="Cấu Hình Quét Hàng Loạt & Đổi Tên", padding=8)
+        settings_box = ttk.LabelFrame(right_frame, text="Batch Extraction & Renaming Configuration", padding=8)
         settings_box.pack(fill=tk.X, pady=(0, 6))
 
         # Row 1: Engine & Mode Info
@@ -251,7 +250,7 @@ class SmartBatchExtractorApp:
 
         ttk.Label(
             r1,
-            text="🛡️ Chế độ Keyword & Regex chống lệch 100% khi ảnh bị crop!",
+            text="🛡️ Keyword mode works 100% even if images are cropped!",
             foreground="#059669",
             font=("Segoe UI", 8, "italic"),
         ).pack(side=tk.LEFT)
@@ -260,7 +259,7 @@ class SmartBatchExtractorApp:
         r_prep = ttk.Frame(settings_box)
         r_prep.pack(fill=tk.X, pady=2)
 
-        ttk.Label(r_prep, text="Tiền xử lý:").pack(side=tk.LEFT)
+        ttk.Label(r_prep, text="Preprocess:").pack(side=tk.LEFT)
         self.combo_prep = ttk.Combobox(
             r_prep,
             textvariable=self.preprocess_mode_var,
@@ -282,10 +281,10 @@ class SmartBatchExtractorApp:
         r2 = ttk.Frame(settings_box)
         r2.pack(fill=tk.X, pady=4)
 
-        ttk.Label(r2, text="Mẫu Tên File:").pack(side=tk.LEFT)
+        ttk.Label(r2, text="Rename Template:").pack(side=tk.LEFT)
         ttk.Entry(r2, textvariable=self.template_var, width=22).pack(side=tk.LEFT, padx=4)
 
-        ttk.Label(r2, text="Chèn:", foreground="#64748b").pack(side=tk.LEFT, padx=(5, 2))
+        ttk.Label(r2, text="Insert:", foreground="#64748b").pack(side=tk.LEFT, padx=(5, 2))
         for var_tag in ["{o1}", "{o2}", "{o3}", "{name}", "{index:03d}"]:
             ttk.Button(
                 r2, text=var_tag, width=len(var_tag) + 1, command=lambda v=var_tag: self._insert_template_tag(v)
@@ -295,7 +294,7 @@ class SmartBatchExtractorApp:
         r3 = ttk.Frame(settings_box)
         r3.pack(fill=tk.X, pady=2)
 
-        ttk.Label(r3, text="Cách Xuất:").pack(side=tk.LEFT)
+        ttk.Label(r3, text="Export Mode:").pack(side=tk.LEFT)
         combo_exp_mode = ttk.Combobox(
             r3,
             textvariable=self.export_mode_var,
@@ -308,7 +307,7 @@ class SmartBatchExtractorApp:
         )
         combo_exp_mode.pack(side=tk.LEFT, padx=(3, 10))
 
-        ttk.Label(r3, text="Định dạng:").pack(side=tk.LEFT)
+        ttk.Label(r3, text="Format:").pack(side=tk.LEFT)
         ttk.Combobox(
             r3, textvariable=self.format_var, values=["Keep original", "png", "jpg"], state="readonly", width=12
         ).pack(side=tk.LEFT, padx=2)
@@ -316,10 +315,10 @@ class SmartBatchExtractorApp:
         # Row 4: Output Folder
         r4 = ttk.Frame(settings_box)
         r4.pack(fill=tk.X, pady=2)
-        ttk.Label(r4, text="Thư Mục Xuất:").pack(side=tk.LEFT)
+        ttk.Label(r4, text="Output Folder:").pack(side=tk.LEFT)
         self.ent_out_folder = ttk.Entry(r4, textvariable=self.output_folder_var)
         self.ent_out_folder.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-        ttk.Button(r4, text="Chọn...", command=self.on_browse_output_folder).pack(side=tk.LEFT)
+        ttk.Button(r4, text="Browse...", command=self.on_browse_output_folder).pack(side=tk.LEFT)
 
         # Actions Toolbar
         action_bar = ttk.Frame(right_frame)
@@ -327,7 +326,7 @@ class SmartBatchExtractorApp:
 
         self.btn_scan = ttk.Button(
             action_bar,
-            text="🚀 Quét Ký Tự Hàng Loạt",
+            text="🔍 Extract Characters (All Images)",
             style="Primary.TButton",
             command=self.on_start_extract_characters,
         )
@@ -335,52 +334,52 @@ class SmartBatchExtractorApp:
 
         self.btn_review = ttk.Button(
             action_bar,
-            text="🎯 Review Focus (Soát & Focus Vị Trí)",
-            style="Focus.TButton",
+            text="🎯 Review Focus (Soát Lỗi)",
+            style="Review.TButton",
             command=self.on_open_review_focus,
         )
         self.btn_review.pack(side=tk.LEFT, padx=3)
 
         self.btn_export = ttk.Button(
             action_bar,
-            text="📁 Xuất & Đổi Tên Ảnh",
+            text="📁 Export & Rename Images",
             style="Accent.TButton",
             command=self.on_start_export_images,
         )
         self.btn_export.pack(side=tk.LEFT, padx=3)
 
-        self.btn_csv = ttk.Button(action_bar, text="📊 Xuất Báo Cáo CSV", command=self.on_export_csv)
+        self.btn_csv = ttk.Button(action_bar, text="📊 Export CSV", command=self.on_export_csv)
         self.btn_csv.pack(side=tk.LEFT, padx=3)
 
-        self.btn_cancel = ttk.Button(action_bar, text="⏹️ Dừng", command=self.on_stop_processing, state="disabled")
+        self.btn_cancel = ttk.Button(action_bar, text="⏹️ Stop", command=self.on_stop_processing, state="disabled")
         self.btn_cancel.pack(side=tk.LEFT, padx=3)
 
         self.progress_bar = ttk.Progressbar(action_bar, mode="determinate")
         self.progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 5))
-        self.progress_lbl = ttk.Label(action_bar, text="Sẵn sàng", foreground="#64748b", width=14, anchor="e")
+        self.progress_lbl = ttk.Label(action_bar, text="Idle", foreground="#64748b", width=12, anchor="e")
         self.progress_lbl.pack(side=tk.RIGHT)
 
         # Results Table
         table_frame = ttk.LabelFrame(
-            right_frame, text="Bảng Kết Quả & Xem Trước Tên Mới (Nhấp đúp dòng để mở Review Focus)", padding=6
+            right_frame,
+            text="Extraction Results & New Filename Preview (Double-click to edit)",
+            padding=6,
         )
         table_frame.pack(fill=tk.BOTH, expand=True)
 
-        res_cols = ("orig_file", "field", "var_tag", "ocr_text", "new_name", "roi")
+        res_cols = ("orig_file", "field", "var_tag", "ocr_text", "new_name")
         self.res_tree = ttk.Treeview(table_frame, columns=res_cols, show="headings", selectmode="browse")
-        self.res_tree.heading("orig_file", text="Tệp Gốc")
-        self.res_tree.heading("field", text="Trường")
+        self.res_tree.heading("orig_file", text="Original File")
+        self.res_tree.heading("field", text="Field")
         self.res_tree.heading("var_tag", text="Tag")
-        self.res_tree.heading("ocr_text", text="Ký Tự Trích Xuất (Nhấp đúp để sửa)")
-        self.res_tree.heading("new_name", text="Tên File Mới Dự Kiến")
-        self.res_tree.heading("roi", text="Vị Trí (ROI)")
+        self.res_tree.heading("ocr_text", text="Extracted Characters (Double-click to edit)")
+        self.res_tree.heading("new_name", text="New Filename")
 
-        self.res_tree.column("orig_file", width=130, anchor="w")
-        self.res_tree.column("field", width=100, anchor="w")
-        self.res_tree.column("var_tag", width=45, anchor="center")
-        self.res_tree.column("ocr_text", width=200, anchor="w")
-        self.res_tree.column("new_name", width=210, anchor="w")
-        self.res_tree.column("roi", width=100, anchor="center")
+        self.res_tree.column("orig_file", width=140, anchor="w")
+        self.res_tree.column("field", width=110, anchor="w")
+        self.res_tree.column("var_tag", width=50, anchor="center")
+        self.res_tree.column("ocr_text", width=230, anchor="w")
+        self.res_tree.column("new_name", width=230, anchor="w")
 
         v_scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.res_tree.yview)
         h_scroll = ttk.Scrollbar(table_frame, orient="horizontal", command=self.res_tree.xview)
@@ -394,7 +393,7 @@ class SmartBatchExtractorApp:
         # Status Bar
         self.status_bar = ttk.Frame(self.root, padding="6 3")
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-        self.status_msg_lbl = ttk.Label(self.status_bar, text="Sẵn sàng", font=("Segoe UI", 8))
+        self.status_msg_lbl = ttk.Label(self.status_bar, text="Ready", font=("Segoe UI", 8))
         self.status_msg_lbl.pack(side=tk.LEFT)
         self.status_engine_lbl = ttk.Label(
             self.status_bar,
@@ -418,7 +417,7 @@ class SmartBatchExtractorApp:
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         demo_dir = os.path.join(base_dir, "sample_images")
         if not os.path.isdir(demo_dir):
-            messagebox.showinfo("Demo", "Không tìm thấy thư mục sample_images.")
+            messagebox.showinfo("Demo Images", "Sample images directory not found.")
             return
 
         self.folder_path = demo_dir
@@ -429,7 +428,7 @@ class SmartBatchExtractorApp:
             key=natural_sort_key,
         )
         if not files:
-            messagebox.showinfo("Demo", "Không có tệp ảnh nào trong thư mục sample_images.")
+            messagebox.showinfo("Demo Images", "No images found in sample folder.")
             return
 
         self.image_files = files
@@ -449,19 +448,19 @@ class SmartBatchExtractorApp:
         self._refresh_rule_tree()
         self.redraw_canvas()
 
-        self._update_status("Đã nạp demo phiếu kho thành công!")
-        messagebox.showinfo(
-            "Demo Nhãn Hàng",
-            f"Đã nạp {len(self.image_files)} ảnh demo (gồm cả ảnh bị cắt xén: label_cropped_demo.png)!\n"
-            "Quy tắc từ khóa: Mã phiếu ({o1}), Tên hàng ({o2}), Trạng thái ({o3}).\n\n"
-            "Bấm '🚀 Quét Ký Tự Hàng Loạt' rồi bấm '🎯 Review Focus' để xem tính năng Focus tự động vào vị trí ký tự!",
+        msg = (
+            f"Loaded {len(self.image_files)} demo images (including cropped image: label_cropped_demo.png)!\n"
+            "Predefined 3 Keyword Rules ({o1}=Mã phiếu, {o2}=Tên hàng, {o3}=Trạng thái).\n\n"
+            "Click 'Extract Characters' to see keyword matching extract 100% correctly even on the cropped image!"
         )
+        self._update_status("Loaded demo images with resilient keyword rules.")
+        messagebox.showinfo("Demo Loaded", msg)
 
     def on_load_glass_demo(self):
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         demo_dir = os.path.join(base_dir, "sample_images")
         if not os.path.isdir(demo_dir):
-            messagebox.showinfo("Demo", "Không tìm thấy thư mục sample_images.")
+            messagebox.showinfo("Demo Images", "Sample images directory not found.")
             return
 
         glass_files = sorted(
@@ -504,20 +503,20 @@ class SmartBatchExtractorApp:
         self._refresh_rule_tree()
         self.redraw_canvas()
 
-        self._update_status("Đã nạp demo mặt kính GlassID.")
-        messagebox.showinfo(
-            "Demo GlassID",
-            f"Đã nạp {len(self.image_files)} ảnh mặt kính (gồm cả ảnh khắc laser mờ: faint_glass_demo.png)!\n"
-            "Quy tắc: GlassID sử dụng Regex '(?i)GlassID\\s*([A-Za-z0-9]+)'.\n"
-            "Bộ lọc: CLAHE + Upscale 2x.\n\n"
-            "Bấm '🚀 Quét Ký Tự Hàng Loạt' rồi '🎯 Review Focus' để trải nghiệm tính năng Focus phóng to vị trí ký tự!",
+        msg = (
+            f"Loaded {len(self.image_files)} glass demo images (including faint etching: faint_glass_demo.png)!\n"
+            "Predefined Rule: GlassID using Regex '(?i)GlassID\\s*([A-Za-z0-9]+)'\n"
+            "Preprocess filter: CLAHE + Upscale 2x.\n\n"
+            "Click 'Extract Characters' to scan, or 'Review Focus' to inspect and edit outputs!"
         )
+        self._update_status("Loaded glass demo images (GlassID).")
+        messagebox.showinfo("Glass Demo Loaded", msg)
 
     # ========================================================================
     # FOLDER & SAMPLE IMAGE
     # ========================================================================
     def on_choose_folder(self):
-        folder = filedialog.askdirectory(title="Chọn Thư Mục Ảnh")
+        folder = filedialog.askdirectory(title="Choose Image Folder")
         if not folder:
             return
 
@@ -534,7 +533,7 @@ class SmartBatchExtractorApp:
         self.image_files = files
 
         if not self.image_files:
-            messagebox.showwarning("Không Có Ảnh", f"Không tìm thấy ảnh hợp lệ trong:\n{self.folder_path}")
+            messagebox.showwarning("No Images", f"No supported images found in:\n{self.folder_path}")
             return
 
         self.output_folder_var.set(os.path.join(self.folder_path, "output"))
@@ -542,7 +541,7 @@ class SmartBatchExtractorApp:
         self.current_sample_idx = 0
         self.sample_combo.current(0)
         self.load_sample_image(self.image_files[0])
-        self._update_status(f"Đã nạp {len(self.image_files)} ảnh từ {self.folder_path}")
+        self._update_status(f"Loaded {len(self.image_files)} image(s) from {self.folder_path}")
 
     def load_sample_image(self, filename: str):
         img_path = os.path.join(self.folder_path, filename)
@@ -552,7 +551,7 @@ class SmartBatchExtractorApp:
             self.sample_image = Image.open(img_path).convert("RGB")
             self.redraw_canvas()
         except Exception as e:
-            messagebox.showerror("Lỗi Mở Ảnh", f"Không thể tải ảnh:\n{e}")
+            messagebox.showerror("Error Opening Image", f"Failed to load image:\n{e}")
 
     def on_sample_combo_selected(self, event=None):
         idx = self.sample_combo.current()
@@ -579,10 +578,10 @@ class SmartBatchExtractorApp:
     # ========================================================================
     def on_auto_detect_sample_text(self):
         if not self.sample_image:
-            messagebox.showinfo("Thông Báo", "Vui lòng chọn hoặc tải ảnh trước.")
+            messagebox.showinfo("Auto Detect", "Please select or load an image first.")
             return
 
-        self._update_status("Đang quét ảnh mẫu để nhận diện dòng chữ...")
+        self._update_status("Scanning sample image to detect text...")
         engine_name = self.ocr_engine_var.get()
 
         def worker():
@@ -597,29 +596,31 @@ class SmartBatchExtractorApp:
                 finally:
                     loop.close()
             elif HAVE_RAPIDOCR:
-                raw_text, ocr_results = run_rapidocr(self.sample_image)
-                if ocr_results:
-                    text_lines = [line[1].strip() for line in ocr_results]
+                engine = get_rapidocr_engine()
+                if engine is None:
+                    engine = RapidOCR()
+                res, _ = engine(np.array(self.sample_image))
+                text_lines = [line[1].strip() for line in res] if res else []
 
             self.root.after(0, self._show_detected_text_dialog, text_lines)
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _show_detected_text_dialog(self, text_lines):
-        self._update_status("Đã nhận diện xong text ảnh mẫu.")
+        self._update_status("Sample image scanned.")
         if not text_lines:
-            messagebox.showinfo("Nhận Diện", "Không tìm thấy văn bản nào trong ảnh mẫu.")
+            messagebox.showinfo("Detected Text", "No text detected in sample image.")
             return
 
         win = tk.Toplevel(self.root)
-        win.title("Nhấp Để Tạo Quy Tắc Nhanh")
+        win.title("Detected Text Lines (Click to Add as Rule)")
         win.geometry("520x450")
         win.transient(self.root)
 
         ttk.Label(
             win,
-            text="Các dòng chữ nhận diện được trong ảnh:\nNhấp vào dòng bất kỳ để tạo Quy Tắc Từ Khóa:",
-            font=("Segoe UI", 10, "bold"),
+            text="Detected text lines in this sample image:\nClick a line to create an extraction rule:",
+            style="Header.TLabel",
         ).pack(anchor="w", padx=12, pady=(10, 5))
 
         listbox_frame = ttk.Frame(win)
@@ -661,18 +662,24 @@ class SmartBatchExtractorApp:
             self.rules.append(new_rule)
             self._refresh_rule_tree()
             win.destroy()
-            messagebox.showinfo("Đã Thêm Quy Tắc", f"Đã thêm quy tắc: '{kw}' (Tag: {{o{new_idx}}})")
+            messagebox.showinfo("Rule Added", f"Added extraction rule for: '{kw}' (Tag: {{o{new_idx}}})")
 
         btn_box = ttk.Frame(win)
         btn_box.pack(fill=tk.X, padx=12, pady=10)
-        ttk.Button(btn_box, text="➕ Thêm Thành Quy Tắc Keyword", style="Primary.TButton", command=add_selected_line).pack(side=tk.LEFT)
-        ttk.Button(btn_box, text="Đóng", command=win.destroy).pack(side=tk.RIGHT)
+        ttk.Button(btn_box, text="➕ Add as Keyword Rule", style="Primary.TButton", command=add_selected_line).pack(side=tk.LEFT)
+        ttk.Button(btn_box, text="Close", command=win.destroy).pack(side=tk.RIGHT)
 
     # ========================================================================
-    # CANVAS & VISUAL DRAWING
+    # CANVAS & VISUAL DRAWING (DEBOUNCED TO PREVENT LAG)
     # ========================================================================
     def on_canvas_configure(self, event=None):
-        if self.sample_image:
+        if not self.sample_image:
+            return
+        cw = self.canvas.winfo_width()
+        ch = self.canvas.winfo_height()
+        if abs(cw - self._last_cw) > 5 or abs(ch - self._last_ch) > 5:
+            self._last_cw = cw
+            self._last_ch = ch
             self.redraw_canvas()
 
     def redraw_canvas(self):
@@ -681,7 +688,7 @@ class SmartBatchExtractorApp:
             self.canvas.create_text(
                 self.canvas.winfo_width() // 2,
                 self.canvas.winfo_height() // 2,
-                text="Vui lòng chọn thư mục hoặc nhấp 'Demo'",
+                text="Please choose a folder or click 'Load Demo Images'",
                 fill="#94a3b8",
                 font=("Segoe UI", 12),
             )
@@ -813,7 +820,7 @@ class SmartBatchExtractorApp:
             self.redraw_canvas()
 
     def on_add_rule(self):
-        name = self.ent_rule_name.get().strip() or "Trường"
+        name = self.ent_rule_name.get().strip() or "Field"
         rtype = self.rule_type_combo.get().strip()
         val = self.ent_rule_val.get().strip()
 
@@ -856,7 +863,7 @@ class SmartBatchExtractorApp:
         self.redraw_canvas()
 
     def on_clear_rules(self):
-        if messagebox.askyesno("Xóa Quy Tắc", "Bạn có chắc chắn muốn xóa toàn bộ quy tắc?"):
+        if messagebox.askyesno("Clear Rules", "Are you sure you want to delete all extraction rules?"):
             self.rules.clear()
             self.selected_rule_idx = -1
             self._refresh_rule_tree()
@@ -864,17 +871,17 @@ class SmartBatchExtractorApp:
 
     def on_save_config(self):
         fpath = filedialog.asksaveasfilename(
-            title="Lưu Quy Tắc Trích Xuất", defaultextension=".json", filetypes=[("JSON Files", "*.json")]
+            title="Save Extraction Rules", defaultextension=".json", filetypes=[("JSON Files", "*.json")]
         )
         if fpath:
             cfg = {"rules": self.rules, "template": self.template_var.get()}
             with open(fpath, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=2, ensure_ascii=False)
-            messagebox.showinfo("Đã Lưu", f"Đã lưu quy tắc vào:\n{fpath}")
+            messagebox.showinfo("Saved", f"Rules saved to:\n{fpath}")
 
     def on_load_config(self):
         fpath = filedialog.askopenfilename(
-            title="Nạp Quy Tắc Trích Xuất", filetypes=[("JSON Files", "*.json")]
+            title="Load Extraction Rules", filetypes=[("JSON Files", "*.json")]
         )
         if fpath:
             with open(fpath, "r", encoding="utf-8") as f:
@@ -885,23 +892,23 @@ class SmartBatchExtractorApp:
                 self.template_var.set(cfg["template"])
             self._refresh_rule_tree()
             self.redraw_canvas()
-            messagebox.showinfo("Đã Nạp", "Đã nạp quy tắc thành công!")
+            messagebox.showinfo("Loaded", "Rules successfully loaded!")
 
     def on_browse_output_folder(self):
-        folder = filedialog.askdirectory(title="Chọn Thư Mục Xuất")
+        folder = filedialog.askdirectory(title="Select Output Folder")
         if folder:
             self.output_folder_var.set(os.path.abspath(folder))
 
     # ========================================================================
-    # BATCH SCAN WORKERS
+    # HIGH-SPEED BATCH SCAN WORKERS (ZERO REDUNDANT OCR)
     # ========================================================================
     def on_start_extract_characters(self):
         if not self.image_files:
-            messagebox.showwarning("Chưa Có Ảnh", "Vui lòng chọn thư mục ảnh hoặc nhấp 'Demo' trước.")
+            messagebox.showwarning("No Images", "Please open an image folder or click 'Load Demo Images' first.")
             return
 
         if not self.rules:
-            messagebox.showwarning("Chưa Có Quy Tắc", "Vui lòng thêm ít nhất một quy tắc trích xuất.")
+            messagebox.showwarning("No Rules", "Please add at least one extraction rule first.")
             return
 
         self.is_processing = True
@@ -926,7 +933,7 @@ class SmartBatchExtractorApp:
     def on_stop_processing(self):
         if self.is_processing:
             self.stop_requested = True
-            self._update_status("Đang dừng tiến trình... Xin vui lòng đợi.")
+            self._update_status("Stopping process... Please wait.")
 
     def _extract_worker(self):
         chosen_engine = self.ocr_engine_var.get()
@@ -935,7 +942,7 @@ class SmartBatchExtractorApp:
         elif HAVE_RAPIDOCR:
             self._sync_rapidocr_worker()
         else:
-            self.root.after(0, messagebox.showerror, "Lỗi Engine", "Không tìm thấy OCR engine khả dụng.")
+            self.root.after(0, messagebox.showerror, "No Engine", "No OCR engine available.")
             self.is_processing = False
             self._toggle_ui_state(True)
 
@@ -949,7 +956,7 @@ class SmartBatchExtractorApp:
 
                 pct = int(((img_idx + 1) / total_images) * 100)
                 self.root.after(0, self._update_progress, pct, f"{img_idx + 1}/{total_images}")
-                self.root.after(0, self._update_status, f"Đang quét Google Lens ({img_idx + 1}/{total_images}): {filename}...")
+                self.root.after(0, self._update_status, f"Scanning ({img_idx + 1}/{total_images}): {filename}...")
 
                 img_path = os.path.join(self.folder_path, filename)
                 try:
@@ -963,9 +970,10 @@ class SmartBatchExtractorApp:
 
                 file_stem = os.path.splitext(filename)[0]
 
-                # Full image OCR once
+                # Full image OCR once (Fast & direct)
                 try:
-                    full_text = await run_lens_full_text(img, lens_api=lens)
+                    res = await lens.process_image(img, output_format="full_text")
+                    full_text = res.get("ocr_text", "")
                 except Exception as e:
                     print(f"Google OCR error on {filename}: {e}", file=sys.stderr)
                     full_text = ""
@@ -985,14 +993,11 @@ class SmartBatchExtractorApp:
                         extracted = ""
                     image_ocr_texts.append(extracted)
 
-                    # Compute or auto-detect bbox
-                    b = auto_detect_bbox_for_image(
-                        raw_img,
-                        r,
-                        extracted,
-                        prep_mode=self.preprocess_mode_var.get(),
-                        upscale=self.upscale_2x_var.get(),
-                    )
+                    # For box rules, compute pixel box; otherwise None (NO extra OCR in batch loop!)
+                    if r["type"] == "box" and r.get("box"):
+                        b = find_bounding_box_for_rule([], r, extracted, orig_size=raw_img.size)
+                    else:
+                        b = None
                     image_bboxes.append(b)
 
                 new_file_stem = compute_filename(self.template_var.get(), img_idx + 1, file_stem, image_ocr_texts)
@@ -1021,7 +1026,9 @@ class SmartBatchExtractorApp:
 
     def _sync_rapidocr_worker(self):
         total_images = len(self.image_files)
-        engine = RapidOCR()
+        engine = get_rapidocr_engine()
+        if engine is None:
+            engine = RapidOCR()
 
         for img_idx, filename in enumerate(self.image_files):
             if self.stop_requested:
@@ -1029,7 +1036,7 @@ class SmartBatchExtractorApp:
 
             pct = int(((img_idx + 1) / total_images) * 100)
             self.root.after(0, self._update_progress, pct, f"{img_idx + 1}/{total_images}")
-            self.root.after(0, self._update_status, f"Đang quét RapidOCR ({img_idx + 1}/{total_images}): {filename}...")
+            self.root.after(0, self._update_status, f"RapidOCR ({img_idx + 1}/{total_images}): {filename}...")
 
             img_path = os.path.join(self.folder_path, filename)
             try:
@@ -1044,10 +1051,12 @@ class SmartBatchExtractorApp:
             file_stem = os.path.splitext(filename)[0]
 
             try:
-                full_text, ocr_results = run_rapidocr(img, engine=engine)
+                res, _ = engine(np.array(img))
+                full_text = "\n".join([line[1] for line in res]) if res else ""
             except Exception as e:
                 print(f"RapidOCR error on {filename}: {e}", file=sys.stderr)
-                full_text, ocr_results = "", []
+                full_text = ""
+                res = []
 
             image_ocr_texts = []
             image_bboxes = []
@@ -1064,9 +1073,9 @@ class SmartBatchExtractorApp:
                     extracted = ""
                 image_ocr_texts.append(extracted)
 
-                # Locate bounding box on original image
+                # Locate bounding box directly from already computed res in memory (0ms cost!)
                 b = find_bounding_box_for_rule(
-                    ocr_results,
+                    res,
                     r,
                     extracted,
                     orig_size=raw_img.size,
@@ -1097,8 +1106,6 @@ class SmartBatchExtractorApp:
         self.root.after(0, self._on_scan_finished)
 
     def _insert_tree_row(self, row: dict):
-        b = row.get("bbox")
-        roi_str = f"[{b[0]},{b[1]},{b[2]},{b[3]}]" if b else "Toàn cảnh"
         self.res_tree.insert(
             "",
             "end",
@@ -1108,7 +1115,6 @@ class SmartBatchExtractorApp:
                 row["var_tag"],
                 row["ocr_text"],
                 row["new_name"],
-                roi_str,
             ),
         )
 
@@ -1120,13 +1126,13 @@ class SmartBatchExtractorApp:
         self.is_processing = False
         self._toggle_ui_state(True)
         self.progress_bar["value"] = 100
-        status_txt = "Đã dừng bởi người dùng." if self.stop_requested else "Hoàn tất quét hàng loạt!"
-        self.progress_lbl.config(text="Xong" if not self.stop_requested else "Đã dừng")
+        status_txt = "Stopped by user." if self.stop_requested else "Extraction completed!"
+        self.progress_lbl.config(text="Complete" if not self.stop_requested else "Stopped")
         self._update_status(status_txt)
         messagebox.showinfo(
-            "Quét Hoàn Tất",
-            f"{status_txt}\nĐã xử lý {len(self.image_files)} tệp ảnh.\n\n"
-            "💡 MẸO: Nhấp nút '🎯 Review Focus (Soát & Focus Vị Trí)' hoặc nhấp đúp vào dòng để kiểm tra, phóng to vị trí ký tự và chỉnh sửa nhanh!",
+            "Extraction Completed",
+            f"{status_txt}\nProcessed {len(self.image_files)} image(s).\n\n"
+            "💡 TIP: Bấm nút '🎯 Review Focus (Soát Lỗi)' hoặc nhấp đúp vào dòng để kiểm tra và sửa lỗi nhanh!",
         )
 
     # ========================================================================
@@ -1145,7 +1151,7 @@ class SmartBatchExtractorApp:
         if not self.results_data or not self.image_files:
             messagebox.showinfo(
                 "Review Focus",
-                "Chưa có dữ liệu trích xuất. Vui lòng bấm '🚀 Quét Ký Tự Hàng Loạt' trước khi soát lỗi.",
+                "Chưa có dữ liệu trích xuất. Vui lòng bấm 'Extract Characters' trước khi soát lỗi.",
             )
             return
         ReviewFocusDialog(self.root, self, target_img_idx=target_img_idx, target_rule_idx=target_rule_idx)
@@ -1196,11 +1202,11 @@ class SmartBatchExtractorApp:
     # ========================================================================
     def on_export_csv(self):
         if not self.results_data:
-            messagebox.showinfo("Xuất CSV", "Không có dữ liệu. Vui lòng quét ký tự trước.")
+            messagebox.showinfo("Export CSV", "No data to export. Please run extraction first.")
             return
 
         fpath = filedialog.asksaveasfilename(
-            title="Lưu Báo Cáo CSV", defaultextension=".csv", filetypes=[("CSV Files", "*.csv")]
+            title="Save CSV File", defaultextension=".csv", filetypes=[("CSV Files", "*.csv")]
         )
         if not fpath:
             return
@@ -1208,18 +1214,16 @@ class SmartBatchExtractorApp:
         try:
             with open(fpath, "w", newline="", encoding="utf-8-sig") as csvfile:
                 writer = csv.writer(csvfile)
-                writer.writerow(["Tệp Gốc", "Trường", "Tag", "Ký Tự Trích Xuất", "Tên Tệp Mới", "Tọa Độ ROI"])
+                writer.writerow(["Original File", "Field", "Tag", "Extracted Characters", "New Filename"])
                 for row in self.results_data:
-                    b = row.get("bbox")
-                    roi_str = f"{b[0]},{b[1]},{b[2]},{b[3]}" if b else ""
-                    writer.writerow([row["orig_file"], row["field"], row["var_tag"], row["ocr_text"], row["new_name"], roi_str])
-            messagebox.showinfo("Xuất CSV Thành Công", f"Đã lưu tệp báo cáo vào:\n{fpath}")
+                    writer.writerow([row["orig_file"], row["field"], row["var_tag"], row["ocr_text"], row["new_name"]])
+            messagebox.showinfo("CSV Exported", f"Successfully exported to:\n{fpath}")
         except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể ghi tệp CSV:\n{e}")
+            messagebox.showerror("Error", f"Failed to export CSV:\n{e}")
 
     def on_start_export_images(self):
         if not self.image_files or not self.results_data:
-            messagebox.showwarning("Thông Báo", "Vui lòng quét ký tự trước khi xuất đổi tên.")
+            messagebox.showwarning("Notice", "Please extract characters first before exporting.")
             return
 
         out_folder = self.output_folder_var.get().strip()
@@ -1230,7 +1234,7 @@ class SmartBatchExtractorApp:
         try:
             os.makedirs(out_folder, exist_ok=True)
         except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể tạo thư mục xuất:\n{e}")
+            messagebox.showerror("Error", f"Cannot create output directory:\n{e}")
             return
 
         self.is_processing = True
@@ -1258,7 +1262,7 @@ class SmartBatchExtractorApp:
 
             pct = int(((idx + 1) / total) * 100)
             self.root.after(0, self._update_progress, pct, f"{idx + 1}/{total}")
-            self.root.after(0, self._update_status, f"Đang xuất ({idx + 1}/{total}): {filename}...")
+            self.root.after(0, self._update_status, f"Exporting ({idx + 1}/{total}): {filename}...")
 
             orig_path = os.path.join(self.folder_path, filename)
             orig_stem = os.path.splitext(filename)[0]
@@ -1291,14 +1295,14 @@ class SmartBatchExtractorApp:
         self.is_processing = False
         self._toggle_ui_state(True)
         self.progress_bar["value"] = 100
-        self.progress_lbl.config(text="Đã xuất xong")
-        status_txt = "Đã hủy xuất." if self.stop_requested else f"Hoàn tất xuất ảnh vào {out_folder}"
+        self.progress_lbl.config(text="Exported")
+        status_txt = "Export cancelled." if self.stop_requested else f"Export completed to {out_folder}"
         self._update_status(status_txt)
 
         if not self.stop_requested:
             res = messagebox.askyesno(
-                "Xuất Hoàn Tất",
-                f"Đã xuất thành công các tệp ảnh đổi tên vào:\n{out_folder}\n\nBạn có muốn mở thư mục ngay bây giờ?",
+                "Export Complete",
+                f"Successfully exported renamed images to:\n{out_folder}\n\nOpen output folder now?",
             )
             if res:
                 self._open_in_file_manager(out_folder)

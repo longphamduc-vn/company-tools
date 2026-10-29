@@ -116,6 +116,6 @@ python image_batch_translator.py
 ```
 
 ### 3. Thử nghiệm với các bộ demo có sẵn:
-- **Demo Nhãn Hàng**: Bấm nút **"✨ Demo Nhãn Hàng"** để tải 4 ảnh phiếu kho (gồm cả ảnh bị crop xén viền).
-- **Demo Mặt Kính (GlassID)**: Bấm nút **"🔍 Demo GlassID"** để tải ảnh kính và ảnh khắc laser mờ (`faint_glass_demo.png`).
-- Bấm **"🚀 Quét Ký Tự Hàng Loạt"** rồi bấm **"🎯 Review Focus"** để trải nghiệm tính năng Focus phóng to vị trí ký tự!
+- **Demo Nhãn Hàng**: Bấm nút **"✨ Load Demo Images"** để tải 4 ảnh phiếu kho (gồm cả ảnh bị crop xén viền).
+- **Demo Mặt Kính (GlassID)**: Bấm nút **"🔍 GlassID Demo"** để tải ảnh kính và ảnh khắc laser mờ (`faint_glass_demo.png`).
+- Bấm **"🔍 Extract Characters (All Images)"** rồi bấm **"🎯 Review Focus (Soát Lỗi)"** để trải nghiệm tính năng Focus phóng to vị trí ký tự!

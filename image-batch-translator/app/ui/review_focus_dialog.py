@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Review Focus Dialog with Auto-Focus ROI Localization.
-Human-in-the-loop manual verification and correction of OCR extraction outputs.
-Features:
-- Auto-Focus directly into the exact text bounding box on the image when focusing a field.
-- Glowing neon highlight bounding box with field badge and context padding.
-- Keyboard-first navigation (Enter = Save & Next, Ctrl+Left/Right, Esc).
-- Suspect-only filter for instant error triage.
+Review Focus Dialog (Human-in-the-Loop Quick Verification & ROI Focus).
+Combines the exact original UI design, shortcuts, and layout with
+instant, zero-lag auto-focus into the exact text bounding box position.
 """
 
 import os
@@ -25,16 +21,17 @@ class ReviewFocusDialog:
     """
     Dedicated Human-in-the-Loop Review & Focus Dialog.
     Enables rapid manual verification and correction of OCR extraction outputs
-    with auto-focus into the exact text position on the image.
+    with keyboard shortcuts (Enter = Save & Next, Ctrl+Left = Prev, Esc = Close)
+    and instant ROI Focus into exact character coordinates.
     """
 
     def __init__(self, parent: tk.Tk, app, target_img_idx: int = None, target_rule_idx: int = None):
         self.parent = parent
         self.app = app
         self.win = tk.Toplevel(parent)
-        self.win.title("🎯 Review Focus - Soát Lỗi & Focus Vị Trí Ký Tự")
-        self.win.geometry("1200x780")
-        self.win.minsize(960, 680)
+        self.win.title("🎯 Review Focus - Soát Lỗi & Sửa Kết Quả Thủ Công")
+        self.win.geometry("1180x760")
+        self.win.minsize(920, 650)
         self.win.transient(parent)
         try:
             self.win.grab_set()
@@ -58,6 +55,10 @@ class ReviewFocusDialog:
         self.focus_mode_var = tk.BooleanVar(value=True)  # Auto-focus ROI enabled by default
         self.zoom_factor = 1.0
 
+        # Prevent canvas configure redraw lag
+        self._last_cw = 0
+        self._last_ch = 0
+
         self.field_entries = []  # list of (row_dict, ttk.Entry, lbl_status, rule_dict)
         self.current_pil_img = None
         self.current_tk_img = None
@@ -75,7 +76,7 @@ class ReviewFocusDialog:
         self.win.bind("<Escape>", lambda e: self.win.destroy())
 
     def _build_ui(self):
-        # 1. Top Header Bar
+        # Top Header Bar (100% original layout)
         top_bar = ttk.Frame(self.win, padding="10 8")
         top_bar.pack(side=tk.TOP, fill=tk.X)
 
@@ -104,45 +105,44 @@ class ReviewFocusDialog:
 
         ttk.Button(top_bar, text="Đóng (Esc)", command=self.win.destroy).pack(side=tk.RIGHT, padx=5)
 
-        # 2. Paned Window (Left: Focus Viewer, Right: Editable Fields & Live Output)
+        # Paned Window (Left: Image Preview & Focus, Right: Editable Fields & Live Output)
         paned = ttk.PanedWindow(self.win, orient=tk.HORIZONTAL)
         paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
 
-        # Left: Image Focus Viewer
-        left_box = ttk.LabelFrame(paned, text="🎯 Visual Focus & Kiểm Tra Vị Trí (ROI View)", padding=6)
+        # Left: Image Viewer with Focus Controls
+        left_box = ttk.LabelFrame(paned, text="Hình Ảnh Kiểm Tra (Visual Check)", padding=6)
         paned.add(left_box, weight=6)
 
-        # Viewport Toolbar
-        v_tool = ttk.Frame(left_box, padding="2 4")
-        v_tool.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
+        # Focus Toolbar
+        f_tool = ttk.Frame(left_box, padding="2 2")
+        f_tool.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
 
-        self.btn_focus_toggle = ttk.Checkbutton(
-            v_tool,
-            text="🎯 Focus Vào Vị Trí",
+        chk_focus = ttk.Checkbutton(
+            f_tool,
+            text="🎯 Focus Vị Trí",
             variable=self.focus_mode_var,
             command=self._draw_image_on_canvas,
         )
-        self.btn_focus_toggle.pack(side=tk.LEFT, padx=3)
+        chk_focus.pack(side=tk.LEFT, padx=2)
 
-        ttk.Button(v_tool, text="🖼️ Toàn Cảnh", command=self._show_full_view).pack(side=tk.LEFT, padx=3)
+        ttk.Button(f_tool, text="🖼️ Toàn Cảnh", command=self._show_full_view).pack(side=tk.LEFT, padx=2)
+        ttk.Separator(f_tool, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=6)
 
-        ttk.Separator(v_tool, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=8)
-
-        ttk.Button(v_tool, text="🔍 +", width=3, command=self._zoom_in).pack(side=tk.LEFT, padx=2)
-        ttk.Button(v_tool, text="🔍 -", width=3, command=self._zoom_out).pack(side=tk.LEFT, padx=2)
-        ttk.Button(v_tool, text="1:1", width=3, command=self._zoom_reset).pack(side=tk.LEFT, padx=2)
+        ttk.Button(f_tool, text="🔍 +", width=3, command=self._zoom_in).pack(side=tk.LEFT, padx=1)
+        ttk.Button(f_tool, text="🔍 -", width=3, command=self._zoom_out).pack(side=tk.LEFT, padx=1)
+        ttk.Button(f_tool, text="1:1", width=3, command=self._zoom_reset).pack(side=tk.LEFT, padx=1)
 
         self.lbl_focus_info = ttk.Label(
-            v_tool, text="Đang hiển thị...", font=("Segoe UI", 9, "bold"), foreground="#0284c7"
+            f_tool, text="", font=("Segoe UI", 9, "bold"), foreground="#0284c7"
         )
-        self.lbl_focus_info.pack(side=tk.RIGHT, padx=6)
+        self.lbl_focus_info.pack(side=tk.RIGHT, padx=4)
 
-        # Focus Canvas
+        # Canvas
         self.canvas_img = tk.Canvas(left_box, bg="#0f172a", highlightthickness=0)
         self.canvas_img.pack(fill=tk.BOTH, expand=True)
-        self.canvas_img.bind("<Configure>", lambda e: self._draw_image_on_canvas())
+        self.canvas_img.bind("<Configure>", self._on_canvas_configure)
 
-        # Right: Fields & Filename
+        # Right: Fields & Filename (100% original layout)
         right_box = ttk.LabelFrame(paned, text="Trích Xuất & Sửa Ký Tự (Keyboard-First)", padding=10)
         paned.add(right_box, weight=5)
 
@@ -166,7 +166,7 @@ class ReviewFocusDialog:
 
         tip_lbl = ttk.Label(
             right_box,
-            text="💡 Mẹo: Nhấp chuột hoặc Tab vào ô nhập để tự động FOCUS vào vị trí ký tự trên ảnh!\nNhấn Enter để Lưu và chuyển ngay sang ảnh tiếp theo.",
+            text="💡 Mẹo: Nhấn Enter để Lưu và chuyển ngay sang ảnh tiếp theo mà không cần dùng chuột!\nNhấp chuột hoặc Tab vào ô nhập để tự động Focus vào vị trí chữ trên ảnh.",
             font=("Segoe UI", 8, "italic"),
             foreground="#64748b",
             wraplength=420,
@@ -190,8 +190,15 @@ class ReviewFocusDialog:
         self.zoom_factor = 1.0
         self._draw_image_on_canvas()
 
-    def set_active_field(self, rule_idx: int):
-        """Switches active focused field and redraws viewport immediately."""
+    def _on_canvas_configure(self, event):
+        cw = event.width
+        ch = event.height
+        if abs(cw - self._last_cw) > 5 or abs(ch - self._last_ch) > 5:
+            self._last_cw = cw
+            self._last_ch = ch
+            self._draw_image_on_canvas()
+
+    def _set_active_field(self, rule_idx: int):
         self.active_rule_idx = rule_idx
         self._draw_image_on_canvas()
 
@@ -203,7 +210,7 @@ class ReviewFocusDialog:
         ch = max(100, self.canvas_img.winfo_height())
         iw, ih = self.current_pil_img.size
 
-        # Identify active row data and bbox
+        # Identify active row data
         active_row = None
         for row_item, _, _, _ in self.field_entries:
             if row_item.get("rule_idx") == self.active_rule_idx:
@@ -214,9 +221,13 @@ class ReviewFocusDialog:
 
         bbox = active_row.get("bbox") if active_row else None
 
-        # If bbox is missing, try on-demand auto-detection
+        # On-demand fallback: only detect if missing and user is inspecting this single image
         if not bbox and active_row:
-            rule_ref = self.app.rules[self.active_rule_idx] if self.active_rule_idx < len(self.app.rules) else None
+            rule_ref = (
+                self.app.rules[self.active_rule_idx]
+                if self.active_rule_idx < len(self.app.rules)
+                else None
+            )
             if rule_ref:
                 bbox = auto_detect_bbox_for_image(
                     self.current_pil_img,
@@ -230,15 +241,14 @@ class ReviewFocusDialog:
 
         self.canvas_img.delete("all")
 
-        # CASE 1: FOCUS MODE (ROI Crop & Zoom)
+        # CASE 1: FOCUS MODE (ROI Zoom & Center)
         if self.focus_mode_var.get() and bbox:
             bx1, by1, bx2, by2 = bbox
             bw = max(1, bx2 - bx1)
             bh = max(1, by2 - by1)
 
-            # Generous context padding around characters
-            pad_x = max(80, int(bw * 0.75))
-            pad_y = max(50, int(bh * 1.5))
+            pad_x = max(60, int(bw * 0.75))
+            pad_y = max(40, int(bh * 1.3))
 
             cx1 = max(0, bx1 - pad_x)
             cy1 = max(0, by1 - pad_y)
@@ -251,8 +261,7 @@ class ReviewFocusDialog:
             if crop_w > 0 and crop_h > 0:
                 roi_img = self.current_pil_img.crop((cx1, cy1, cx2, cy2))
 
-                # Scale crop to comfortably fill canvas
-                base_scale = min(cw / crop_w, ch / crop_h) * 0.88
+                base_scale = min(cw / crop_w, ch / crop_h) * 0.90
                 scale = base_scale * self.zoom_factor
                 nw = max(1, int(crop_w * scale))
                 nh = max(1, int(crop_h * scale))
@@ -270,32 +279,33 @@ class ReviewFocusDialog:
                 tb_x2 = ox + (bx2 - cx1) * scale
                 tb_y2 = oy + (by2 - cy1) * scale
 
-                # 1. Outer Neon Glow
+                # Neon Outer & Inner Rectangles
                 self.canvas_img.create_rectangle(
-                    tb_x1 - 2, tb_y1 - 2, tb_x2 + 2, tb_y2 + 2, outline="#0284c7", width=4
+                    tb_x1 - 2, tb_y1 - 2, tb_x2 + 2, tb_y2 + 2, outline="#0284c7", width=3
                 )
-                # 2. Inner Bright Highlight
                 self.canvas_img.create_rectangle(
                     tb_x1, tb_y1, tb_x2, tb_y2, outline="#10b981", width=2
                 )
 
-                # 3. Floating Field Tag Badge above text box
+                # Floating Badge
                 tag_text = f"🎯 {active_row.get('field', 'Vị trí')}: {active_row.get('ocr_text', '')}"
                 self.canvas_img.create_rectangle(
-                    tb_x1, tb_y1 - 26, tb_x1 + len(tag_text) * 8 + 16, tb_y1 - 4,
+                    tb_x1, tb_y1 - 24, tb_x1 + len(tag_text) * 8 + 14, tb_y1 - 3,
                     fill="#0f172a", outline="#0284c7", width=1
                 )
                 self.canvas_img.create_text(
-                    tb_x1 + 8, tb_y1 - 15,
+                    tb_x1 + 6, tb_y1 - 13,
                     text=tag_text, anchor="w", fill="#38bdf8", font=("Segoe UI", 9, "bold")
                 )
 
-                info_str = f"🎯 Focus: {active_row.get('field')} | Zoom: {int(scale * 100)}%"
-                self.lbl_focus_info.config(text=info_str, foreground="#10b981")
+                self.lbl_focus_info.config(
+                    text=f"🎯 Focus: {active_row.get('field')} ({int(scale * 100)}%)",
+                    foreground="#10b981",
+                )
                 return
 
-        # CASE 2: FULL VIEW MODE (or Fallback if no bbox)
-        base_scale = min(cw / max(1, iw), ch / max(1, ih)) * 0.94
+        # CASE 2: FULL IMAGE VIEW
+        base_scale = min(cw / max(1, iw), ch / max(1, ih)) * 0.96
         scale = base_scale * self.zoom_factor
         nw = max(1, int(iw * scale))
         nh = max(1, int(ih * scale))
@@ -307,7 +317,7 @@ class ReviewFocusDialog:
         oy = (ch - nh) // 2
         self.canvas_img.create_image(ox, oy, anchor=tk.NW, image=self.current_tk_img)
 
-        # Draw highlight boxes on full image for all fields
+        # Highlight boxes for fields on full image
         for row_item, _, _, _ in self.field_entries:
             b = row_item.get("bbox")
             if b:
@@ -320,17 +330,8 @@ class ReviewFocusDialog:
                 color = "#10b981" if is_active else "#64748b"
                 width = 3 if is_active else 1
                 self.canvas_img.create_rectangle(rx1, ry1, rx2, ry2, outline=color, width=width)
-                if is_active:
-                    self.canvas_img.create_rectangle(
-                        rx1 - 2, ry1 - 2, rx2 + 2, ry2 + 2, outline="#0284c7", width=2
-                    )
 
-        if not bbox and active_row:
-            self.lbl_focus_info.config(
-                text="ℹ️ Chưa xác định tọa độ ROI (Xem toàn cảnh)", foreground="#f59e0b"
-            )
-        else:
-            self.lbl_focus_info.config(text="🖼️ Toàn Cảnh (Full View)", foreground="#0284c7")
+        self.lbl_focus_info.config(text="🖼️ Toàn Cảnh", foreground="#0284c7")
 
     def _load_current_image_data(self):
         if not self.unique_image_indices:
@@ -343,7 +344,7 @@ class ReviewFocusDialog:
         self.lbl_progress.config(text=f"Ảnh {self.current_idx_pointer + 1} / {total}")
         self.lbl_filename.config(text=f"Tệp: {orig_filename}")
 
-        # 1. Load and display Image
+        # 1. Load Image
         img_path = os.path.join(self.app.folder_path, orig_filename)
         if os.path.isfile(img_path):
             try:
@@ -373,13 +374,12 @@ class ReviewFocusDialog:
             rule_idx = row_item.get("rule_idx", 0)
             rule = self.app.rules[rule_idx] if rule_idx < len(self.app.rules) else None
 
-            lbl_f_title = ttk.Label(
+            ttk.Label(
                 hdr,
-                text=f"🎯 {row_item['field']} ({row_item['var_tag']}):",
+                text=f"{row_item['field']} ({row_item['var_tag']}):",
                 font=("Segoe UI", 10, "bold"),
                 foreground="#1e293b",
-            )
-            lbl_f_title.pack(side=tk.LEFT)
+            ).pack(side=tk.LEFT)
 
             status_lbl = ttk.Label(hdr, font=("Segoe UI", 8, "bold"))
             status_lbl.pack(side=tk.RIGHT)
@@ -391,7 +391,7 @@ class ReviewFocusDialog:
 
             # Auto-focus ROI when user clicks or tabs into this Entry!
             def make_focus_cb(r_id):
-                return lambda event: self.set_active_field(r_id)
+                return lambda event: self._set_active_field(r_id)
 
             ent.bind("<FocusIn>", make_focus_cb(rule_idx))
 
@@ -477,56 +477,65 @@ class ReviewFocusDialog:
                 messagebox.showinfo("Hoàn Tất", "🎉 Đã duyệt hết tất cả các ảnh trong danh sách!")
 
     def on_prev(self):
+        if not self.unique_image_indices:
+            return
+
+        img_idx = self.unique_image_indices[self.current_idx_pointer]
+        orig_filename = self.app.image_files[img_idx]
+        for row_item, ent, _, _ in self.field_entries:
+            row_item["ocr_text"] = ent.get().strip()
+        self.app._recalculate_filenames_for_image(orig_filename, img_idx)
+
         prev_ptr = self._find_next_pointer(direction=-1)
         if prev_ptr is not None:
             self.current_idx_pointer = prev_ptr
             self._load_current_image_data()
 
     def _on_filter_toggled(self):
-        # Refresh current pointer based on filter
-        next_ptr = self._find_next_pointer(direction=0)
-        if next_ptr is not None:
-            self.current_idx_pointer = next_ptr
-            self._load_current_image_data()
-        else:
-            messagebox.showinfo("Thông Báo", "Không có ảnh nào có vấn đề hoặc rỗng.")
-            self.filter_issues_only_var.set(False)
+        if self.filter_issues_only_var.get():
+            img_idx = self.unique_image_indices[self.current_idx_pointer]
+            rows = [r for r in self.app.results_data if r["img_idx"] == img_idx]
+            current_is_issue = any(not r["ocr_text"].strip() for r in rows)
+            if not current_is_issue:
+                next_ptr = self._find_next_pointer(direction=1)
+                if next_ptr is None:
+                    next_ptr = self._find_next_pointer(direction=-1)
+                if next_ptr is not None:
+                    self.current_idx_pointer = next_ptr
+                    self._load_current_image_data()
+                else:
+                    messagebox.showinfo("Thông Báo", "Tất cả ảnh đều đã có dữ liệu đầy đủ!")
+                    self.filter_issues_only_var.set(False)
 
-    def _find_next_pointer(self, direction: int) -> int:
+    def _find_next_pointer(self, direction=1):
         total = len(self.unique_image_indices)
-        if total == 0:
+        if total <= 1:
             return None
 
-        filter_issues = self.filter_issues_only_var.get()
+        ptr = self.current_idx_pointer + direction
+        while 0 <= ptr < total:
+            if not self.filter_issues_only_var.get():
+                return ptr
 
-        if direction == 0:
-            # Check current
-            if not filter_issues or self._image_has_issue(self.unique_image_indices[self.current_idx_pointer]):
-                return self.current_idx_pointer
-            direction = 1
-
-        curr = self.current_idx_pointer + direction
-        while 0 <= curr < total:
-            img_idx = self.unique_image_indices[curr]
-            if not filter_issues or self._image_has_issue(img_idx):
-                return curr
-            curr += direction
-        return None
-
-    def _image_has_issue(self, img_idx: int) -> bool:
-        """Determines if any field in the image is empty or violates regex."""
-        rows = [r for r in self.app.results_data if r["img_idx"] == img_idx]
-        for r in rows:
-            val = r.get("ocr_text", "").strip()
-            if not val:
-                return True
-            rule_idx = r.get("rule_idx", 0)
-            if rule_idx < len(self.app.rules):
-                rule = self.app.rules[rule_idx]
-                if rule.get("type") == "regex" and rule.get("pattern"):
+            check_img_idx = self.unique_image_indices[ptr]
+            rows = [r for r in self.app.results_data if r["img_idx"] == check_img_idx]
+            has_issue = False
+            for r in rows:
+                txt = r["ocr_text"].strip()
+                if not txt:
+                    has_issue = True
+                    break
+                rule_idx = r.get("rule_idx", 0)
+                rule = self.app.rules[rule_idx] if rule_idx < len(self.app.rules) else None
+                if rule and rule.get("type") == "regex" and rule.get("pattern"):
                     try:
-                        if not re.search(rule["pattern"], val):
-                            return True
+                        if not re.search(rule["pattern"], txt):
+                            has_issue = True
+                            break
                     except Exception:
                         pass
-        return False
+            if has_issue:
+                return ptr
+            ptr += direction
+
+        return None

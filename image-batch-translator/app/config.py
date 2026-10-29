@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Application Configuration, Constants, Theme Styles & Dependency Management.
+Preserves the exact original English UI styles and themes of image_batch_translator.py.
 """
 
 import os
@@ -23,7 +24,6 @@ except ImportError:
 HAVE_CV2 = False
 try:
     import cv2
-    import numpy as np
     HAVE_CV2 = True
 except ImportError:
     pass
@@ -38,7 +38,6 @@ except ImportError:
 HAVE_RAPIDOCR = False
 try:
     from rapidocr_onnxruntime import RapidOCR
-    import numpy as np
     HAVE_RAPIDOCR = True
 except ImportError:
     pass
@@ -69,7 +68,7 @@ PREPROCESS_MODES = [
 
 
 # ============================================================================
-# FONTS & THEME STYLING
+# FONTS & THEME STYLING (RESTORED 100% ORIGINAL DESIGN & PALETTE)
 # ============================================================================
 def find_default_font() -> str:
     """Find a system font that reliably renders Unicode & Vietnamese diacritics."""
@@ -105,112 +104,44 @@ def find_default_font() -> str:
 
 
 def init_theme_styles(style: ttk.Style):
-    """Initializes modern, clean ttk styles with distinct accents."""
+    """
+    Initializes the exact original clean, professional ttk styles
+    from image_batch_translator.py.
+    """
     try:
         style.theme_use("clam")
     except Exception:
         pass
 
-    # Colors
-    bg_color = "#f8fafc"
-    card_bg = "#ffffff"
-    text_color = "#0f172a"
-    primary_color = "#0284c7"
-    primary_hover = "#0369a1"
-    accent_color = "#10b981"
-    accent_hover = "#059669"
-    danger_color = "#ef4444"
-    border_color = "#cbd5e1"
+    style.configure(".", font=("Segoe UI", 9))
+    style.configure("TLabel", font=("Segoe UI", 9))
+    style.configure("TButton", font=("Segoe UI", 9), padding=5)
+    style.configure("Header.TLabel", font=("Segoe UI", 11, "bold"), foreground="#1e293b")
+    style.configure("Title.TLabel", font=("Segoe UI", 13, "bold"), foreground="#0f172a")
 
-    style.configure(".", background=bg_color, foreground=text_color, font=("Segoe UI", 9))
-    style.configure("Card.TFrame", background=card_bg, relief="solid", borderwidth=1)
-    style.configure("TLabelframe", background=card_bg, relief="solid", borderwidth=1)
-    style.configure(
-        "TLabelframe.Label",
-        background=card_bg,
-        foreground="#1e293b",
-        font=("Segoe UI", 9, "bold"),
-    )
-
-    # Primary Button (Sky Blue)
+    # Original Primary Button (Blue #2563eb)
     style.configure(
         "Primary.TButton",
-        background=primary_color,
-        foreground="#ffffff",
         font=("Segoe UI", 9, "bold"),
-        padding=6,
-        borderwidth=0,
+        background="#2563eb",
+        foreground="#ffffff",
     )
-    style.map(
-        "Primary.TButton",
-        background=[("active", primary_hover), ("disabled", "#94a3b8")],
-        foreground=[("disabled", "#cbd5e1")],
-    )
+    style.map("Primary.TButton", background=[("active", "#1d4ed8")])
 
-    # Accent Button (Emerald Green)
+    # Original Accent Button (Green #059669)
     style.configure(
         "Accent.TButton",
-        background=accent_color,
+        font=("Segoe UI", 9, "bold"),
+        background="#059669",
         foreground="#ffffff",
-        font=("Segoe UI", 9, "bold"),
-        padding=6,
-        borderwidth=0,
     )
-    style.map(
-        "Accent.TButton",
-        background=[("active", accent_hover), ("disabled", "#94a3b8")],
-        foreground=[("disabled", "#cbd5e1")],
-    )
+    style.map("Accent.TButton", background=[("active", "#047857")])
 
-    # Focus Button (Indigo / Violet)
+    # Original Review Button (Amber #d97706)
     style.configure(
-        "Focus.TButton",
-        background="#6366f1",
+        "Review.TButton",
+        font=("Segoe UI", 9, "bold"),
+        background="#d97706",
         foreground="#ffffff",
-        font=("Segoe UI", 9, "bold"),
-        padding=6,
-        borderwidth=0,
     )
-    style.map(
-        "Focus.TButton",
-        background=[("active", "#4f46e5"), ("disabled", "#94a3b8")],
-        foreground=[("disabled", "#cbd5e1")],
-    )
-
-    # Danger Button (Rose Red)
-    style.configure(
-        "Danger.TButton",
-        background=danger_color,
-        foreground="#ffffff",
-        font=("Segoe UI", 9, "bold"),
-        padding=6,
-        borderwidth=0,
-    )
-    style.map(
-        "Danger.TButton",
-        background=[("active", "#dc2626"), ("disabled", "#94a3b8")],
-        foreground=[("disabled", "#cbd5e1")],
-    )
-
-    # Treeview Styling
-    style.configure(
-        "Treeview",
-        background="#ffffff",
-        foreground="#1e293b",
-        fieldbackground="#ffffff",
-        rowheight=26,
-        font=("Segoe UI", 9),
-        borderwidth=1,
-    )
-    style.configure(
-        "Treeview.Heading",
-        background="#e2e8f0",
-        foreground="#0f172a",
-        font=("Segoe UI", 9, "bold"),
-        padding=4,
-    )
-    style.map(
-        "Treeview",
-        background=[("selected", "#0284c7")],
-        foreground=[("selected", "#ffffff")],
-    )
+    style.map("Review.TButton", background=[("active", "#b45309")])
