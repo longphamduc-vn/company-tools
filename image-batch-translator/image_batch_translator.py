@@ -219,12 +219,14 @@ def extract_by_keyword(full_text: str, keyword: str) -> str:
 
 
 def extract_by_pattern(full_text: str, pattern: str) -> str:
-    """Extracts text matching a regex pattern from full text."""
+    """Extracts text matching a regex pattern from full text (returns group 1 if capturing group exists)."""
     if not pattern.strip() or not full_text:
         return ""
     try:
         m = re.search(pattern.strip(), full_text)
-        return m.group(0).strip() if m else ""
+        if m:
+            return m.group(1).strip() if m.groups() else m.group(0).strip()
+        return ""
     except Exception:
         return ""
 
