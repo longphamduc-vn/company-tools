@@ -43,9 +43,16 @@ from string import Formatter
 MISSING_PACKAGES = []
 
 try:
-    from PIL import Image, ImageTk, ImageDraw, ImageFont
+    from PIL import Image, ImageTk, ImageDraw, ImageFont, ImageOps, ImageFilter
 except ImportError:
     MISSING_PACKAGES.append("pillow")
+
+HAVE_CV2 = False
+try:
+    import cv2
+    HAVE_CV2 = True
+except ImportError:
+    pass
 
 HAVE_LENS = False
 try:
@@ -186,17 +193,18 @@ def extract_by_keyword(full_text: str, keyword: str) -> str:
     """
     Extracts text associated with a keyword across full text.
     Resilient to:
-    - Same line with colon: 'Mã phiếu: PXK-2026-001'
+    - Same line with colon: 'Mã phiếu: PXK-2026-001', 'GlassID: DLLLLLL1'
+    - Same line with space: 'GlassID DLLLLLL1'
+    - Same line fused: 'GlassIDDLLLLLL1'
     - Multi-line with colon or break: 'Mã phiếu:\nPXK-2026-001'
-    - Same line without colon: 'Mã phiếu PXK-2026-001'
     Works even if images are cropped, shifted or scaled!
     """
     if not keyword.strip() or not full_text:
         return ""
     kw = re.escape(keyword.strip())
 
-    # 1. Try same line
-    m1 = re.search(rf"(?i){kw}[:\s\-_–—]+([^\n\r]+)", full_text)
+    # 1. Try same line (with optional separator or fused)
+    m1 = re.search(rf"(?i){kw}[:\s\-_–—]*([^\n\r]+)", full_text)
     if m1 and m1.group(1).strip():
         return m1.group(1).strip()
 
@@ -255,6 +263,670 @@ def extract_by_box(img: Image.Image, box: tuple, engine_name: str, lens_api=None
 
 
 # ============================================================================
+# 3. IMAGE PREPROCESSING SYSTEM FOR OCR ACCURACY
+# ============================================================================
+PREPROCESS_MODES = [
+    "None (Ảnh gốc)",
+    "CLAHE (Độ tương phản cao - Chống lóa / Mặt kính)",
+    "Enhance (Tự động cân bằng & Sắc nét)",
+    "Invert (Đảo màu - Kính tối / Khắc laser sáng)",
+    "Binarize (Otsu - Nhị phân đen trắng lọc nhiễu)",
+    "Sharpen (Làm sắc nét chữ mờ)",
+]
+
+
+def preprocess_for_ocr(img_pil: Image.Image, mode: str = "none", upscale: bool = False) -> Image.Image:
+    """
+    Applies image preprocessing to dramatically improve OCR accuracy on glass,
+    faint laser etching, reflective glare, low-contrast ink, and noisy backgrounds.
+    """
+    if not mode or mode.lower().startswith("none"):
+        if upscale:
+            w, h = img_pil.size
+            return img_pil.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
+        return img_pil.convert("RGB")
+
+    mode_key = mode.lower()
+
+    if HAVE_CV2:
+        img_np = np.array(img_pil)
+        if img_np.ndim == 2:
+            gray = img_np
+        elif img_np.shape[2] == 4:
+            gray = cv2.cvtColor(img_np, cv2.COLOR_RGBA2GRAY)
+        else:
+            gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+
+        if upscale:
+            h, w = gray.shape[:2]
+            gray = cv2.resize(gray, (w * 2, h * 2), interpolation=cv2.INTER_LANCZOS4)
+
+        if "clahe" in mode_key:
+            clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+            processed = clahe.apply(gray)
+        elif "invert" in mode_key:
+            processed = cv2.bitwise_not(gray)
+        elif "binarize" in mode_key or "otsu" in mode_key:
+            blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+            _, processed = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        elif "enhance" in mode_key:
+            clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+            eq = clahe.apply(gray)
+            kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
+            processed = cv2.filter2D(eq, -1, kernel)
+        elif "sharpen" in mode_key:
+            kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
+            processed = cv2.filter2D(gray, -1, kernel)
+        else:
+            processed = gray
+
+        return Image.fromarray(processed).convert("RGB")
+    else:
+        # Pure PIL Fallback
+        gray = img_pil.convert("L")
+        if upscale:
+            w, h = gray.size
+            gray = gray.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
+
+        if "invert" in mode_key:
+            processed = ImageOps.invert(gray)
+        elif "enhance" in mode_key or "clahe" in mode_key:
+            eq = ImageOps.autocontrast(gray, cutoff=2)
+            processed = eq.filter(ImageFilter.SHARPEN)
+        elif "sharpen" in mode_key:
+            processed = gray.filter(ImageFilter.SHARPEN)
+        elif "binarize" in mode_key or "otsu" in mode_key:
+            processed = gray.point(lambda p: 255 if p > 128 else 0)
+        else:
+            processed = gray
+
+        return processed.convert("RGB")
+
+
+# ============================================================================
+# PREPROCESS TEST & OCR TEST SCAN DIALOG
+# ============================================================================
+class PreprocessTestDialog:
+    """Interactive preview and test scan dialog for image preprocessing algorithms."""
+
+    def __init__(self, parent: tk.Tk, app):
+        self.parent = parent
+        self.app = app
+        self.win = tk.Toplevel(parent)
+        self.win.title("🧪 Test Tiền Xử Lý & Quét Thử OCR (Image Preprocessing & OCR Test)")
+        self.win.geometry("1100x750")
+        self.win.minsize(900, 620)
+        self.win.transient(parent)
+        try:
+            self.win.grab_set()
+        except Exception:
+            pass
+
+        self.current_img_idx = (
+            app.current_sample_idx
+            if (app.image_files and 0 <= app.current_sample_idx < len(app.image_files))
+            else 0
+        )
+        self.mode_var = tk.StringVar(value=app.preprocess_mode_var.get())
+        self.upscale_var = tk.BooleanVar(value=app.upscale_2x_var.get())
+        self.ocr_engine_var = tk.StringVar(value=app.ocr_engine_var.get())
+
+        self.orig_image = None
+        self.prep_image = None
+        self.orig_photo = None
+        self.prep_photo = None
+
+        self._build_ui()
+        self._load_current_image()
+
+    def _build_ui(self):
+        # Top toolbar
+        top = ttk.Frame(self.win, padding="10 8")
+        top.pack(side=tk.TOP, fill=tk.X)
+
+        ttk.Label(top, text="Chọn ảnh:", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(0, 4))
+        self.img_combo = ttk.Combobox(top, values=self.app.image_files, state="readonly", width=24)
+        if self.app.image_files:
+            self.img_combo.current(self.current_img_idx)
+        self.img_combo.pack(side=tk.LEFT, padx=(0, 10))
+        self.img_combo.bind("<<ComboboxSelected>>", self._on_image_selected)
+
+        ttk.Label(top, text="Bộ lọc xử lý:", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(5, 4))
+        self.mode_combo = ttk.Combobox(
+            top, textvariable=self.mode_var, values=PREPROCESS_MODES, state="readonly", width=34
+        )
+        self.mode_combo.pack(side=tk.LEFT, padx=(0, 10))
+        self.mode_combo.bind("<<ComboboxSelected>>", lambda e: self._update_preprocessed_preview())
+
+        ttk.Checkbutton(
+            top, text="Upscale 2x", variable=self.upscale_var, command=self._update_preprocessed_preview
+        ).pack(side=tk.LEFT, padx=(0, 10))
+
+        btn_run_test = ttk.Button(top, text="⚡ Quét Thử OCR", style="Primary.TButton", command=self._run_test_scan)
+        btn_run_test.pack(side=tk.LEFT, padx=5)
+
+        # Center: Side-by-side Image Previews
+        preview_paned = ttk.PanedWindow(self.win, orient=tk.HORIZONTAL)
+        preview_paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        # Left: Original
+        f_left = ttk.LabelFrame(preview_paned, text="Ảnh Gốc (Original Image)", padding=5)
+        preview_paned.add(f_left, weight=1)
+        self.lbl_orig = ttk.Label(f_left, text="No Image", anchor="center", background="#0f172a")
+        self.lbl_orig.pack(fill=tk.BOTH, expand=True)
+
+        # Right: Preprocessed
+        f_right = ttk.LabelFrame(preview_paned, text="Ảnh Sau Tiền Xử Lý (Preprocessed Image)", padding=5)
+        preview_paned.add(f_right, weight=1)
+        self.lbl_prep = ttk.Label(f_right, text="No Image", anchor="center", background="#0f172a")
+        self.lbl_prep.pack(fill=tk.BOTH, expand=True)
+
+        # Bottom: OCR Test Results & Actions
+        res_frame = ttk.LabelFrame(self.win, text="Kết Quả Quét Thử OCR & Trích Xuất Dữ Liệu", padding=8)
+        res_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
+
+        self.txt_ocr_output = tk.Text(
+            res_frame, height=5, font=("Consolas", 10), wrap="word", bg="#f8fafc", relief="solid", borderwidth=1
+        )
+        self.txt_ocr_output.pack(fill=tk.X, expand=True, side=tk.TOP, pady=(0, 6))
+
+        bot_bar = ttk.Frame(self.win, padding="10 8")
+        bot_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self.lbl_status = ttk.Label(
+            bot_bar, text="Chọn bộ lọc và bấm '⚡ Quét Thử OCR' để kiểm tra kết quả.", font=("Segoe UI", 9, "italic")
+        )
+        self.lbl_status.pack(side=tk.LEFT)
+
+        ttk.Button(bot_bar, text="Đóng", command=self.win.destroy).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(
+            bot_bar, text="✅ Áp Dụng Cấu Hình Này", style="Accent.TButton", command=self._apply_and_close
+        ).pack(side=tk.RIGHT, padx=4)
+
+    def _on_image_selected(self, event=None):
+        idx = self.img_combo.current()
+        if 0 <= idx < len(self.app.image_files):
+            self.current_img_idx = idx
+            self._load_current_image()
+
+    def _load_current_image(self):
+        if not self.app.image_files or not self.app.folder_path:
+            return
+        filename = self.app.image_files[self.current_img_idx]
+        img_path = os.path.join(self.app.folder_path, filename)
+        if not os.path.isfile(img_path):
+            return
+        try:
+            self.orig_image = Image.open(img_path).convert("RGB")
+            self._update_original_preview()
+            self._update_preprocessed_preview()
+        except Exception as e:
+            self.lbl_status.config(text=f"Lỗi mở ảnh: {e}")
+
+    def _update_original_preview(self):
+        if not self.orig_image:
+            return
+        w, h = self.orig_image.size
+        max_w, max_h = 480, 280
+        ratio = min(max_w / max(1, w), max_h / max(1, h))
+        nw, nh = max(1, int(w * ratio)), max(1, int(h * ratio))
+        resized = self.orig_image.resize((nw, nh), Image.Resampling.BILINEAR)
+        self.orig_photo = ImageTk.PhotoImage(resized)
+        self.lbl_orig.config(image=self.orig_photo, text="")
+
+    def _update_preprocessed_preview(self):
+        if not self.orig_image:
+            return
+        try:
+            mode = self.mode_var.get()
+            upscale = self.upscale_var.get()
+            self.prep_image = preprocess_for_ocr(self.orig_image, mode=mode, upscale=upscale)
+            w, h = self.prep_image.size
+            max_w, max_h = 480, 280
+            ratio = min(max_w / max(1, w), max_h / max(1, h))
+            nw, nh = max(1, int(w * ratio)), max(1, int(h * ratio))
+            resized = self.prep_image.resize((nw, nh), Image.Resampling.BILINEAR)
+            self.prep_photo = ImageTk.PhotoImage(resized)
+            self.lbl_prep.config(image=self.prep_photo, text="")
+        except Exception as e:
+            self.lbl_status.config(text=f"Lỗi tiền xử lý ảnh: {e}")
+
+    def _run_test_scan(self):
+        if not self.prep_image:
+            return
+        self.lbl_status.config(text="Đang quét thử OCR... Xin vui lòng đợi...")
+        self.txt_ocr_output.delete("1.0", tk.END)
+        self.txt_ocr_output.insert(tk.END, "⏳ Đang quét OCR trên ảnh tiền xử lý...\n")
+
+        engine_name = self.app.ocr_engine_var.get()
+
+        def worker():
+            import time
+
+            t0 = time.time()
+            full_text = ""
+            lines = []
+            if "Google" in engine_name and HAVE_LENS:
+                loop = asyncio.new_event_loop()
+                try:
+                    lens = LensAPI()
+                    res = loop.run_until_complete(lens.process_image(self.prep_image, output_format="full_text"))
+                    loop.run_until_complete(lens.aclose())
+                    full_text = res.get("ocr_text", "")
+                    lines = [l.strip() for l in full_text.splitlines() if l.strip()]
+                except Exception as e:
+                    full_text = f"Lỗi Google OCR: {e}"
+                finally:
+                    loop.close()
+            elif HAVE_RAPIDOCR:
+                engine = RapidOCR()
+                res, _ = engine(np.array(self.prep_image))
+                if res:
+                    lines = [line[1].strip() for line in res]
+                    full_text = "\n".join(lines)
+            else:
+                full_text = "Không tìm thấy OCR Engine khả dụng."
+
+            elapsed = round(time.time() - t0, 3)
+
+            extracted_summary = []
+            for r in self.app.rules:
+                if r["type"] == "keyword":
+                    val = extract_by_keyword(full_text, r["keyword"])
+                elif r["type"] == "regex":
+                    val = extract_by_pattern(full_text, r["pattern"])
+                elif r["type"] == "box" and r.get("box"):
+                    val = extract_by_box(
+                        self.prep_image,
+                        (r["box"]["rx1"], r["box"]["ry1"], r["box"]["rx2"], r["box"]["ry2"]),
+                        engine_name,
+                    )
+                else:
+                    val = ""
+                extracted_summary.append(f"  • {r['name']} ({r['var']}): \"{val}\"")
+
+            self.win.after(0, self._display_test_results, full_text, extracted_summary, elapsed)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _display_test_results(self, full_text, extracted_summary, elapsed):
+        self.txt_ocr_output.delete("1.0", tk.END)
+        out = []
+        out.append(
+            f"⏱️ Quét hoàn tất trong {elapsed}s | Bộ lọc: {self.mode_var.get()} | Upscale 2x: {self.upscale_var.get()}"
+        )
+        out.append("-" * 70)
+        out.append("🎯 DỮ LIỆU TRÍCH XUẤT THEO QUY TẮC:")
+        if extracted_summary:
+            out.extend(extracted_summary)
+        else:
+            out.append("  (Chưa có quy tắc nào được định nghĩa)")
+        out.append("-" * 70)
+        out.append("📄 TOÀN BỘ KÝ TỰ NHẬN DIỆN (FULL OCR TEXT):")
+        out.append(full_text if full_text.strip() else "(Không tìm thấy văn bản)")
+        self.txt_ocr_output.insert(tk.END, "\n".join(out))
+        self.lbl_status.config(text=f"✅ Quét xong trong {elapsed}s.")
+
+    def _apply_and_close(self):
+        self.app.preprocess_mode_var.set(self.mode_var.get())
+        self.app.upscale_2x_var.set(self.upscale_var.get())
+        self.win.destroy()
+        messagebox.showinfo(
+            "Đã Áp Dụng",
+            f"Đã cấu hình bộ lọc tiền xử lý: {self.mode_var.get()}\nUpscale 2x: {self.upscale_var.get()}",
+        )
+
+
+# ============================================================================
+# REVIEW FOCUS DIALOG (HUMAN-IN-THE-LOOP QUICK VERIFICATION)
+# ============================================================================
+class ReviewFocusDialog:
+    """
+    Dedicated Human-in-the-Loop Review & Focus Dialog.
+    Enables rapid manual verification and correction of OCR extraction outputs
+    with keyboard shortcuts (Enter = Save & Next, Ctrl+Left = Prev, Esc = Close).
+    """
+
+    def __init__(self, parent: tk.Tk, app, target_img_idx: int = None, target_rule_idx: int = None):
+        self.parent = parent
+        self.app = app
+        self.win = tk.Toplevel(parent)
+        self.win.title("🎯 Review Focus - Soát Lỗi & Sửa Kết Quả Thủ Công")
+        self.win.geometry("1150x760")
+        self.win.minsize(920, 650)
+        self.win.transient(parent)
+        try:
+            self.win.grab_set()
+        except Exception:
+            pass
+
+        # Build list of distinct image indices present in results_data
+        self.unique_image_indices = []
+        for row in app.results_data:
+            if row["img_idx"] not in self.unique_image_indices:
+                self.unique_image_indices.append(row["img_idx"])
+        self.unique_image_indices.sort()
+
+        if target_img_idx is not None and target_img_idx in self.unique_image_indices:
+            self.current_idx_pointer = self.unique_image_indices.index(target_img_idx)
+        else:
+            self.current_idx_pointer = 0
+
+        self.target_rule_idx = target_rule_idx
+        self.filter_issues_only_var = tk.BooleanVar(value=False)
+        self.field_entries = []  # list of (row_dict, ttk.Entry, lbl_status, rule_dict)
+
+        self.current_pil_img = None
+        self.current_tk_img = None
+
+        self._build_ui()
+        self._load_current_image_data()
+        self._bind_keys()
+
+    def _bind_keys(self):
+        self.win.bind("<Return>", lambda e: self.on_save_and_next())
+        self.win.bind("<Control-Left>", lambda e: self.on_prev())
+        self.win.bind("<Alt-Left>", lambda e: self.on_prev())
+        self.win.bind("<Control-Right>", lambda e: self.on_save_and_next())
+        self.win.bind("<Alt-Right>", lambda e: self.on_save_and_next())
+        self.win.bind("<Escape>", lambda e: self.win.destroy())
+
+    def _build_ui(self):
+        # Top Header Bar
+        top_bar = ttk.Frame(self.win, padding="10 8")
+        top_bar.pack(side=tk.TOP, fill=tk.X)
+
+        self.btn_prev = ttk.Button(top_bar, text="◀ Trước (Ctrl+←)", command=self.on_prev)
+        self.btn_prev.pack(side=tk.LEFT, padx=3)
+
+        self.lbl_progress = ttk.Label(
+            top_bar, text="Ảnh 1 / 1", font=("Segoe UI", 12, "bold"), foreground="#1e293b"
+        )
+        self.lbl_progress.pack(side=tk.LEFT, padx=12)
+
+        self.btn_next = ttk.Button(
+            top_bar, text="Tiếp theo ▶ (Enter / Ctrl+→)", style="Primary.TButton", command=self.on_save_and_next
+        )
+        self.btn_next.pack(side=tk.LEFT, padx=3)
+
+        ttk.Separator(top_bar, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=15)
+
+        chk_filter = ttk.Checkbutton(
+            top_bar,
+            text="⚠️ Chỉ duyệt ảnh có lỗi / rỗng (Filter Suspect/Empty)",
+            variable=self.filter_issues_only_var,
+            command=self._on_filter_toggled,
+        )
+        chk_filter.pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(top_bar, text="Đóng (Esc)", command=self.win.destroy).pack(side=tk.RIGHT, padx=5)
+
+        # Paned Window (Left: Image Preview, Right: Editable Fields & Live Output)
+        paned = ttk.PanedWindow(self.win, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
+
+        # Left: Image Viewer
+        left_box = ttk.LabelFrame(paned, text="Hình Ảnh Kiểm Tra (Visual Check)", padding=6)
+        paned.add(left_box, weight=6)
+
+        self.canvas_img = tk.Canvas(left_box, bg="#0f172a", highlightthickness=0)
+        self.canvas_img.pack(fill=tk.BOTH, expand=True)
+        self.canvas_img.bind("<Configure>", lambda e: self._draw_image_on_canvas())
+
+        # Right: Fields & Filename
+        right_box = ttk.LabelFrame(paned, text="Trích Xuất & Sửa Ký Tự (Keyboard-First)", padding=10)
+        paned.add(right_box, weight=5)
+
+        self.lbl_filename = ttk.Label(
+            right_box, text="File: sample.png", font=("Segoe UI", 10, "bold"), foreground="#2563eb"
+        )
+        self.lbl_filename.pack(anchor="w", pady=(0, 8))
+
+        # Container for dynamic field entries
+        self.fields_container = ttk.Frame(right_box)
+        self.fields_container.pack(fill=tk.BOTH, expand=True)
+
+        # Live Filename Preview Box
+        preview_box = ttk.LabelFrame(right_box, text="🏷️ Xem Trước Tên File Mới Khi Đổi (Live Preview)", padding=8)
+        preview_box.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 0))
+
+        self.lbl_new_name_preview = ttk.Label(
+            preview_box, text="", font=("Segoe UI", 11, "bold"), foreground="#059669", wraplength=420
+        )
+        self.lbl_new_name_preview.pack(fill=tk.X, pady=3)
+
+        tip_lbl = ttk.Label(
+            right_box,
+            text="💡 Mẹo: Nhấn Enter để Lưu và chuyển ngay sang ảnh tiếp theo mà không cần dùng chuột!",
+            font=("Segoe UI", 8, "italic"),
+            foreground="#64748b",
+        )
+        tip_lbl.pack(side=tk.BOTTOM, anchor="w", pady=(5, 0))
+
+    def _draw_image_on_canvas(self):
+        if not self.current_pil_img:
+            return
+        cw = max(100, self.canvas_img.winfo_width())
+        ch = max(100, self.canvas_img.winfo_height())
+        iw, ih = self.current_pil_img.size
+
+        scale = min(cw / max(1, iw), ch / max(1, ih)) * 0.96
+        nw = max(1, int(iw * scale))
+        nh = max(1, int(ih * scale))
+
+        resized = self.current_pil_img.resize((nw, nh), Image.Resampling.BILINEAR)
+        self.current_tk_img = ImageTk.PhotoImage(resized)
+
+        self.canvas_img.delete("all")
+        ox = (cw - nw) // 2
+        oy = (ch - nh) // 2
+        self.canvas_img.create_image(ox, oy, anchor=tk.NW, image=self.current_tk_img)
+
+    def _load_current_image_data(self):
+        if not self.unique_image_indices:
+            return
+
+        img_idx = self.unique_image_indices[self.current_idx_pointer]
+        orig_filename = self.app.image_files[img_idx]
+
+        total = len(self.unique_image_indices)
+        self.lbl_progress.config(text=f"Ảnh {self.current_idx_pointer + 1} / {total}")
+        self.lbl_filename.config(text=f"Tệp: {orig_filename}")
+
+        # 1. Load and display Image on Canvas
+        img_path = os.path.join(self.app.folder_path, orig_filename)
+        if os.path.isfile(img_path):
+            try:
+                self.current_pil_img = Image.open(img_path).convert("RGB")
+                self._draw_image_on_canvas()
+            except Exception as e:
+                print("Error opening review image:", e)
+
+        # 2. Clear old field widgets
+        for widget in self.fields_container.winfo_children():
+            widget.destroy()
+
+        self.field_entries.clear()
+
+        # 3. Find all rows in results_data for this image
+        image_rows = [r for r in self.app.results_data if r["img_idx"] == img_idx]
+
+        focused_entry = None
+
+        for r_idx, row_item in enumerate(image_rows):
+            f_frame = ttk.Frame(self.fields_container, padding="4 6")
+            f_frame.pack(fill=tk.X, pady=4)
+
+            # Header row: Field Name & Tag
+            hdr = ttk.Frame(f_frame)
+            hdr.pack(fill=tk.X)
+
+            rule_idx = row_item.get("rule_idx", 0)
+            rule = self.app.rules[rule_idx] if rule_idx < len(self.app.rules) else None
+
+            ttk.Label(
+                hdr,
+                text=f"{row_item['field']} ({row_item['var_tag']}):",
+                font=("Segoe UI", 10, "bold"),
+                foreground="#1e293b",
+            ).pack(side=tk.LEFT)
+
+            status_lbl = ttk.Label(hdr, font=("Segoe UI", 8, "bold"))
+            status_lbl.pack(side=tk.RIGHT)
+
+            # Large text input
+            ent = ttk.Entry(f_frame, font=("Segoe UI", 14, "bold"))
+            ent.insert(0, row_item["ocr_text"])
+            ent.pack(fill=tk.X, pady=(3, 0))
+
+            # Bind key release to update status & filename preview live
+            def make_edit_cb(entry, status, rule_ref):
+                def callback(event=None):
+                    val = entry.get().strip()
+                    if not val:
+                        status.config(text="⚠️ RỖNG", foreground="#dc2626")
+                    elif rule_ref and rule_ref.get("type") == "regex" and rule_ref.get("pattern"):
+                        try:
+                            if re.search(rule_ref["pattern"], val):
+                                status.config(text="✅ HỢP LỆ", foreground="#059669")
+                            else:
+                                status.config(text="⚠️ KHÁC KHUÔN MẪU", foreground="#d97706")
+                        except Exception:
+                            status.config(text="✅ ĐÃ NHẬP", foreground="#059669")
+                    else:
+                        status.config(text="✅ ĐÃ CÓ", foreground="#059669")
+                    self._update_live_filename_preview()
+
+                return callback
+
+            cb = make_edit_cb(ent, status_lbl, rule)
+            ent.bind("<KeyRelease>", cb)
+            cb()
+
+            self.field_entries.append((row_item, ent, status_lbl, rule))
+
+            if focused_entry is None or (
+                self.target_rule_idx is not None and rule_idx == self.target_rule_idx
+            ):
+                focused_entry = ent
+
+        if focused_entry:
+            focused_entry.focus_set()
+            focused_entry.select_range(0, tk.END)
+
+        self._update_live_filename_preview()
+
+    def _update_live_filename_preview(self):
+        if not self.unique_image_indices:
+            return
+        img_idx = self.unique_image_indices[self.current_idx_pointer]
+        orig_filename = self.app.image_files[img_idx]
+        orig_stem = os.path.splitext(orig_filename)[0]
+
+        ocr_texts = [ent.get().strip() for _, ent, _, _ in self.field_entries]
+        new_stem = compute_filename(self.app.template_var.get(), img_idx + 1, orig_stem, ocr_texts)
+
+        orig_ext = os.path.splitext(orig_filename)[1].lstrip(".")
+        chosen_fmt = self.app.format_var.get().lower()
+        final_ext = "png" if "png" in chosen_fmt else ("jpg" if "jpg" in chosen_fmt else orig_ext)
+        new_full_name = f"{new_stem}.{final_ext}"
+
+        self.lbl_new_name_preview.config(text=new_full_name)
+
+    def on_save_and_next(self):
+        if not self.unique_image_indices:
+            return
+
+        img_idx = self.unique_image_indices[self.current_idx_pointer]
+        orig_filename = self.app.image_files[img_idx]
+
+        # 1. Commit all edited entries
+        for row_item, ent, _, _ in self.field_entries:
+            row_item["ocr_text"] = ent.get().strip()
+
+        # 2. Recalculate filenames and update main treeview
+        self.app._recalculate_filenames_for_image(orig_filename, img_idx)
+
+        # 3. Advance to next
+        next_ptr = self._find_next_pointer(direction=1)
+        if next_ptr is not None:
+            self.current_idx_pointer = next_ptr
+            self._load_current_image_data()
+        else:
+            if self.filter_issues_only_var.get():
+                messagebox.showinfo("Hoàn Tất", "🎉 Tuyệt vời! Không còn ảnh nào bị lỗi hoặc rỗng.")
+            else:
+                messagebox.showinfo("Hoàn Tất", "🎉 Đã duyệt hết tất cả các ảnh trong danh sách!")
+
+    def on_prev(self):
+        if not self.unique_image_indices:
+            return
+
+        # Commit current before moving
+        img_idx = self.unique_image_indices[self.current_idx_pointer]
+        orig_filename = self.app.image_files[img_idx]
+        for row_item, ent, _, _ in self.field_entries:
+            row_item["ocr_text"] = ent.get().strip()
+        self.app._recalculate_filenames_for_image(orig_filename, img_idx)
+
+        prev_ptr = self._find_next_pointer(direction=-1)
+        if prev_ptr is not None:
+            self.current_idx_pointer = prev_ptr
+            self._load_current_image_data()
+
+    def _find_next_pointer(self, direction=1):
+        total = len(self.unique_image_indices)
+        if total <= 1:
+            return None
+
+        ptr = self.current_idx_pointer + direction
+        while 0 <= ptr < total:
+            if not self.filter_issues_only_var.get():
+                return ptr
+
+            # If filter is ON, check if image has any empty or suspect fields
+            check_img_idx = self.unique_image_indices[ptr]
+            rows = [r for r in self.app.results_data if r["img_idx"] == check_img_idx]
+            has_issue = False
+            for r in rows:
+                txt = r["ocr_text"].strip()
+                if not txt:
+                    has_issue = True
+                    break
+                rule_idx = r.get("rule_idx", 0)
+                rule = self.app.rules[rule_idx] if rule_idx < len(self.app.rules) else None
+                if rule and rule.get("type") == "regex" and rule.get("pattern"):
+                    try:
+                        if not re.search(rule["pattern"], txt):
+                            has_issue = True
+                            break
+                    except Exception:
+                        pass
+            if has_issue:
+                return ptr
+            ptr += direction
+
+        return None
+
+    def _on_filter_toggled(self):
+        if self.filter_issues_only_var.get():
+            # If current item is not problematic, jump to first problematic
+            img_idx = self.unique_image_indices[self.current_idx_pointer]
+            rows = [r for r in self.app.results_data if r["img_idx"] == img_idx]
+            current_is_issue = any(not r["ocr_text"].strip() for r in rows)
+            if not current_is_issue:
+                next_ptr = self._find_next_pointer(direction=1)
+                if next_ptr is None:
+                    next_ptr = self._find_next_pointer(direction=-1)
+                if next_ptr is not None:
+                    self.current_idx_pointer = next_ptr
+                    self._load_current_image_data()
+                else:
+                    messagebox.showinfo("Thông Báo", "Tất cả ảnh đều đã có dữ liệu đầy đủ!")
+                    self.filter_issues_only_var.set(False)
+
+
+# ============================================================================
 # 4. MAIN APPLICATION CLASS
 # ============================================================================
 class SmartBatchExtractorApp:
@@ -300,6 +972,8 @@ class SmartBatchExtractorApp:
 
         # Configurations
         self.ocr_engine_var = tk.StringVar(value="Google Lens (Cloud AI - Highly Accurate)" if HAVE_LENS else "RapidOCR (Local Offline)")
+        self.preprocess_mode_var = tk.StringVar(value="CLAHE (Độ tương phản cao - Chống lóa / Mặt kính)")
+        self.upscale_2x_var = tk.BooleanVar(value=True)
         self.template_var = tk.StringVar(value=DEFAULT_NAME_TEMPLATE)
         self.export_mode_var = tk.StringVar(value="Copy & Rename Original (High Quality)")
         self.format_var = tk.StringVar(value="Keep original")
@@ -324,6 +998,8 @@ class SmartBatchExtractorApp:
         self.style.map("Primary.TButton", background=[("active", "#1d4ed8")])
         self.style.configure("Accent.TButton", font=("Segoe UI", 9, "bold"), background="#059669", foreground="#ffffff")
         self.style.map("Accent.TButton", background=[("active", "#047857")])
+        self.style.configure("Review.TButton", font=("Segoe UI", 9, "bold"), background="#d97706", foreground="#ffffff")
+        self.style.map("Review.TButton", background=[("active", "#b45309")])
 
     def _build_ui(self):
         # Top Header Bar
@@ -336,8 +1012,11 @@ class SmartBatchExtractorApp:
         btn_open = ttk.Button(top_bar, text="📁 Choose Folder...", command=self.on_choose_folder)
         btn_open.pack(side=tk.LEFT, padx=3)
 
-        btn_demo = ttk.Button(top_bar, text="✨ Load Demo Images (Includes Cropped)", command=self.on_load_demo_images)
+        btn_demo = ttk.Button(top_bar, text="✨ Load Demo Images", command=self.on_load_demo_images)
         btn_demo.pack(side=tk.LEFT, padx=3)
+
+        btn_glass = ttk.Button(top_bar, text="🔍 GlassID Demo", command=self.on_load_glass_demo)
+        btn_glass.pack(side=tk.LEFT, padx=3)
 
         btn_save_cfg = ttk.Button(top_bar, text="💾 Save Rules", command=self.on_save_config)
         btn_save_cfg.pack(side=tk.LEFT, padx=3)
@@ -461,6 +1140,28 @@ class SmartBatchExtractorApp:
             font=("Segoe UI", 8, "italic"),
         ).pack(side=tk.LEFT)
 
+        # Row 1b: Image Preprocessing Options
+        r_prep = ttk.Frame(settings_box)
+        r_prep.pack(fill=tk.X, pady=2)
+
+        ttk.Label(r_prep, text="Preprocess:").pack(side=tk.LEFT)
+        self.combo_prep = ttk.Combobox(
+            r_prep,
+            textvariable=self.preprocess_mode_var,
+            values=PREPROCESS_MODES,
+            state="readonly",
+            width=36,
+        )
+        self.combo_prep.pack(side=tk.LEFT, padx=(3, 8))
+
+        ttk.Checkbutton(
+            r_prep, text="Upscale 2x", variable=self.upscale_2x_var
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        ttk.Button(
+            r_prep, text="🧪 Test Xử lý & Quét thử...", command=self.on_open_preprocess_test_dialog
+        ).pack(side=tk.LEFT, padx=2)
+
         # Row 2: Rename Template
         r2 = ttk.Frame(settings_box)
         r2.pack(fill=tk.X, pady=4)
@@ -515,6 +1216,14 @@ class SmartBatchExtractorApp:
             command=self.on_start_extract_characters,
         )
         self.btn_scan.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.btn_review = ttk.Button(
+            action_bar,
+            text="🎯 Review Focus (Soát Lỗi)",
+            style="Review.TButton",
+            command=self.on_open_review_focus,
+        )
+        self.btn_review.pack(side=tk.LEFT, padx=3)
 
         self.btn_export = ttk.Button(
             action_bar,
@@ -628,6 +1337,63 @@ class SmartBatchExtractorApp:
         )
         self._update_status("Loaded demo images with resilient keyword rules.")
         messagebox.showinfo("Demo Loaded", msg)
+
+    def on_load_glass_demo(self):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        demo_dir = os.path.join(base_dir, "sample_images")
+        if not os.path.isdir(demo_dir):
+            messagebox.showinfo("Demo Images", "Sample images directory not found.")
+            return
+
+        glass_files = sorted(
+            [
+                f
+                for f in os.listdir(demo_dir)
+                if ("glass" in f.lower() or "faint" in f.lower()) and f.lower().endswith(SUPPORTED_EXTENSIONS)
+            ],
+            key=natural_sort_key,
+        )
+        if not glass_files:
+            glass_files = sorted(
+                [f for f in os.listdir(demo_dir) if f.lower().endswith(SUPPORTED_EXTENSIONS)], key=natural_sort_key
+            )
+
+        self.folder_path = demo_dir
+        self.folder_disp_lbl.config(text=demo_dir)
+        self.image_files = glass_files
+        self.output_folder_var.set(os.path.join(demo_dir, "output"))
+        self.sample_combo["values"] = self.image_files
+        self.current_sample_idx = 0
+        self.sample_combo.current(0)
+        self.load_sample_image(self.image_files[0])
+
+        # Predefine GlassID Rule with Regex capture
+        self.rules = [
+            {
+                "id": 1,
+                "var": "{o1}",
+                "name": "GlassID",
+                "type": "regex",
+                "keyword": "",
+                "pattern": r"(?i)GlassID\s*([A-Za-z0-9]+)",
+                "box": None,
+            },
+        ]
+        self.selected_rule_idx = 0
+        self.template_var.set("{o1}")
+        self.preprocess_mode_var.set("CLAHE (Độ tương phản cao - Chống lóa / Mặt kính)")
+        self.upscale_2x_var.set(True)
+        self._refresh_rule_tree()
+        self.redraw_canvas()
+
+        msg = (
+            f"Loaded {len(self.image_files)} glass demo images (including faint etching: faint_glass_demo.png)!\n"
+            "Predefined Rule: GlassID using Regex '(?i)GlassID\\s*([A-Za-z0-9]+)'\n"
+            "Preprocess filter: CLAHE + Upscale 2x.\n\n"
+            "Click 'Extract Characters' to scan, or 'Review Focus' to inspect and edit outputs!"
+        )
+        self._update_status("Loaded glass demo images (GlassID).")
+        messagebox.showinfo("Glass Demo Loaded", msg)
 
     # ========================================================================
     # FOLDER & SAMPLE IMAGE
@@ -1028,6 +1794,7 @@ class SmartBatchExtractorApp:
     def _toggle_ui_state(self, enabled: bool):
         st = "normal" if enabled else "disabled"
         self.btn_scan.config(state=st)
+        self.btn_review.config(state=st)
         self.btn_export.config(state=st)
         self.btn_csv.config(state=st)
         self.btn_cancel.config(state="normal" if not enabled else "disabled")
@@ -1062,7 +1829,10 @@ class SmartBatchExtractorApp:
 
                 img_path = os.path.join(self.folder_path, filename)
                 try:
-                    img = Image.open(img_path).convert("RGB")
+                    raw_img = Image.open(img_path).convert("RGB")
+                    img = preprocess_for_ocr(
+                        raw_img, mode=self.preprocess_mode_var.get(), upscale=self.upscale_2x_var.get()
+                    )
                 except Exception as e:
                     print(f"Error opening image {filename}: {e}", file=sys.stderr)
                     continue
@@ -1084,7 +1854,9 @@ class SmartBatchExtractorApp:
                     elif r["type"] == "regex":
                         extracted = extract_by_pattern(full_text, r["pattern"])
                     elif r["type"] == "box" and r.get("box"):
-                        extracted = extract_by_box(img, (r["box"]["rx1"], r["box"]["ry1"], r["box"]["rx2"], r["box"]["ry2"]), "Google", lens_api=lens)
+                        extracted = extract_by_box(
+                            img, (r["box"]["rx1"], r["box"]["ry1"], r["box"]["rx2"], r["box"]["ry2"]), "Google", lens_api=lens
+                        )
                     else:
                         extracted = ""
                     image_ocr_texts.append(extracted)
@@ -1126,7 +1898,10 @@ class SmartBatchExtractorApp:
 
             img_path = os.path.join(self.folder_path, filename)
             try:
-                img = Image.open(img_path).convert("RGB")
+                raw_img = Image.open(img_path).convert("RGB")
+                img = preprocess_for_ocr(
+                    raw_img, mode=self.preprocess_mode_var.get(), upscale=self.upscale_2x_var.get()
+                )
             except Exception as e:
                 print(f"Error opening image {filename}: {e}", file=sys.stderr)
                 continue
@@ -1147,7 +1922,9 @@ class SmartBatchExtractorApp:
                 elif r["type"] == "regex":
                     extracted = extract_by_pattern(full_text, r["pattern"])
                 elif r["type"] == "box" and r.get("box"):
-                    extracted = extract_by_box(img, (r["box"]["rx1"], r["box"]["ry1"], r["box"]["rx2"], r["box"]["ry2"]), "RapidOCR", rapid_engine=engine)
+                    extracted = extract_by_box(
+                        img, (r["box"]["rx1"], r["box"]["ry1"], r["box"]["rx2"], r["box"]["ry2"]), "RapidOCR", rapid_engine=engine
+                    )
                 else:
                     extracted = ""
                 image_ocr_texts.append(extracted)
@@ -1197,52 +1974,38 @@ class SmartBatchExtractorApp:
         status_txt = "Stopped by user." if self.stop_requested else "Extraction completed!"
         self.progress_lbl.config(text="Complete" if not self.stop_requested else "Stopped")
         self._update_status(status_txt)
-        messagebox.showinfo("Extraction Completed", f"{status_txt}\nProcessed {len(self.image_files)} image(s).")
+        messagebox.showinfo(
+            "Extraction Completed",
+            f"{status_txt}\nProcessed {len(self.image_files)} image(s).\n\n"
+            "💡 TIP: Bấm nút '🎯 Review Focus (Soát Lỗi)' hoặc nhấp đúp vào dòng để kiểm tra và sửa lỗi nhanh!",
+        )
 
     # ========================================================================
-    # INLINE EDITING IN TREEVIEW
+    # REVIEW FOCUS & INLINE EDITING
     # ========================================================================
     def on_tree_double_click(self, event):
-        region = self.res_tree.identify_region(event.x, event.y)
-        if region != "cell":
-            return
-
-        column = self.res_tree.identify_column(event.x)
         item = self.res_tree.identify_row(event.y)
         if not item:
             return
+        item_idx = self.res_tree.index(item)
+        if 0 <= item_idx < len(self.results_data):
+            row_data = self.results_data[item_idx]
+            self.on_open_review_focus(target_img_idx=row_data["img_idx"], target_rule_idx=row_data["rule_idx"])
 
-        col_idx = int(column.replace("#", "")) - 1
-        if col_idx != 3:  # Only allow editing Extracted Characters
+    def on_open_review_focus(self, target_img_idx: int = None, target_rule_idx: int = None):
+        if not self.results_data or not self.image_files:
+            messagebox.showinfo(
+                "Review Focus",
+                "Chưa có dữ liệu trích xuất. Vui lòng bấm 'Extract Characters' trước khi soát lỗi.",
+            )
             return
+        ReviewFocusDialog(self.root, self, target_img_idx=target_img_idx, target_rule_idx=target_rule_idx)
 
-        x, y, w, h = self.res_tree.bbox(item, column)
-        current_values = list(self.res_tree.item(item, "values"))
-        current_text = current_values[col_idx]
-
-        edit_entry = ttk.Entry(self.res_tree)
-        edit_entry.place(x=x, y=y, width=w, height=h)
-        edit_entry.insert(0, current_text)
-        edit_entry.select_range(0, tk.END)
-        edit_entry.focus_set()
-
-        def commit_edit(evt=None):
-            new_text = edit_entry.get()
-            edit_entry.destroy()
-
-            current_values[col_idx] = new_text
-            self.res_tree.item(item, values=current_values)
-
-            item_idx = self.res_tree.index(item)
-            if 0 <= item_idx < len(self.results_data):
-                self.results_data[item_idx]["ocr_text"] = new_text
-                target_filename = self.results_data[item_idx]["orig_file"]
-                img_idx = self.results_data[item_idx]["img_idx"]
-                self._recalculate_filenames_for_image(target_filename, img_idx)
-
-        edit_entry.bind("<Return>", commit_edit)
-        edit_entry.bind("<FocusOut>", commit_edit)
-        edit_entry.bind("<Escape>", lambda e: edit_entry.destroy())
+    def on_open_preprocess_test_dialog(self):
+        if not self.image_files:
+            messagebox.showinfo("Test Tiền Xử Lý", "Vui lòng chọn thư mục ảnh hoặc tải ảnh Demo trước.")
+            return
+        PreprocessTestDialog(self.root, self)
 
     def _recalculate_filenames_for_image(self, filename: str, img_idx: int):
         orig_stem = os.path.splitext(filename)[0]

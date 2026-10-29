@@ -50,10 +50,57 @@ python test_demo_extraction.py
 1. **Khởi chạy ứng dụng**:
    ```bash
    python image_batch_translator.py
+   # hoặc:
+   ./run_app.sh
    ```
 2. **Thử nghiệm ngay với ảnh mẫu**:
-   - Bấm **"✨ Load Demo Images"**: Tải ngay 4 ảnh mẫu (trong đó có ảnh bị crop xén viền).
-   - Đã cấu hình sẵn 3 quy tắc từ khóa: `{o1}` = `Mã phiếu`, `{o2}` = `Tên hàng`.
-   - Bấm **"🔍 Extract Characters (All Images)"**: Toàn bộ ảnh kể cả ảnh bị crop đều được nhận diện chính xác 100%!
-   - Bấm **"📁 Export & Rename Images"** để xuất ảnh đổi tên mới: `PXK-2026-001_Bơm_Cao_Áp_Schneider.png`.
-   - Bấm **"📊 Export CSV"** để xuất dữ liệu bảng tính.
+   - Bấm **"✨ Load Demo Images"**: Tải 4 ảnh phiếu kho (bao gồm ảnh bị crop xén viền).
+   - Bấm **"🔍 GlassID Demo"**: Tải các ảnh kính thực tế và ảnh khắc laser mờ (`faint_glass_demo.png`) với quy tắc bẫy mẫu Regex `(?i)GlassID\s*([A-Za-z0-9]+)`.
+   - Bấm **"🔍 Extract Characters (All Images)"**: Toàn bộ ảnh kể cả ảnh bị crop hoặc mờ đều được nhận diện chính xác!
+
+---
+
+## 🔬 Tiền Xử Lý Hình Ảnh Trước Khi Scan (Image Preprocessing)
+
+### Có nên xử lý hình ảnh trước khi scan không?
+**CỰC KỲ NÊN!** Trong thực tế sản xuất, ảnh chụp từ camera công nghiệp hoặc điện thoại thường gặp:
+- **Phản xạ ánh sáng, lóa sáng trên mặt kính, bề mặt kim loại/bóng**: Chữ bị mờ đục hoặc mất nét.
+- **Chữ khắc laser trắng trên nền tối (kính/màn hình LCD)**: Các engine OCR chuẩn thường được tối ưu tốt nhất cho chữ đen trên nền sáng.
+- **Nhiễu hạt, bóng mờ loang lổ, độ phân giải thấp, chữ nhỏ (< 25px)**: OCR dễ nhầm lẫn `0` và `O`, `1` và `I/L`, `8` và `B`.
+
+### 6 Bộ Lọc Tích Hợp Sẵn:
+1. **CLAHE (Khuyên dùng cho Mặt Kính / Chống Lóa)**: Cân bằng tương phản cục bộ, làm nổi bật nét khắc mờ trên kính mà không bị cháy sáng vùng bóng lóa.
+2. **Invert (Đảo màu)**: Biến chữ sáng nền tối thành chữ đen nền trắng, tăng độ nhạy nhận diện mã khắc laser.
+3. **Binarize (Otsu Threshold)**: Nhị phân hóa đen trắng thuần túy, lọc sạch toàn bộ đổ bóng nền và vân hoa văn gây nhiễu.
+4. **Enhance (Tự động cân bằng & Sắc nét)**: Kết hợp CLAHE và Unsharp Masking, phù hợp đa số tem nhãn thông dụng.
+5. **Sharpen (Làm sắc nét)**: Khôi phục viền ký tự bị nhòe mờ do rung máy.
+6. **Upscale 2x (Nội suy Lanczos)**: Phóng to gấp đôi độ phân giải giúp OCR nhận diện chuẩn xác các số serial cỡ chữ siêu nhỏ.
+
+### 🧪 Hộp Thoại Test Xử Lý & Quét Thử (Preprocess Test Dialog):
+- Bấm nút **"🧪 Test Xử lý & Quét thử..."** trong khung cấu hình.
+- Xem so sánh trực quan song song (Side-by-side: Ảnh Gốc vs Ảnh Tiền Xử Lý).
+- Bấm **"⚡ Quét Thử OCR"** để kiểm tra ngay kết quả nhận diện và thời gian phản hồi trước khi quét hàng loạt cả thư mục.
+- Bấm **"✅ Áp Dụng Cấu Hình Này"** để lưu thiết lập cho toàn bộ batch.
+
+---
+
+## 🎯 Chế Độ Review Focus (Soát Lỗi & Sửa Thủ Công Siêu Tốc)
+
+Ngay cả khi OCR đạt độ chính xác > 98%, luôn có một số ít ảnh chất lượng quá kém cần sự can thiệp của con người. Chế độ **Review Focus** được thiết kế theo tư duy **Human-in-the-Loop** với trải nghiệm bàn phím tiện lợi nhất:
+
+### Cách Mở:
+- Bấm nút **"🎯 Review Focus (Soát Lỗi)"** trên thanh tác vụ.
+- Hoặc **nhấp đúp chuột** vào bất kỳ dòng nào trong bảng kết quả quét.
+
+### Các Tính Năng Nổi Bật:
+1. **Giao Diện Kiểm Tra Trực Quan Cận Cảnh**: Ảnh gốc được hiển thị rõ nét bên trái để mắt người dùng dễ dàng đối chiếu trực tiếp ký tự.
+2. **Ô Nhập Chữ To Rõ (Font 14pt Bold)**: Tự động trỏ con trỏ chuột vào ô dữ liệu, tự động đổi màu trạng thái (`✅ HỢP LỆ`, `⚠️ RỖNG`, `⚠️ KHÁC KHUÔN MẪU`).
+3. **Live Preview Tên File**: Xem trước tên file mới sẽ được đổi thành gì ngay khi đang gõ từng ký tự.
+4. **Workflow Bàn Phím Siêu Tốc (Không Cần Chuột)**:
+   - **Nhấn `Enter`**: Lưu dữ liệu đã sửa, cập nhật lại bảng chính và tên file mới, đồng thời tự động chuyển ngay sang ảnh tiếp theo!
+   - **Nhấn `Ctrl + ←` / `Alt + ←`**: Quay lại ảnh trước.
+   - **Nhấn `Ctrl + →` / `Alt + →`**: Tiến sang ảnh sau.
+   - **Nhấn `Esc`**: Đóng hộp thoại.
+5. **Bộ Lọc Thông Minh "⚠️ Chỉ duyệt ảnh có lỗi / rỗng"**:
+   - Khi bật tùy chọn này, phím `Enter` sẽ tự động nhảy qua 95% ảnh đã nhận diện đúng, và **chỉ dừng lại ở các ảnh bị trống hoặc nghi ngờ sai**! Giúp người vận hành soát lỗi hàng trăm ảnh chỉ trong vài chục giây.
+

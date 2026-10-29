@@ -2,3 +2,5 @@ pillow>=10.0.0
 chrome-lens-py>=3.8.0
 deep-translator>=1.11.0
 rapidocr-onnxruntime>=1.2.0
+opencv-python>=4.5.0
+
