@@ -276,13 +276,18 @@ class ReviewFocusDialog:
                     "mode": "focus",
                 }
 
-                # Map text box coordinates to canvas
-                tb_x1 = ox + (bx1 - cx1) * scale
-                tb_y1 = oy + (by1 - cy1) * scale
-                tb_x2 = ox + (bx2 - cx1) * scale
-                tb_y2 = oy + (by2 - cy1) * scale
+                # Map text box coordinates to canvas with padding
+                bw = max(1, bx2 - bx1)
+                bh = max(1, by2 - by1)
+                pad_box_x = max(5, int(bw * 0.08 * scale))
+                pad_box_y = max(4, int(bh * 0.12 * scale))
 
-                # Neon Outer & Inner Rectangles
+                tb_x1 = ox + (bx1 - cx1) * scale - pad_box_x
+                tb_y1 = oy + (by1 - cy1) * scale - pad_box_y
+                tb_x2 = ox + (bx2 - cx1) * scale + pad_box_x
+                tb_y2 = oy + (by2 - cy1) * scale + pad_box_y
+
+                # Neon Outer & Inner Rectangles with padding
                 self.canvas_img.create_rectangle(
                     tb_x1 - 2, tb_y1 - 2, tb_x2 + 2, tb_y2 + 2, outline="#0284c7", width=3
                 )
@@ -328,15 +333,19 @@ class ReviewFocusDialog:
             "mode": "full",
         }
 
-        # Highlight boxes for fields on full image
+        # Highlight boxes for fields on full image with padding
         for row_item, _, _, _ in self.field_entries:
             b = row_item.get("bbox")
             if b:
                 is_active = (row_item.get("rule_idx") == self.active_rule_idx)
-                rx1 = ox + b[0] * scale
-                ry1 = oy + b[1] * scale
-                rx2 = ox + b[2] * scale
-                ry2 = oy + b[3] * scale
+                bw = max(1, b[2] - b[0])
+                bh = max(1, b[3] - b[1])
+                pad_box_x = max(3, int(bw * 0.08 * scale))
+                pad_box_y = max(2, int(bh * 0.12 * scale))
+                rx1 = ox + b[0] * scale - pad_box_x
+                ry1 = oy + b[1] * scale - pad_box_y
+                rx2 = ox + b[2] * scale + pad_box_x
+                ry2 = oy + b[3] * scale + pad_box_y
 
                 color = "#10b981" if is_active else "#64748b"
                 width = 3 if is_active else 1
