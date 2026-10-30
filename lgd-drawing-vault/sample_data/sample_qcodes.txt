@@ -1,0 +1,5 @@
+# Sample QCodes list for batch download
+# Format: <QCODE>, <CUSTOM_NAME>
+QCAK09691, Machine_2018021GC26
+QCAD69945, Sub_Motor_Assembly
+QCAK09692, Line1_Conveyor_Unit

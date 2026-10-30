@@ -1,0 +1,15 @@
+# Core HTTP & Network
+requests>=2.28.0
+urllib3>=1.26.0
+
+# Optional websocket library (built-in socket RFC 6455 fallback is also provided)
+websockets>=11.0
+
+# HTML parsing for Windchill JSP detail view
+beautifulsoup4>=4.11.0
+
+# Image Viewer & Processing
+Pillow>=9.0.0
+
+# Testing
+pytest>=7.0.0

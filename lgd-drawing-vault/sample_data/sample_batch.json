@@ -1,0 +1,13 @@
+{
+  "items": [
+    {
+      "qcode": "QCAK09691",
+      "custom_name": "Machine_2018021GC26"
+    },
+    {
+      "qcode": "QCAD69945",
+      "custom_name": "Sub_Motor_Assembly"
+    }
+  ],
+  "download_dir": "downloaded_images"
+}
