@@ -9,9 +9,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from lgd_vault.drawing_service import DrawingService
-from lgd_vault.models import DrawingItem, DrawingRecord, DownloadResult, BatchDownloadSummary
-from lgd_vault.exceptions import DrawingNotFoundError
+from drawing_vault.drawing_service import DrawingService
+from drawing_vault.models import DrawingItem, DrawingRecord, DownloadResult, BatchDownloadSummary
+from drawing_vault.exceptions import DrawingNotFoundError
 
 
 class TestDrawingService(unittest.TestCase):
@@ -78,7 +78,7 @@ class TestDrawingService(unittest.TestCase):
         <html>
             <body>
                 <div class="content">
-                    <a href="http://fdm.lgdisplay.com:8008/Windchill/extcore/jsp/lgdfdm/drawing/viewContent/DWG99201.jpg?oid=12345">Download</a>
+                    <a href="http://fdm.internal.net:8008/Windchill/extcore/jsp/vault/drawing/viewContent/DWG99201.jpg?oid=12345">Download</a>
                 </div>
             </body>
         </html>
@@ -93,7 +93,7 @@ class TestDrawingService(unittest.TestCase):
 
         self.assertEqual(
             url,
-            "http://fdm.lgdisplay.com:8008/Windchill/extcore/jsp/lgdfdm/drawing/viewContent/DWG99201.jpg?oid=12345",
+            "http://fdm.internal.net:8008/Windchill/extcore/jsp/vault/drawing/viewContent/DWG99201.jpg?oid=12345",
         )
 
     def test_download_corrupt_payload_and_retry(self):

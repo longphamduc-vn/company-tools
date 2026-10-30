@@ -16,9 +16,9 @@ try:
 except ImportError:
     HAS_PIL = False
 
-from lgd_vault.models import DownloadResult
+from drawing_vault.models import DownloadResult
 
-logger = logging.getLogger("lgd_vault.gallery")
+logger = logging.getLogger("drawing_vault.gallery")
 
 
 class ImageCard(ttk.Frame):

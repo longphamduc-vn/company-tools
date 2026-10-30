@@ -1,10 +1,11 @@
 """
-SSO Client implementation for LG Display Vault Authentication.
+SSO Client implementation for Drawing Vault Authentication.
 Complies with Section 4.1:
 - Local WebSocket agent on ws://127.0.0.1:28083/
-- Token request payload: API?args=tsso://im.lgdisplay.com:8088/GETTOKEN?apiroot=/pdadmin&protocol=http&pd_h=null&pd_id=null
-- Token exchange endpoint: http://im.lgdisplay.com:8088/pdadmin/eai/eai.jsp
+- Token request payload: API?args=tsso://im.internal.net:8088/GETTOKEN?apiroot=/pdadmin&protocol=http&pd_h=null&pd_id=null
+- Token exchange endpoint: http://im.internal.net:8088/pdadmin/eai/eai.jsp
 - Extraction and validation of PD-TH-SESSION-ID, PD-ID, JSESSIONID
+Includes comprehensive step-by-step diagnostic logging.
 """
 
 import base64
@@ -19,7 +20,7 @@ from typing import Dict, Optional, Tuple
 
 import requests
 
-from lgd_vault.config import (
+from drawing_vault.config import (
     SSO_WS_HOST,
     SSO_WS_PORT,
     SSO_WS_PAYLOAD,
@@ -29,10 +30,10 @@ from lgd_vault.config import (
     DEFAULT_TIMEOUT_READ,
     USER_AGENT,
 )
-from lgd_vault.exceptions import SSOConnectionRefusedError, AuthExpiredError
-from lgd_vault.session_manager import SessionManager
+from drawing_vault.exceptions import SSOConnectionRefusedError, AuthExpiredError
+from drawing_vault.session_manager import SessionManager
 
-logger = logging.getLogger("lgd_vault.sso")
+logger = logging.getLogger("drawing_vault.sso")
 
 
 class SSOClient:
@@ -62,7 +63,10 @@ class SSOClient:
         if not force_refresh:
             cached_cookies = self.session_manager.load_session()
             if cached_cookies:
-                logger.info("Using active cached session cookies")
+                logger.info(
+                    "Using active cached session cookies: %s (expires soon)",
+                    list(cached_cookies.keys()),
+                )
                 session.cookies.update(cached_cookies)
                 return session
 
@@ -74,38 +78,50 @@ class SSOClient:
 
     def authenticate(self) -> Dict[str, str]:
         """
-        Executes full authentication flow:
+        Executes full authentication flow with detailed diagnostics:
         1. Connects to ws://127.0.0.1:28083/ and sends token request payload.
         2. Exchanges received token at eai.jsp.
         3. Extracts PD-TH-SESSION-ID, PD-ID, JSESSIONID.
         4. Saves session to session.json.
         """
-        # Step 1: WebSocket communication with local SSO agent
+        logger.info("--- [SSO AUTH] Step 1: Connecting to Local SSO Agent ws://%s:%s/ ---", self.ws_host, self.ws_port)
         raw_sso_response = self._request_token_via_websocket()
-        logger.info("SSO WebSocket response received: %s", raw_sso_response[:100] if raw_sso_response else "None")
+        logger.info("[SSO AUTH] Step 1 SUCCESS: Received raw token response (%d chars): %s", len(raw_sso_response), repr(raw_sso_response[:200]))
 
-        # Step 2: Exchange token with EAI endpoint
+        logger.info("--- [SSO AUTH] Step 2: Token Exchange at %s ---", self.token_exchange_url)
         cookies = self._exchange_token_for_cookies(raw_sso_response)
 
-        # Step 3: Verify and save session
+        # Check for required cookies
+        missing = [c for c in REQUIRED_COOKIES if c not in cookies]
+        if missing:
+            logger.warning("[SSO AUTH] Warning: Missing expected cookies: %s. Present: %s", missing, list(cookies.keys()))
+        else:
+            logger.info("[SSO AUTH] All required cookies present: %s", list(cookies.keys()))
+
+        # Save session
         self.session_manager.save_session(cookies, metadata={"source": "sso_agent"})
+        logger.info("[SSO AUTH] Session saved to %s", self.session_manager.session_file)
         return cookies
 
     def _request_token_via_websocket(self, timeout: float = 8.0) -> str:
         """
         Connects to ws://127.0.0.1:28083/ and sends SSO_WS_PAYLOAD.
-        Uses pure Python socket RFC-6455 handshake to avoid mandatory external websocket dependencies,
-        with fallback support for third-party libraries if present.
+        Uses pure Python socket RFC-6455 handshake with diagnostic logging.
         """
-        logger.debug("Connecting to SSO Agent at ws://%s:%s/", self.ws_host, self.ws_port)
-
+        logger.debug("Opening TCP socket to %s:%s...", self.ws_host, self.ws_port)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
 
         try:
             sock.connect((self.ws_host, self.ws_port))
+            logger.debug("Connected to %s:%s successfully.", self.ws_host, self.ws_port)
         except (ConnectionRefusedError, socket.timeout, OSError) as e:
-            logger.error("Failed to connect to SSO Agent on %s:%s - %s", self.ws_host, self.ws_port, e)
+            logger.error("[SSO ERROR] Failed to connect to SSO Agent on %s:%s - %s", self.ws_host, self.ws_port, e)
+            logger.error(
+                "[SSO DIAGNOSTIC] Cause: The SSO local Agent software is not running or port %s is blocked. "
+                "Action: Please launch SSO software on your PC.",
+                self.ws_port,
+            )
             raise SSOConnectionRefusedError() from e
 
         try:
@@ -132,22 +148,29 @@ class SSOClient:
                 response_data += chunk
 
             header_text = response_data.decode("utf-8", errors="ignore")
+            logger.debug("WebSocket Handshake Response Header:\n%s", header_text.strip())
+
             if "101" not in header_text.splitlines()[0]:
-                raise SSOConnectionRefusedError(f"SSO Agent rejected WS upgrade: {header_text[:120]}")
+                err_msg = f"SSO Agent rejected WS upgrade: {header_text[:120]}"
+                logger.error("[SSO ERROR] %s", err_msg)
+                raise SSOConnectionRefusedError(err_msg)
 
             # 2. Send Payload text frame
+            logger.info("[SSO AUTH] Sending WebSocket payload: %s", SSO_WS_PAYLOAD)
             payload_bytes = SSO_WS_PAYLOAD.encode("utf-8")
             frame = self._build_websocket_frame(payload_bytes, opcode=1, mask=True)
             sock.sendall(frame)
 
             # 3. Read WebSocket response frame
             received_payload = self._read_websocket_frame(sock)
-            return received_payload.decode("utf-8", errors="ignore")
+            resp_str = received_payload.decode("utf-8", errors="ignore")
+            logger.debug("[SSO AUTH] Received frame payload (%d bytes): %s", len(received_payload), resp_str)
+            return resp_str
 
         except SSOConnectionRefusedError:
             raise
         except Exception as e:
-            logger.error("Error communicating with SSO Local Agent: %s", e)
+            logger.exception("[SSO ERROR] Communication error with local SSO agent on port %s: %s", self.ws_port, e)
             raise SSOConnectionRefusedError(f"SSO Local Agent communication failed: {e}") from e
         finally:
             try:
@@ -163,15 +186,7 @@ class SSOClient:
         req_session = requests.Session()
         req_session.headers.update({"User-Agent": USER_AGENT})
 
-        # Parse token / arguments from raw response
-        # Common formats:
-        # 1. "TOKEN=ABC..." or query string "token=ABC&..."
-        # 2. Direct token string "ABC12345"
-        # 3. URL containing query params "http://.../eai.jsp?token=..."
-        # 4. JSON: {"token": "..."}
         params: Dict[str, str] = {}
-        headers: Dict[str, str] = {}
-
         cleaned = (sso_resp or "").strip()
 
         if cleaned.startswith("{") and cleaned.endswith("}"):
@@ -186,7 +201,6 @@ class SSOClient:
 
         if not params:
             if "://" in cleaned and "?" in cleaned:
-                # Full URL received
                 parsed_url = urllib.parse.urlparse(cleaned)
                 params = dict(urllib.parse.parse_qsl(parsed_url.query))
             elif "=" in cleaned:
@@ -195,7 +209,7 @@ class SSOClient:
                 params["token"] = cleaned
 
         target_url = self.token_exchange_url
-        logger.debug("Requesting token exchange at %s with params %s", target_url, params)
+        logger.info("[SSO AUTH] Calling EAI Token Exchange URL: %s with params: %s", target_url, params)
 
         try:
             resp = req_session.get(
@@ -204,14 +218,22 @@ class SSOClient:
                 timeout=(DEFAULT_TIMEOUT_CONNECT, DEFAULT_TIMEOUT_READ),
                 allow_redirects=True,
             )
+            logger.info(
+                "[SSO AUTH] EAI Response: HTTP %d (URL: %s, Time: %.2fs)",
+                resp.status_code,
+                resp.url,
+                resp.elapsed.total_seconds(),
+            )
+            logger.debug("[SSO AUTH] EAI Response Headers: %s", dict(resp.headers))
+            logger.debug("[SSO AUTH] EAI Response Body Preview: %s", resp.text[:300])
+
         except requests.RequestException as e:
-            logger.error("Failed to reach Token Exchange Endpoint %s: %s", target_url, e)
+            logger.error("[SSO ERROR] Failed to reach Token Exchange Endpoint %s: %s", target_url, e)
             raise AuthExpiredError(f"Cannot reach Token Exchange Endpoint: {e}") from e
 
-        # Extract cookies from session cookie jar
         cookies = dict(req_session.cookies)
 
-        # Fallback check for missing cookies in Set-Cookie headers
+        # Fallback check for Set-Cookie header
         if not cookies and "Set-Cookie" in resp.headers:
             for part in resp.headers.get("Set-Cookie", "").split(","):
                 for item in part.split(";"):
@@ -219,14 +241,14 @@ class SSOClient:
                         k, v = item.strip().split("=", 1)
                         cookies[k] = v
 
-        logger.info("Cookies retrieved from SSO Exchange: %s", list(cookies.keys()))
+        logger.info("[SSO AUTH] Cookies received from SSO Exchange: %s", list(cookies.keys()))
         return cookies
 
     @staticmethod
     def _build_websocket_frame(payload: bytes, opcode: int = 1, mask: bool = True) -> bytes:
         """Constructs an RFC 6455 WebSocket frame."""
         frame = bytearray()
-        first_byte = 0x80 | (opcode & 0x0F)  # FIN = 1
+        first_byte = 0x80 | (opcode & 0x0F)
         frame.append(first_byte)
 
         length = len(payload)

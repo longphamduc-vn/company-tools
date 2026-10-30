@@ -1,6 +1,6 @@
-# LGD Drawing Vault - Trình Tải & Xem Hàng Loạt Bản Vẽ Kỹ Thuật 📐
+# Drawing Vault - Trình Tải & Xem Hàng Loạt Bản Vẽ Kỹ Thuật 📐
 
-Phần mềm chuyên dụng phục vụ kỹ sư: **Tìm kiếm, tải xuống hàng loạt (Batch Downloader) và duyệt xem bản vẽ kỹ thuật trực quan (Batch Image & Blueprint Viewer)** từ hệ thống Vault nội bộ LG Display (FDM / Windchill), tự động kết nối qua SSO Local Agent.
+Phần mềm chuyên dụng phục vụ kỹ sư: **Tìm kiếm, tải xuống hàng loạt (Batch Downloader) và duyệt xem bản vẽ kỹ thuật trực quan (Batch Image & Blueprint Viewer)** từ hệ thống Vault nội bộ (FDM / Windchill), tự động kết nối qua SSO Local Agent.
 
 ---
 
@@ -36,7 +36,7 @@ Phần mềm chuyên dụng phục vụ kỹ sư: **Tìm kiếm, tải xuống h
    - Xuất toàn bộ báo cáo danh sách kết quả ra file `.csv`.
 4. **Tự Động Kết Nối SSO Local Agent**:
    - Kết nối WebSocket cục bộ `ws://127.0.0.1:28083/`.
-   - Trao đổi token tại `http://im.lgdisplay.com:8088/pdadmin/eai/eai.jsp`.
+   - Trao đổi token qua endpoint SSO EAI nội bộ (cấu hình trong `.env` / `VAULT_SSO_TOKEN_EXCHANGE_URL`).
    - Quản lý phiên `session.json` với cơ chế TTL (2 giờ).
 5. **Chính Sách Lọc Bản Vẽ (Non-CAD Policy)**:
    - Tự động bỏ qua các bản vẽ 3D CAD nặng (`typeName == "CAD"`).
@@ -50,8 +50,8 @@ Phần mềm chuyên dụng phục vụ kỹ sư: **Tìm kiếm, tải xuống h
 ## 📁 Cấu Trúc Thư Mục
 
 ```
-lgd-drawing-vault/
-├── lgd_vault/
+drawing-vault/
+├── drawing_vault/
 │   ├── __init__.py
 │   ├── config.py              # URL, cổng SSO 28083, TTL session
 │   ├── models.py              # Schema dữ liệu (DrawingItem, DownloadResult, BatchDownloadSummary)
@@ -59,6 +59,9 @@ lgd-drawing-vault/
 │   ├── session_manager.py     # Quản lý file session.json & kiểm tra TTL
 │   ├── sso_client.py          # WebSocket client port 28083 & Token exchange
 │   ├── drawing_service.py     # Tìm kiếm FDM, lọc CAD, scrape JSP, tải ảnh nhị phân & batch
+│   ├── excel_grid.py          # Bảng nhập liệu tương tác Excel-like
+│   ├── image_gallery.py       # Lưới hiển thị danh sách thẻ ảnh thumbnail
+│   ├── logger_setup.py        # Ghi log thời gian thực ra file & console
 │   └── viewer_app.py          # Giao diện Trình xem ảnh hàng loạt (Tkinter + Pillow)
 ├── sample_data/
 │   ├── sample_qcodes.txt      # Mẫu danh sách QCode dạng text/csv
@@ -66,7 +69,9 @@ lgd-drawing-vault/
 ├── tests/
 │   ├── test_session.py        # Kiểm thử TTL và lưu trữ cookie
 │   ├── test_sso_client.py     # Kiểm thử WebSocket SSO & mock EAI
-│   └── test_drawing_service.py# Kiểm thử tìm kiếm, lọc CAD, scrape & batch progress
+│   ├── test_drawing_service.py# Kiểm thử tìm kiếm, lọc CAD, scrape & batch progress
+│   ├── test_excel_grid.py     # Kiểm thử phân tách dữ liệu clipboard Excel
+│   └── test_diagnostics_logging.py # Kiểm thử ghi log chẩn đoán lỗi
 ├── main.py                    # Điểm khởi chạy CLI và GUI
 ├── run_app.sh                 # Script chạy nhanh trên Linux / WSL
 ├── run_app.bat                # Script chạy nhanh trên Windows
@@ -81,7 +86,7 @@ lgd-drawing-vault/
 ### 1. Kích hoạt môi trường Conda và cài đặt thư viện
 ```bash
 conda activate company-env
-cd lgd-drawing-vault
+cd drawing-vault
 pip install -r requirements.txt
 ```
 
@@ -110,7 +115,19 @@ pip install -r requirements.txt
 | `F` | Căn ảnh vừa màn hình (Fit to Screen) |
 | `0` | Trả về tỉ lệ gốc 100% |
 
-### 4. Sử Dụng Dòng Lệnh (CLI)
+### 4. Sử Dụng Dòng Lệnh (CLI) & Chẩn Đoán Lỗi (Diagnostics)
+
+- **Chạy Chẩn Đoán Toàn Diện Hệ Thống (Network & SSO Diagnostics)**:
+  Kiểm tra từng bước từ SSO WebSocket (cổng 28083), trao đổi token EAI, truy vấn FDM search, và scrape link tải:
+  ```bash
+  python main.py diag --qcode QCAK09691
+  ```
+  Lệnh sẽ in ra màn hình trạng thái chi tiết từng bước (HTTP status, URL, body preview) và ghi log đầy đủ vào file.
+
+- **Xem trực tiếp các dòng log gần nhất**:
+  ```bash
+  python main.py log -n 60
+  ```
 
 - **Tải nhanh một bản vẽ theo QCode**:
   ```bash
@@ -122,7 +139,7 @@ pip install -r requirements.txt
   python main.py batch --file sample_data/sample_qcodes.txt --dir downloaded_images
   ```
 
-- **Kiểm tra trạng thái SSO**:
+- **Kiểm tra hoặc làm mới phiên SSO**:
   ```bash
   python main.py auth
   python main.py auth --force
@@ -130,10 +147,30 @@ pip install -r requirements.txt
 
 ---
 
+## 🔍 Xem Chi Tiết Lỗi & Nhật Ký Hoạt Động (Logs & Error Details)
+
+1. **Xem log trực tiếp trên giao diện (Live Diagnostics Log Console)**:
+   - Trên thanh công cụ trên cùng hoặc góc dưới bảng tải, bấm nút **`📜 Live Logs`** (hoặc chuyển chế độ xem sang radio `📜 Live Logs`).
+   - Cung cấp màn hình console log trực quan theo thời gian thực (được phân màu nổi bật: `[DEBUG]`, `[INFO]`, `[WARNING]`, `[ERROR]`), có tính năng tự động cuộn (Auto-scroll), tìm kiếm/lọc từ khóa, nút `📋 Copy All` và nút mở file log ngoài `📂 Open File`.
+
+2. **Xem chi tiết lỗi từng dòng trong bảng (Inspect Row Error)**:
+   - Khi một mã bản vẽ bị lỗi (`❌ Error`), bạn có thể:
+     - Nhấp đúp vào ô trạng thái của dòng đó.
+     - Hoặc chọn dòng đó rồi bấm nút **`🔍 View Error`** trên thanh công cụ bảng Excel.
+     - Hoặc nhấp chuột phải chọn **`🔍 View Error Details`**.
+   - Hộp thoại bật lên sẽ hiển thị đầy đủ thông tin: Mã QCode, Tên thiết bị, Mã trạng thái HTTP, URL máy chủ trả về, nội dung HTML/JSON preview lỗi, và nút **Copy Error Details** để gửi báo lỗi.
+
+3. **File log chi tiết trên ổ đĩa**:
+   - Tất cả các yêu cầu mạng, cookie, header và nội dung phản hồi từ máy chủ Windchill/FDM Vault đều được tự động ghi lại tại:
+     `drawing-vault/vault_download.log`
+
+---
+
 ## 🧪 Chạy Bộ Kiểm Thử (Unit Tests)
 
 ```bash
-cd lgd-drawing-vault
+cd drawing-vault
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
-Toàn bộ các test cases cho Session TTL, WebSocket SSO, CAD Filter, Scraper Regex và Batch Download Progress đều chạy tự động và độc lập mà không cần kết nối mạng nội bộ thực tế khi chạy test.
+Toàn bộ các test cases cho Session TTL, WebSocket SSO, CAD Filter, Scraper Regex, Diagnostics Logging và Batch Download Progress đều chạy tự động và độc lập mà không cần kết nối mạng nội bộ thực tế khi chạy test.
+

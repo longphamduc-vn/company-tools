@@ -5,7 +5,7 @@ Unit tests for ExcelInputGrid parsing and data handling.
 import unittest
 from unittest.mock import MagicMock, patch
 
-from lgd_vault.models import DrawingItem
+from drawing_vault.models import DrawingItem
 
 
 class TestExcelGridLogic(unittest.TestCase):

@@ -11,7 +11,7 @@ Kho lưu trữ tập trung (Monorepo) các công cụ, tiện ích phần mềm 
 | **SCADA-TraceLog** | [`scada-tracelog/`](./scada-tracelog) | Giám sát & tạo nhật ký thay đổi thông số máy SCADA (Change Log), bẫy lỗi mất dữ liệu do giới hạn 256 cột của Excel .xls cũ. | Python, Tkinter/TTK, Pandas |
 | **EMS Nexacro Extension** | [`ems-nexacro-extension/`](./ems-nexacro-extension) | Tiện ích mở rộng trình duyệt (Browser Extension) hỗ trợ tự động hóa và tối ưu giao diện EMS Nexacro. | JavaScript, Chrome Extensions API |
 | **Image Batch Translator** | [`image-batch-translator/`](./image-batch-translator) | Nhận diện chữ (Google Lens OCR), dịch thuật hàng loạt (Google Translate), xóa chữ cũ với màu nền median, vẽ chữ dịch và tự động đổi tên file. | Python, Tkinter, Pillow, Chrome-Lens-Py, Deep-Translator |
-| **LGD Drawing Vault** | [`lgd-drawing-vault/`](./lgd-drawing-vault) | Tìm kiếm, tải hàng loạt và duyệt xem bản vẽ kỹ thuật (Batch Image Viewer) từ Vault nội bộ LGD (FDM/Windchill) qua SSO. | Python, Tkinter, Pillow, Requests |
+| **Drawing Vault** | [`drawing-vault/`](./drawing-vault) | Tìm kiếm, tải hàng loạt và duyệt xem bản vẽ kỹ thuật (Batch Image Viewer) từ Vault nội bộ (FDM/Windchill) qua SSO. | Python, Tkinter, Pillow, Requests |
 
 ---
 
@@ -50,10 +50,10 @@ Mỗi dự án con được tổ chức độc lập trong thư mục riêng kè
   python image_batch_translator.py
   ```
 
-### 4. LGD Drawing Vault (Tải & Xem Bản Vẽ Tự Động)
+### 4. Drawing Vault (Tải & Xem Bản Vẽ Tự Động)
 - Di chuyển vào thư mục:
   ```bash
-  cd lgd-drawing-vault
+  cd drawing-vault
   ```
 - Cài đặt thư viện:
   ```bash

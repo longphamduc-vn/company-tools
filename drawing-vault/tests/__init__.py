@@ -1,3 +1,3 @@
 """
-Test suite for LGD Drawing Vault Automation.
+Test suite for Drawing Vault Automation.
 """

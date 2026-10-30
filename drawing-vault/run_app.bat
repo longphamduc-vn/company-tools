@@ -3,7 +3,7 @@ setlocal
 
 cd /d "%~dp0"
 
-echo [LGD Drawing Vault] Starting application...
+echo [Drawing Vault] Starting application...
 
 :: Check if conda is available
 where conda >nul 2>nul

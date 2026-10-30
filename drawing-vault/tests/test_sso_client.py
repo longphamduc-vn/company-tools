@@ -8,9 +8,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from lgd_vault.sso_client import SSOClient
-from lgd_vault.exceptions import SSOConnectionRefusedError
-from lgd_vault.session_manager import SessionManager
+from drawing_vault.sso_client import SSOClient
+from drawing_vault.exceptions import SSOConnectionRefusedError
+from drawing_vault.session_manager import SessionManager
 
 
 class TestSSOClient(unittest.TestCase):
@@ -41,7 +41,7 @@ class TestSSOClient(unittest.TestCase):
         client = SSOClient(session_manager=mgr)
 
         # Mock WebSocket response
-        mock_ws_resp = "API?args=tsso://im.lgdisplay.com:8088/pdadmin/eai/eai.jsp?token=MOCK_TOKEN_XYZ"
+        mock_ws_resp = "API?args=tsso://im.internal.net:8088/pdadmin/eai/eai.jsp?token=MOCK_TOKEN_XYZ"
 
         # Mock requests.Session for eai.jsp
         mock_resp = MagicMock()

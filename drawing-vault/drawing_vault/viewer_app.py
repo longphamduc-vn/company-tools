@@ -1,5 +1,5 @@
 """
-LGD Drawing Vault - Batch Blueprint Downloader & Interactive Image Viewer.
+Drawing Vault - Batch Blueprint Downloader & Interactive Image Viewer.
 Features:
 - Excel-like Input Grid with seamless copy & paste from Microsoft Excel / Google Sheets.
 - Dual View Modes: High-resolution Interactive Canvas & Visual Thumbnail Card Gallery.
@@ -26,15 +26,21 @@ try:
 except ImportError:
     HAS_PIL = False
 
-from lgd_vault.config import DEFAULT_DOWNLOAD_DIR, DEFAULT_SITE, DEFAULT_FAB
-from lgd_vault.models import DrawingItem, DownloadResult, BatchDownloadSummary
-from lgd_vault.session_manager import SessionManager
-from lgd_vault.drawing_service import DrawingService
-from lgd_vault.sso_client import SSOClient
-from lgd_vault.excel_grid import ExcelInputGrid
-from lgd_vault.image_gallery import ThumbnailGalleryView
+from drawing_vault.config import DEFAULT_DOWNLOAD_DIR, DEFAULT_SITE, DEFAULT_FAB
+from drawing_vault.models import DrawingItem, DownloadResult, BatchDownloadSummary
+from drawing_vault.session_manager import SessionManager
+from drawing_vault.drawing_service import DrawingService
+from drawing_vault.sso_client import SSOClient
+from drawing_vault.excel_grid import ExcelInputGrid
+from drawing_vault.image_gallery import ThumbnailGalleryView
+from drawing_vault.logger_setup import (
+    setup_diagnostics_logging,
+    ui_log_handler,
+    LOG_FILE_PATH,
+    read_latest_log_tail,
+)
 
-logger = logging.getLogger("lgd_vault.viewer")
+logger = logging.getLogger("drawing_vault.viewer")
 
 
 class DrawingViewerApp(tk.Tk):
@@ -42,9 +48,13 @@ class DrawingViewerApp(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("LGD Drawing Vault - Batch Blueprint Downloader & Viewer")
+        self.title("Drawing Vault - Batch Blueprint Downloader & Viewer")
         self.geometry("1440x900")
         self.minsize(1100, 720)
+
+        # Initialize comprehensive diagnostics logger (writes to vault_download.log)
+        setup_diagnostics_logging(verbose=True)
+        ui_log_handler.set_callback(self._on_log_message)
 
         # Services
         self.session_manager = SessionManager()
@@ -67,7 +77,7 @@ class DrawingViewerApp(tk.Tk):
         self.img_pos_x: int = 0
         self.img_pos_y: int = 0
 
-        # View mode: "canvas" (single image viewer) or "gallery" (thumbnail card grid)
+        # View mode: "canvas" (single image viewer), "gallery" (thumbnail card grid), or "logs" (live diagnostic console)
         self.view_mode = tk.StringVar(value="canvas")
 
         # Batch download control
@@ -110,7 +120,7 @@ class DrawingViewerApp(tk.Tk):
 
         title_lbl = ttk.Label(
             top_bar,
-            text="📐 LGD Drawing Vault | Batch Blueprint Viewer",
+            text="📐 Drawing Vault | Batch Blueprint Viewer",
             font=("Segoe UI", 13, "bold"),
             foreground="#0b2147",
         )
@@ -127,6 +137,9 @@ class DrawingViewerApp(tk.Tk):
 
         btn_refresh_sso = ttk.Button(top_bar, text="Check SSO", width=11, command=self._refresh_sso_session)
         btn_refresh_sso.pack(side=tk.LEFT, padx=4)
+
+        btn_show_logs_top = ttk.Button(top_bar, text="📜 Live Logs", width=11, command=self._open_log_view)
+        btn_show_logs_top.pack(side=tk.LEFT, padx=2)
 
         # Target download folder chooser
         dir_frame = ttk.Frame(top_bar)
@@ -189,6 +202,13 @@ class DrawingViewerApp(tk.Tk):
         self.lbl_batch_progress = ttk.Label(batch_ctrl_frame, text="Ready.", font=("Segoe UI", 9), foreground="#0052cc")
         self.lbl_batch_progress.pack(anchor="w")
 
+        btn_log_view_quick = ttk.Button(
+            batch_ctrl_frame,
+            text="📜 Live Logs & Error Diagnostics",
+            command=self._open_log_view,
+        )
+        btn_log_view_quick.pack(fill=tk.X, pady=(4, 0))
+
         # RIGHT PANE: IMAGE VIEWER & THUMBNAIL GALLERY
         right_panel = ttk.Frame(self.main_paned, padding=4)
         self.main_paned.add(right_panel, weight=3)
@@ -197,7 +217,7 @@ class DrawingViewerApp(tk.Tk):
         viewer_toolbar = ttk.Frame(right_panel, padding=(4, 4))
         viewer_toolbar.pack(fill=tk.X, side=tk.TOP)
 
-        # View Mode Selector: Canvas vs Thumbnail Grid
+        # View Mode Selector: Canvas vs Thumbnail Grid vs Live Logs
         mode_frame = ttk.Frame(viewer_toolbar)
         mode_frame.pack(side=tk.LEFT, padx=(0, 10))
 
@@ -213,6 +233,14 @@ class DrawingViewerApp(tk.Tk):
             mode_frame,
             text="📑 Thumbnail Gallery",
             value="gallery",
+            variable=self.view_mode,
+            command=self._switch_view_mode,
+        ).pack(side=tk.LEFT, padx=3)
+
+        ttk.Radiobutton(
+            mode_frame,
+            text="📜 Live Logs",
+            value="logs",
             variable=self.view_mode,
             command=self._switch_view_mode,
         ).pack(side=tk.LEFT, padx=3)
@@ -276,6 +304,10 @@ class DrawingViewerApp(tk.Tk):
             on_open_image=self._open_image_from_gallery,
         )
 
+        # 3. Live Diagnostics Log Console View
+        self.log_view_subframe = ttk.Frame(self.viewport_container)
+        self._build_log_console(self.log_view_subframe)
+
         # Initially show canvas view
         self.canvas_subframe.pack(fill=tk.BOTH, expand=True)
 
@@ -323,21 +355,31 @@ class DrawingViewerApp(tk.Tk):
     # ------------------ View Mode Toggle ------------------
 
     def _switch_view_mode(self):
-        """Switches between Canvas View and Thumbnail Grid View."""
+        """Switches between Canvas View, Thumbnail Grid View, and Live Diagnostics Log."""
         mode = self.view_mode.get()
         if mode == "canvas":
             self.gallery_view.pack_forget()
+            self.log_view_subframe.pack_forget()
             self.canvas_subframe.pack(fill=tk.BOTH, expand=True)
             self.nav_frame.pack(side=tk.LEFT, padx=(0, 8))
             self.zoom_frame.pack(side=tk.LEFT)
             if self.current_index >= 0:
                 self.show_image_at_index(self.current_index)
-        else:
+        elif mode == "gallery":
             self.canvas_subframe.pack_forget()
+            self.log_view_subframe.pack_forget()
+            self.nav_frame.pack_forget()
+            self.zoom_frame.pack_forget()
             self.gallery_view.pack(fill=tk.BOTH, expand=True)
             self.gallery_view.set_items(self.items_gallery)
             if self.current_index >= 0 and self.current_index < len(self.items_gallery):
                 self.gallery_view.select_item(self.items_gallery[self.current_index])
+        elif mode == "logs":
+            self.canvas_subframe.pack_forget()
+            self.gallery_view.pack_forget()
+            self.nav_frame.pack_forget()
+            self.zoom_frame.pack_forget()
+            self.log_view_subframe.pack(fill=tk.BOTH, expand=True)
 
     def _open_image_from_gallery(self, result: DownloadResult):
         """Triggered when an image card in gallery view is double-clicked / selected."""
@@ -376,14 +418,14 @@ class DrawingViewerApp(tk.Tk):
                 cookies = self.sso_client.authenticate()
                 self.after(0, lambda: [
                     self.sso_status_lbl.configure(text="🟢 SSO Authenticated Successfully", foreground="#00875a"),
-                    messagebox.showinfo("SSO Success", f"Connected and saved LG Display SSO session!\nCookies: {list(cookies.keys())}"),
+                    messagebox.showinfo("SSO Success", f"Connected and saved SSO session!\nCookies: {list(cookies.keys())}"),
                 ])
             except Exception as e:
                 self.after(0, lambda: [
                     self.sso_status_lbl.configure(text="🔴 SSO Offline / Refused", foreground="#de350b"),
                     messagebox.showerror(
                         "SSO Connection Error",
-                        f"Cannot connect to SSO Agent:\n{e}\n\nPlease ensure LG Display SSO Agent is running on port 28083.",
+                        f"Cannot connect to SSO Agent:\n{e}\n\nPlease ensure SSO Local Agent is running on port 28083.",
                     ),
                 ])
         threading.Thread(target=run, daemon=True).start()
@@ -490,6 +532,8 @@ class DrawingViewerApp(tk.Tk):
         # Update status in the Excel grid row
         status_tag = "✅ Done" if result.status == "Success" else "❌ Error"
         self.excel_grid.update_item_status(result.qcode, status_tag)
+        if result.error_detail:
+            self.excel_grid.set_item_error(result.qcode, result.error_detail)
 
         # Add result to gallery list
         self._add_result_to_gallery(result, auto_display=(current == 1))
@@ -500,12 +544,30 @@ class DrawingViewerApp(tk.Tk):
         self.btn_batch_stop.configure(state="disabled")
 
         if summary.error_message:
-            messagebox.showerror("Batch Download Error", summary.error_message)
-        else:
+            for it in self.excel_grid.get_items():
+                self.excel_grid.update_item_status(it.qcode, "❌ Error")
+                self.excel_grid.set_item_error(it.qcode, summary.error_message)
+            self.lbl_batch_progress.configure(text="Batch download failed.")
+            messagebox.showerror(
+                "Batch Download Error",
+                f"Batch download failed: {summary.error_message}\n\n"
+                f"👉 Click '🔍 View Error' on any row or switch to the '📜 Live Logs' tab to inspect details.",
+            )
+        elif summary.total_failed > 0:
             msg = (
                 f"Batch download completed in {summary.elapsed_seconds}s:\n"
                 f"- Successful: {summary.total_downloaded}/{summary.total_requested}\n"
-                f"- Failed: {summary.total_failed}"
+                f"- Failed: {summary.total_failed}\n\n"
+                f"💡 Tip: Click '🔍 View Error' or double-click any ❌ Error row in the table to inspect failure details, "
+                f"or switch to the '📜 Live Logs' tab to view full server responses."
+            )
+            self.lbl_batch_progress.configure(text=f"Completed with {summary.total_failed} error(s)")
+            messagebox.showwarning("Batch Download Completed with Errors", msg)
+        else:
+            msg = (
+                f"Batch download completed successfully in {summary.elapsed_seconds}s:\n"
+                f"- Successful: {summary.total_downloaded}/{summary.total_requested}\n"
+                f"- Failed: 0"
             )
             self.lbl_batch_progress.configure(text=f"Completed ({summary.total_downloaded}/{summary.total_requested} images)")
             messagebox.showinfo("Batch Download Completed", msg)
@@ -840,6 +902,167 @@ class DrawingViewerApp(tk.Tk):
             messagebox.showinfo("Export Successful", f"Saved CSV report to file:\n{path}")
         except Exception as e:
             messagebox.showerror("Export Error", f"Cannot save CSV file: {e}")
+
+    # ------------------ Live Diagnostic Log Console ------------------
+
+    def _build_log_console(self, parent: ttk.Frame):
+        """Constructs an integrated live diagnostic log viewer with filter and auto-scroll."""
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
+
+        # 1. Log Toolbar
+        log_tb = ttk.Frame(parent, padding=(6, 4))
+        log_tb.grid(row=0, column=0, sticky="ew")
+
+        ttk.Label(
+            log_tb,
+            text="📜 Live Diagnostic Log Console",
+            font=("Segoe UI", 10, "bold"),
+            foreground="#0b2147",
+        ).pack(side=tk.LEFT, padx=(0, 10))
+
+        # Auto-scroll toggle
+        self.log_autoscroll = tk.BooleanVar(value=True)
+        chk_scroll = ttk.Checkbutton(log_tb, text="Auto-scroll", variable=self.log_autoscroll)
+        chk_scroll.pack(side=tk.LEFT, padx=4)
+
+        # Filter entry
+        ttk.Label(log_tb, text="Search:").pack(side=tk.LEFT, padx=(10, 2))
+        self.log_filter_entry = ttk.Entry(log_tb, width=16)
+        self.log_filter_entry.pack(side=tk.LEFT, padx=2)
+        self.log_filter_entry.bind("<Return>", lambda e: self._filter_log_view())
+
+        ttk.Button(log_tb, text="Filter", width=6, command=self._filter_log_view).pack(side=tk.LEFT, padx=1)
+        ttk.Button(log_tb, text="Reset", width=6, command=self._reset_log_view).pack(side=tk.LEFT, padx=1)
+
+        # Right buttons
+        ttk.Button(log_tb, text="🗑️ Clear", width=7, command=self._clear_log_console).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(log_tb, text="📂 Open File", width=10, command=self._open_log_file_external).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(log_tb, text="📋 Copy All", width=9, command=self._copy_all_logs).pack(side=tk.RIGHT, padx=2)
+
+        # 2. Text display
+        text_container = ttk.Frame(parent)
+        text_container.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
+
+        self.log_text = tk.Text(
+            text_container,
+            wrap=tk.WORD,
+            font=("Consolas", 9),
+            bg="#181a1f",
+            fg="#abb2bf",
+            insertbackground="#ffffff",
+            selectbackground="#3e4451",
+            selectforeground="#ffffff",
+            relief="flat",
+            padx=8,
+            pady=8,
+        )
+        log_vsb = ttk.Scrollbar(text_container, orient=tk.VERTICAL, command=self.log_text.yview)
+        log_hsb = ttk.Scrollbar(text_container, orient=tk.HORIZONTAL, command=self.log_text.xview)
+        self.log_text.configure(yscrollcommand=log_vsb.set, xscrollcommand=log_hsb.set)
+
+        self.log_text.grid(row=0, column=0, sticky="nsew")
+        log_vsb.grid(row=0, column=1, sticky="ns")
+        log_hsb.grid(row=1, column=0, sticky="ew")
+
+        text_container.grid_rowconfigure(0, weight=1)
+        text_container.grid_columnconfigure(0, weight=1)
+
+        # Color tags
+        self.log_text.tag_configure("DEBUG", foreground="#5c6370")
+        self.log_text.tag_configure("INFO", foreground="#61afef")
+        self.log_text.tag_configure("WARNING", foreground="#e5c07b", font=("Consolas", 9, "bold"))
+        self.log_text.tag_configure("ERROR", foreground="#ff6b6b", font=("Consolas", 9, "bold"))
+        self.log_text.tag_configure("CRITICAL", foreground="#ffffff", background="#e06c75", font=("Consolas", 9, "bold"))
+        self.log_text.tag_configure("HIGHLIGHT", background="#ffd33d", foreground="#000000")
+
+        # Load recent tail
+        tail = read_latest_log_tail(max_lines=150)
+        if tail:
+            for line in tail.splitlines(keepends=True):
+                self._insert_log_line(line)
+
+    def _on_log_message(self, message: str, level: int):
+        """Dispatches log events from background threads to GUI text widget."""
+        try:
+            self.after(0, lambda: self._insert_log_line(message + "\n"))
+        except Exception:
+            pass
+
+    def _insert_log_line(self, line: str):
+        if not hasattr(self, "log_text") or not self.log_text.winfo_exists():
+            return
+
+        level_tag = "INFO"
+        upper = line.upper()
+        if " [DEBUG] " in upper:
+            level_tag = "DEBUG"
+        elif " [WARNING] " in upper or " [WARN] " in upper:
+            level_tag = "WARNING"
+        elif " [ERROR] " in upper:
+            level_tag = "ERROR"
+        elif " [CRITICAL] " in upper:
+            level_tag = "CRITICAL"
+
+        self.log_text.insert(tk.END, line, (level_tag,))
+        if getattr(self, "log_autoscroll", None) and self.log_autoscroll.get():
+            self.log_text.see(tk.END)
+
+    def _open_log_view(self):
+        """Switches active view mode directly to Live Logs."""
+        self.view_mode.set("logs")
+        self._switch_view_mode()
+
+    def _open_log_file_external(self):
+        if not os.path.isfile(LOG_FILE_PATH):
+            messagebox.showinfo("Log File", f"Log file does not exist yet:\n{LOG_FILE_PATH}")
+            return
+        try:
+            if sys.platform == "win32":
+                os.startfile(LOG_FILE_PATH)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", LOG_FILE_PATH])
+            else:
+                subprocess.Popen(["xdg-open", LOG_FILE_PATH])
+        except Exception as e:
+            messagebox.showerror("Log File Error", f"Cannot open log file: {e}")
+
+    def _copy_all_logs(self):
+        content = self.log_text.get("1.0", tk.END)
+        self.clipboard_clear()
+        self.clipboard_append(content)
+        messagebox.showinfo("Copied", f"Copied {len(content)} characters of diagnostic logs to clipboard.")
+
+    def _clear_log_console(self):
+        self.log_text.delete("1.0", tk.END)
+
+    def _filter_log_view(self):
+        query = self.log_filter_entry.get().strip().lower()
+        if not query:
+            self._reset_log_view()
+            return
+
+        self.log_text.tag_remove("HIGHLIGHT", "1.0", tk.END)
+        start = "1.0"
+        match_count = 0
+        first_match = None
+        while True:
+            pos = self.log_text.search(query, start, stopindex=tk.END, nocase=True)
+            if not pos:
+                break
+            match_count += 1
+            if not first_match:
+                first_match = pos
+            end_pos = f"{pos}+{len(query)}c"
+            self.log_text.tag_add("HIGHLIGHT", pos, end_pos)
+            start = end_pos
+
+        if first_match:
+            self.log_text.see(first_match)
+
+    def _reset_log_view(self):
+        self.log_filter_entry.delete(0, tk.END)
+        self.log_text.tag_remove("HIGHLIGHT", "1.0", tk.END)
 
 
 def launch_gui():

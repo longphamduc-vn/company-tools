@@ -3,7 +3,7 @@ Exceptions and Error Codes conforming to Section 7 of AI Agent Technical Specifi
 """
 
 class VaultAutomationError(Exception):
-    """Base exception for LGD Drawing Vault automation errors."""
+    """Base exception for Drawing Vault automation errors."""
     code: str = "VAULT_ERROR"
     recovery_action: str = ""
 
@@ -19,18 +19,18 @@ class SSOConnectionRefusedError(VaultAutomationError):
     """
     Code: WS_CONN_REFUSED
     Cause: SSO Local Agent software not running on user PC.
-    Recovery Action: Inform user to open LG Display SSO Agent software on port 28083.
+    Recovery Action: Inform user to open SSO Local Agent software on port 28083.
     """
     code: str = "WS_CONN_REFUSED"
     recovery_action: str = (
-        "Inform user to open LG Display SSO Agent software on port 28083 "
+        "Inform user to open SSO Local Agent software on port 28083 "
         "(ws://127.0.0.1:28083/)."
     )
 
     def __init__(self, message: str = None):
         default_msg = (
             "Authentication Failed: SSO Local Agent on port 28083 is not responding or session rejected. "
-            "Please ensure the LG Display SSO Agent software is running on your machine."
+            "Please ensure the SSO Local Agent software is running on your machine."
         )
         super().__init__(message or default_msg, code=self.code, recovery_action=self.recovery_action)
 

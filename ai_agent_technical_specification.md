@@ -1,12 +1,12 @@
 # TECHNICAL SPECIFICATION (SPEC) FOR AI AGENT INTERACTION
-## Project: LGD Drawing Vault Downloader & Viewer Automation
+## Project: Drawing Vault Downloader & Viewer Automation
 
 ---
 
 ## 1. System Overview & Objective
-This specification defines the functional schema, capabilities, and system contract for an **AI Agent** interacting with the **LGD Drawing Vault Professional System**. 
+This specification defines the functional schema, capabilities, and system contract for an **AI Agent** interacting with the **Drawing Vault Professional System**. 
 
-The AI Agent acts as an autonomous operator that takes user natural-language requests or batch structured inputs (e.g., QCodes, device aliases), interacts with LG Display's internal FDM/Windchill Vault via SSO authentication, executes drawing downloads, and returns structured execution reports with local file artifacts.
+The AI Agent acts as an autonomous operator that takes user natural-language requests or batch structured inputs (e.g., QCodes, device aliases), interacts with internal FDM/Windchill Vault via SSO authentication, executes drawing downloads, and returns structured execution reports with local file artifacts.
 
 ---
 
@@ -33,8 +33,8 @@ The AI Agent acts as an autonomous operator that takes user natural-language req
                     |                               |
                     v                               v
 +-----------------------------------------------------------------------+
-|                     LG DISPLAY INTERNAL VAULT                         |
-|       (fdm.lgdisplay.com:8008  |  im.lgdisplay.com:8088)              |
+|                         INTERNAL VAULT                                |
+|       (fdm.internal.net:8008   |  im.internal.net:8088)                |
 +-----------------------------------------------------------------------+
 ```
 
@@ -49,7 +49,7 @@ This JSON Schema defines the tool interface exposed to the AI Agent (compatible 
 ```json
 {
   "name": "download_vault_drawings",
-  "description": "Searches and downloads engineering drawings/blueprints from LG Display Vault (FDM/Windchill) using QCodes and optional custom device names. Requires an active SSO Local Agent on port 28083.",
+  "description": "Searches and downloads engineering drawings/blueprints from Vault (FDM/Windchill) using QCodes and optional custom device names. Requires an active SSO Local Agent on port 28083.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -90,8 +90,8 @@ This JSON Schema defines the tool interface exposed to the AI Agent (compatible 
 
 1. **Protocol**: WebSocket
 2. **Local Endpoint**: `ws://127.0.0.1:28083/`
-3. **Payload Sent**: `API?args=tsso://im.lgdisplay.com:8088/GETTOKEN?apiroot=/pdadmin&protocol=http&pd_h=null&pd_id=null`
-4. **Token Exchange Endpoint**: `http://im.lgdisplay.com:8088/pdadmin/eai/eai.jsp`
+3. **Payload Sent**: `API?args=tsso://im.internal.net:8088/GETTOKEN?apiroot=/pdadmin&protocol=http&pd_h=null&pd_id=null`
+4. **Token Exchange Endpoint**: `http://im.internal.net:8088/pdadmin/eai/eai.jsp`
 5. **Required Session Cookies**:
    - `PD-TH-SESSION-ID`
    - `PD-ID`
@@ -102,7 +102,7 @@ This JSON Schema defines the tool interface exposed to the AI Agent (compatible 
 
 ### 4.2 Drawing Search & Download Logic
 
-1. **Search Endpoint**: `POST http://fdm.lgdisplay.com:8008/`
+1. **Search Endpoint**: `POST http://fdm.internal.net:8008/`
    - **Form Payload**:
      ```json
      {
@@ -115,7 +115,7 @@ This JSON Schema defines the tool interface exposed to the AI Agent (compatible 
      }
      ```
 2. **Detail Page Parsing (Scraper)**:
-   - **Endpoint**: `GET /Windchill/extcore/jsp/lgdfdm/drawing/detailNonCAD.jsp`
+   - **Endpoint**: `GET /Windchill/extcore/jsp/vault/drawing/detailNonCAD.jsp`
    - **Params**: `drawingOid`, `fabOid`, `folderPath`, `lang=en`
    - **Pattern**: Regex matching `href=['"](http[s]?://[^'"]+viewContent/[^'"]+)['"]`
 3. **Asset Filter Policy**:
@@ -176,7 +176,7 @@ The tool output returned to the AI Agent must strictly follow this JSON response
 When integrating this tool into an LLM system (e.g. System Prompt configuration), adhere to the following rules:
 
 ### 6.1 System Prompt Context Instruction
-> You are an AI Assistant integrated into LG Display's engineering system.
+> You are an AI Assistant integrated into the enterprise engineering system.
 > You have access to the `download_vault_drawings` tool to retrieve visual blueprints and equipment drawings.
 > 
 > **Guidelines:**
@@ -191,7 +191,7 @@ When integrating this tool into an LLM system (e.g. System Prompt configuration)
 
 | Error Code / Message | Cause | AI Agent Recovery Action |
 | :--- | :--- | :--- |
-| `WS_CONN_REFUSED` | SSO Local Agent software not running on user PC. | Inform user to open LG Display SSO Agent software on port 28083. |
+| `WS_CONN_REFUSED` | SSO Local Agent software not running on user PC. | Inform user to open SSO Local Agent software on port 28083. |
 | `HTTP_401` / `HTTP_403` | Cookies expired or invalid session. | Force clear `session.json` and re-trigger `authenticate()`. |
 | `DRAWING_NOT_FOUND` | QCode invalid or no Non-CAD drawings available. | Report missing QCode directly to user for verification. |
 | `CORRUPT_PAYLOAD` | Server returned HTML login page instead of binary stream. | Re-authenticate session and retry download stream once. |

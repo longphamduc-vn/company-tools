@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Main Entry Point for LGD Drawing Vault - Batch Blueprint Downloader & Viewer.
+Main Entry Point for Drawing Vault - Batch Blueprint Downloader & Viewer.
 """
 
 import argparse
@@ -15,26 +15,97 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from lgd_vault.config import DEFAULT_DOWNLOAD_DIR
-from lgd_vault.models import DrawingItem
-from lgd_vault.session_manager import SessionManager
-from lgd_vault.sso_client import SSOClient
-from lgd_vault.drawing_service import DrawingService
+from drawing_vault.config import DEFAULT_DOWNLOAD_DIR
+from drawing_vault.models import DrawingItem
+from drawing_vault.session_manager import SessionManager
+from drawing_vault.sso_client import SSOClient
+from drawing_vault.drawing_service import DrawingService
+from drawing_vault.logger_setup import (
+    setup_diagnostics_logging,
+    get_log_file_path,
+    read_latest_log_tail,
+)
 
 
 def setup_logging(verbose: bool = False):
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    setup_diagnostics_logging(verbose=verbose)
 
 
 def cmd_gui():
     """Launch the Batch Blueprint Viewer GUI."""
-    from lgd_vault.viewer_app import launch_gui
+    from drawing_vault.viewer_app import launch_gui
     launch_gui()
+
+
+def cmd_diag(qcode: str):
+    """Deep network & SSO diagnostics to test endpoints and print root cause."""
+    print("=" * 68)
+    print("🔍 Drawing Vault - Connectivity & Diagnostic Test")
+    print(f"Target QCode: {qcode}")
+    print(f"Log File: {get_log_file_path()}")
+    print("=" * 68)
+
+    # Step 1: WebSocket SSO Agent on port 28083
+    print("\n[Step 1/4] Checking Local SSO Agent on Port 28083 (ws://127.0.0.1:28083/)...")
+    sso = SSOClient()
+    raw_resp = None
+    try:
+        raw_resp = sso._request_token_via_websocket()
+        print(f"   ✅ SSO WebSocket Connected! Raw response ({len(raw_resp)} chars): {raw_resp[:60]}...")
+    except Exception as e:
+        print(f"   ❌ SSO Connection Failed: {e}")
+        print("   👉 Troubleshooting: Make sure the SSO Local Agent service is running on this computer.")
+        print(f"   Check log file '{get_log_file_path()}' for complete details.")
+        return
+
+    # Step 2: EAI Token Exchange
+    print(f"\n[Step 2/4] Checking EAI Token Exchange ({config.SSO_TOKEN_EXCHANGE_URL})...")
+    try:
+        cookies = sso._exchange_token_for_cookies(raw_resp)
+        print(f"   ✅ Token Exchange Successful! Active Cookies: {list(cookies.keys())}")
+    except Exception as e:
+        print(f"   ❌ EAI Token Exchange Failed: {e}")
+        print(f"   Check log file '{get_log_file_path()}' for complete details.")
+        return
+
+    # Step 3: FDM Search Endpoint
+    print(f"\n[Step 3/4] Searching Vault for QCode '{qcode}' (POST {config.FDM_BASE_URL}/)...")
+    service = DrawingService(sso_client=sso)
+    records = []
+    try:
+        records = service.search_drawings(qcode)
+        print(f"   ✅ FDM Search Succeeded! Found {len(records)} visual non-CAD drawing record(s).")
+        for i, r in enumerate(records[:3], 1):
+            print(f"      #{i}: OID={r.drawing_oid}, FileName={r.file_name}, Folder={r.folder_path}")
+    except Exception as e:
+        print(f"   ❌ FDM Search Failed: {e}")
+        print(f"   Check log file '{get_log_file_path()}' for complete HTTP request & response body.")
+        return
+
+    # Step 4: Detail JSP Scraper
+    if records:
+        rec = records[0]
+        print(f"\n[Step 4/4] Scraping viewContent stream URL for OID '{rec.drawing_oid}'...")
+        try:
+            view_url = service.scrape_detail_page(rec)
+            if view_url:
+                print(f"   ✅ Direct viewContent URL found: {view_url}")
+            else:
+                print("   ❌ No viewContent URL found in detail Non-CAD JSP.")
+        except Exception as e:
+            print(f"   ❌ Scraping detail page failed: {e}")
+
+    print("\n" + "=" * 68)
+    print("Diagnostics completed. Full raw payload logs written to:")
+    print(f"📄 {get_log_file_path()}")
+    print("=" * 68)
+
+
+def cmd_log(lines: int):
+    """Prints recent lines of the diagnostic log file."""
+    print(f"=== Last {lines} lines of {get_log_file_path()} ===")
+    tail = read_latest_log_tail(max_lines=lines)
+    print(tail)
 
 
 def cmd_auth(force: bool = False):
@@ -106,7 +177,7 @@ def cmd_batch(file_path: str, download_dir: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="LGD Drawing Vault - Batch Blueprint Downloader & Image Viewer",
+        description="Drawing Vault - Batch Blueprint Downloader & Image Viewer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose debug logging")
@@ -130,6 +201,14 @@ def main():
     batch_p.add_argument("--file", required=True, help="Path to .txt, .csv or .json batch file")
     batch_p.add_argument("--dir", default=DEFAULT_DOWNLOAD_DIR, help="Target download directory")
 
+    # Diagnostics
+    diag_p = subparsers.add_parser("diag", help="Run end-to-end network and SSO diagnostics")
+    diag_p.add_argument("--qcode", default="QCAK09691", help="Equipment QCode to test (default: QCAK09691)")
+
+    # View Log
+    log_p = subparsers.add_parser("log", help="Display recent entries from vault_download.log")
+    log_p.add_argument("-n", "--lines", type=int, default=60, help="Number of lines to show (default: 60)")
+
     args = parser.parse_args()
     setup_logging(args.verbose)
 
@@ -141,6 +220,10 @@ def main():
         cmd_download(args.qcode, args.name, args.dir)
     elif args.command == "batch":
         cmd_batch(args.file, args.dir)
+    elif args.command == "diag":
+        cmd_diag(args.qcode)
+    elif args.command == "log":
+        cmd_log(args.lines)
     else:
         # Default fallback: Launch GUI if DISPLAY is available, otherwise show help
         if os.environ.get("DISPLAY") or sys.platform in ("win32", "darwin"):

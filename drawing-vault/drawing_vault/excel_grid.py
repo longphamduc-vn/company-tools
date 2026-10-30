@@ -12,6 +12,8 @@ import csv
 import logging
 import os
 import re
+import subprocess
+import sys
 from typing import List, Dict, Optional, Callable
 
 import tkinter as tk
@@ -23,9 +25,10 @@ try:
 except ImportError:
     HAS_OPENPYXL = False
 
-from lgd_vault.models import DrawingItem
+from drawing_vault.models import DrawingItem
+from drawing_vault.logger_setup import LOG_FILE_PATH
 
-logger = logging.getLogger("lgd_vault.excel_grid")
+logger = logging.getLogger("drawing_vault.excel_grid")
 
 
 class ExcelInputGrid(ttk.Frame):
@@ -36,6 +39,7 @@ class ExcelInputGrid(ttk.Frame):
         self.on_change = on_change
         self.active_entry: Optional[ttk.Entry] = None
         self.editing_cell: Optional[tuple] = None  # (item_id, col_name)
+        self.item_error_details: Dict[str, str] = {}  # QCode -> detailed error trace/message
 
         self._build_toolbar()
         self._build_grid()
@@ -52,22 +56,25 @@ class ExcelInputGrid(ttk.Frame):
 
         btn_paste = ttk.Button(
             tb,
-            text="📋 Paste from Excel (Ctrl+V)",
+            text="📋 Paste (Ctrl+V)",
             style="Accent.TButton",
             command=self.paste_from_clipboard,
         )
         btn_paste.pack(side=tk.LEFT, padx=(0, 2))
 
-        btn_add = ttk.Button(tb, text="➕ Add", width=6, command=lambda: self.add_row("", ""))
+        btn_add = ttk.Button(tb, text="➕ Add", width=5, command=lambda: self.add_row("", ""))
         btn_add.pack(side=tk.LEFT, padx=1)
 
-        btn_del = ttk.Button(tb, text="➖ Delete", width=7, command=self.delete_selected_rows)
+        btn_del = ttk.Button(tb, text="➖ Delete", width=6, command=self.delete_selected_rows)
         btn_del.pack(side=tk.LEFT, padx=1)
 
-        btn_import = ttk.Button(tb, text="📁 Import File", width=11, command=self.import_file)
+        btn_err = ttk.Button(tb, text="🔍 View Error", width=11, command=self.show_selected_error)
+        btn_err.pack(side=tk.LEFT, padx=1)
+
+        btn_import = ttk.Button(tb, text="📁 Import", width=8, command=self.import_file)
         btn_import.pack(side=tk.LEFT, padx=1)
 
-        btn_clear = ttk.Button(tb, text="🗑️ Clear All", width=9, command=self.clear_all)
+        btn_clear = ttk.Button(tb, text="🗑️ Clear", width=7, command=self.clear_all)
         btn_clear.pack(side=tk.LEFT, padx=1)
 
         self.lbl_count = ttk.Label(tb, text="0 rows", font=("Segoe UI", 9, "bold"), foreground="#0052cc")
@@ -128,6 +135,28 @@ class ExcelInputGrid(ttk.Frame):
         self.tree.bind("<Delete>", lambda e: self.delete_selected_rows())
         self.tree.bind("<BackSpace>", lambda e: self.delete_selected_rows())
 
+        # Context menu
+        self.context_menu = tk.Menu(self, tearoff=0)
+        self.context_menu.add_command(label="🔍 View Error Details", command=self.show_selected_error)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="📋 Copy Row (Ctrl+C)", command=self.copy_selected_to_clipboard)
+        self.context_menu.add_command(label="📋 Paste (Ctrl+V)", command=self.paste_from_clipboard)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="➕ Add Row", command=lambda: self.add_row("", ""))
+        self.context_menu.add_command(label="➖ Delete Row", command=self.delete_selected_rows)
+
+        self.tree.bind("<Button-3>", self._on_right_click)
+        self.tree.bind("<Button-2>", self._on_right_click)
+
+    def _on_right_click(self, event):
+        row_id = self.tree.identify_row(event.y)
+        if row_id:
+            self.tree.selection_set(row_id)
+        try:
+            self.context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.context_menu.grab_release()
+
     # ------------------ Cell In-Place Editing ------------------
 
     def _on_double_click(self, event):
@@ -143,6 +172,8 @@ class ExcelInputGrid(ttk.Frame):
         # Column mapping: #1 -> row_no (read-only), #2 -> qcode, #3 -> custom_name, #4 -> status
         if column_id in ("#2", "#3"):
             self._start_cell_edit(row_id, column_id)
+        elif column_id == "#4":
+            self.show_error_dialog(row_id)
 
     def _on_enter_pressed(self, event):
         selected = self.tree.selection()
@@ -413,3 +444,121 @@ class ExcelInputGrid(ttk.Frame):
                 vals[3] = status
                 self.tree.item(item_id, values=vals)
                 break
+
+    def set_item_error(self, qcode: str, error_detail: str):
+        """Saves detailed diagnostic error for a given QCode."""
+        if qcode:
+            self.item_error_details[qcode.upper()] = error_detail
+
+    def get_item_error(self, qcode: str) -> str:
+        """Retrieves stored error detail for a given QCode."""
+        return self.item_error_details.get(qcode.upper(), "")
+
+    def show_selected_error(self):
+        """Shows error dialog for the currently selected row."""
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showinfo("No Selection", "Please click on a row in the table first.")
+            return
+        self.show_error_dialog(selected[0])
+
+    def show_error_dialog(self, item_id: str):
+        """Displays comprehensive error diagnostics dialog for an item."""
+        vals = self.tree.item(item_id, "values")
+        if not vals:
+            return
+
+        row_no, qcode, alias, status = vals[0], vals[1], vals[2], vals[3]
+        error_detail = self.get_item_error(qcode)
+
+        if not error_detail and "error" not in status.lower() and "fail" not in status.lower():
+            messagebox.showinfo(
+                f"Status: {qcode}",
+                f"QCode: {qcode}\nAlias: {alias or 'None'}\nStatus: {status}\n\nNo errors recorded for this item.",
+            )
+            return
+
+        if not error_detail:
+            error_detail = f"Status: {status}\n\nNo extended error trace recorded. Please inspect the main log console or vault_download.log."
+
+        # Create diagnostic modal window
+        win = tk.Toplevel(self)
+        win.title(f"Diagnostic Error Details - {qcode}")
+        win.geometry("700x520")
+        win.minsize(550, 400)
+        win.transient(self.winfo_toplevel())
+
+        # Top Info Card
+        info_frame = ttk.Frame(win, padding=12)
+        info_frame.pack(fill=tk.X)
+
+        title_lbl = ttk.Label(
+            info_frame,
+            text=f"❌ Download Error: {qcode}",
+            font=("Segoe UI", 12, "bold"),
+            foreground="#de350b",
+        )
+        title_lbl.pack(anchor="w")
+
+        meta_text = f"Device Alias: {alias or '(None)'}   |   Current Status: {status}\nLog File: {LOG_FILE_PATH}"
+        ttk.Label(info_frame, text=meta_text, font=("Segoe UI", 9), foreground="#5e6c84").pack(anchor="w", pady=(2, 0))
+
+        # Text area for detailed error trace
+        text_frame = ttk.Frame(win, padding=(12, 0, 12, 12))
+        text_frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(text_frame, text="Detailed Diagnostic Information & Server Response:", font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 4))
+
+        txt = tk.Text(
+            text_frame,
+            wrap=tk.WORD,
+            font=("Consolas", 9),
+            bg="#1e1e24",
+            fg="#f8f9fa",
+            insertbackground="white",
+            padx=8,
+            pady=8,
+            relief="solid",
+            borderwidth=1,
+        )
+        scroll = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=txt.yview)
+        txt.configure(yscrollcommand=scroll.set)
+
+        txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        txt.insert("1.0", error_detail)
+        txt.configure(state="disabled")
+
+        # Bottom Button Bar
+        btn_bar = ttk.Frame(win, padding=12)
+        btn_bar.pack(fill=tk.X, side=tk.BOTTOM)
+
+        def copy_to_clipboard():
+            self.clipboard_clear()
+            self.clipboard_append(f"QCode: {qcode}\nAlias: {alias}\nStatus: {status}\n\n{error_detail}")
+            lbl_copied.configure(text="✅ Copied to clipboard!")
+            win.after(2500, lambda: lbl_copied.configure(text=""))
+
+        def open_log():
+            if not os.path.isfile(LOG_FILE_PATH):
+                messagebox.showinfo("Log File", f"Log file does not exist yet:\n{LOG_FILE_PATH}")
+                return
+            try:
+                if sys.platform == "win32":
+                    os.startfile(LOG_FILE_PATH)
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", LOG_FILE_PATH])
+                else:
+                    subprocess.Popen(["xdg-open", LOG_FILE_PATH])
+            except Exception as e:
+                messagebox.showerror("Log File Error", f"Cannot open log file: {e}")
+
+        ttk.Button(btn_bar, text="📋 Copy Error Details", command=copy_to_clipboard).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_bar, text="📂 Open Full Log File", command=open_log).pack(side=tk.LEFT, padx=4)
+
+        lbl_copied = ttk.Label(btn_bar, text="", font=("Segoe UI", 9, "bold"), foreground="#00875a")
+        lbl_copied.pack(side=tk.LEFT, padx=8)
+
+        ttk.Button(btn_bar, text="Close", width=9, command=win.destroy).pack(side=tk.RIGHT)
+

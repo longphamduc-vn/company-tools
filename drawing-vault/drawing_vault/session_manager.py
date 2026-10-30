@@ -1,5 +1,5 @@
 """
-Session management and persistence for LGD SSO Cookies.
+Session management and persistence for SSO Cookies.
 Complies with Section 4.1.5 & 4.1.6 of the specification:
 - Session file backup: session.json (Default TTL: 7200s / 2 hours)
 - Required session cookies: PD-TH-SESSION-ID, PD-ID, JSESSIONID
@@ -11,13 +11,13 @@ import os
 import time
 from typing import Dict, Optional, Any
 
-from lgd_vault.config import (
+from drawing_vault.config import (
     DEFAULT_SESSION_FILE,
     SESSION_TTL_SECONDS,
     REQUIRED_COOKIES,
 )
 
-logger = logging.getLogger("lgd_vault.session")
+logger = logging.getLogger("drawing_vault.session")
 
 
 class SessionManager:
@@ -79,7 +79,7 @@ class SessionManager:
 
             # Verify that required cookies exist or at least non-empty cookies are present
             if not any(k in cookies for k in REQUIRED_COOKIES):
-                logger.warning("Session file does not contain required LGD cookies (%s)", REQUIRED_COOKIES)
+                logger.warning("Session file does not contain required cookies (%s)", REQUIRED_COOKIES)
 
             logger.info("Valid session loaded from %s (expires in %.0fs)", self.session_file, expires_at - now)
             return cookies

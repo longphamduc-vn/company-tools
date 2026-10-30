@@ -1,5 +1,5 @@
 """
-Data models for LGD Drawing Vault Batch Downloader & Viewer.
+Data models for Drawing Vault Batch Downloader & Viewer.
 """
 
 from dataclasses import dataclass, field, asdict
@@ -28,6 +28,7 @@ class DownloadResult:
     file_size_bytes: int = 0
     image_width: int = 0
     image_height: int = 0
+    error_detail: str = ""  # Detailed diagnostic info for troubleshooting
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

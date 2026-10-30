@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lgd_vault.session_manager import SessionManager
+from drawing_vault.session_manager import SessionManager
 
 
 class TestSessionManager(unittest.TestCase):

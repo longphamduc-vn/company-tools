@@ -1,12 +1,7 @@
 """
-Drawing Service implementation for LG Display Vault.
-Handles:
-- Search Endpoint: POST http://fdm.lgdisplay.com:8008/
-- Non-CAD Filter: Skip records where typeName == "CAD"
-- Detail Page Scraper: GET /Windchill/extcore/jsp/lgdfdm/drawing/detailNonCAD.jsp
-  Regex pattern: href=['"](http[s]?://[^'"]+viewContent/[^'"]+)['"]
-- Binary Downloader: stream binary, verify visual payload, prefix custom_name, error recovery.
-- Batch Download Orchestration.
+Drawing Service implementation for Drawing Vault.
+Features deep diagnostics logging for every network request, response status,
+HTML/JSON body snippet, cookie state, and scraper regex evaluation.
 """
 
 import json
@@ -21,7 +16,7 @@ from typing import List, Optional, Tuple, Dict, Any, Callable
 import requests
 from bs4 import BeautifulSoup
 
-from lgd_vault.config import (
+from drawing_vault.config import (
     FDM_BASE_URL,
     FDM_SEARCH_URL,
     FDM_DETAIL_NONCAD_URL,
@@ -35,22 +30,22 @@ from lgd_vault.config import (
     RASTER_EXTENSIONS,
     USER_AGENT,
 )
-from lgd_vault.exceptions import (
+from drawing_vault.exceptions import (
     VaultAutomationError,
     SSOConnectionRefusedError,
     AuthExpiredError,
     DrawingNotFoundError,
     CorruptPayloadError,
 )
-from lgd_vault.models import (
+from drawing_vault.models import (
     DrawingItem,
     DrawingRecord,
     DownloadResult,
     BatchDownloadSummary,
 )
-from lgd_vault.sso_client import SSOClient
+from drawing_vault.sso_client import SSOClient
 
-logger = logging.getLogger("lgd_vault.service")
+logger = logging.getLogger("drawing_vault.service")
 
 # Regex patterns for viewContent
 VIEW_CONTENT_REGEX = re.compile(r"""href=['"](http[s]?://[^'"]+viewContent/[^'"]+)['"]""", re.IGNORECASE)
@@ -59,7 +54,7 @@ SRC_VIEW_CONTENT_REGEX = re.compile(r"""src=['"](http[s]?://[^'"]+viewContent/[^
 
 
 class DrawingService:
-    """Manages searching, scraping, filtering, and batch downloading drawings from LGD Vault."""
+    """Manages searching, scraping, filtering, and batch downloading drawings from Drawing Vault."""
 
     def __init__(self, sso_client: Optional[SSOClient] = None):
         self.sso_client = sso_client or SSOClient()
@@ -86,9 +81,8 @@ class DrawingService:
         end: str = DEFAULT_PAGE_END,
     ) -> List[DrawingRecord]:
         """
-        Executes search on FDM Vault (POST http://fdm.lgdisplay.com:8008/).
-        Filters out 3D CAD records (typeName == 'CAD').
-        Returns list of eligible visual drawing records.
+        Executes search on FDM Vault.
+        Logs request URL, payload, headers, cookies, HTTP status, and response snippet.
         """
         session = self.get_session()
         payload = {
@@ -100,7 +94,16 @@ class DrawingService:
             "end": end,
         }
 
-        logger.info("Searching drawings for QCode '%s' at %s (site=%s, fab=%s)", qcode, FDM_SEARCH_URL, site, fab)
+        cookies_dict = dict(session.cookies)
+        logger.info(
+            "[SEARCH] Querying FDM Vault for QCode '%s' at %s (site=%s, fab=%s)",
+            qcode,
+            FDM_SEARCH_URL,
+            site,
+            fab,
+        )
+        logger.debug("[SEARCH] Request Payload: %s", payload)
+        logger.debug("[SEARCH] Active Cookies: %s", list(cookies_dict.keys()))
 
         try:
             resp = session.post(
@@ -108,43 +111,108 @@ class DrawingService:
                 data=payload,
                 timeout=(DEFAULT_TIMEOUT_CONNECT, DEFAULT_TIMEOUT_READ),
                 headers={"User-Agent": USER_AGENT},
+                allow_redirects=True,
             )
+            elapsed = resp.elapsed.total_seconds()
+            logger.info(
+                "[SEARCH] Response: HTTP %d (URL: %s, Elapsed: %.2fs, Content-Type: %s, Body Length: %d bytes)",
+                resp.status_code,
+                resp.url,
+                elapsed,
+                resp.headers.get("Content-Type", "unknown"),
+                len(resp.text),
+            )
+            if resp.history:
+                logger.warning(
+                    "[SEARCH] Redirects detected: %s -> final: %s",
+                    " -> ".join(f"HTTP {r.status_code} {r.url}" for r in resp.history),
+                    resp.url,
+                )
+
+            # Log snippet of response body
+            body_preview = resp.text[:1200].replace("\r", " ").replace("\n", " ").strip()
+            logger.debug("[SEARCH] Response Body Preview (first 1200 chars):\n%s", body_preview)
+
         except requests.RequestException as e:
-            logger.error("Network error during FDM search for %s: %s", qcode, e)
-            raise VaultAutomationError(f"Network error querying FDM Vault: {e}") from e
+            err_msg = f"Network error querying FDM Vault ({FDM_SEARCH_URL}): {e}"
+            logger.error("[SEARCH ERROR] %s", err_msg)
+            raise VaultAutomationError(err_msg) from e
 
         # Check for authentication expiry
         if resp.status_code in (401, 403):
-            logger.warning("FDM search returned HTTP %d - session expired", resp.status_code)
-            raise AuthExpiredError(f"HTTP {resp.status_code} during FDM Search", code=f"HTTP_{resp.status_code}")
+            err_msg = f"HTTP {resp.status_code} during FDM Search (Cookies expired or unauthorized)"
+            logger.warning("[SEARCH ERROR] %s", err_msg)
+            raise AuthExpiredError(err_msg, code=f"HTTP_{resp.status_code}")
 
         # Check for HTML login redirection
         if self._is_html_login_page(resp.text, resp.headers.get("Content-Type", "")):
-            logger.warning("FDM search returned HTML login page instead of search result")
-            raise AuthExpiredError("FDM session expired - redirected to login page", code="HTTP_401")
+            err_msg = f"FDM Vault redirected to Login Page (Session rejected). Final URL: {resp.url}"
+            logger.warning("[SEARCH ERROR] %s", err_msg)
+            raise AuthExpiredError(err_msg, code="HTTP_401")
 
         # Parse records from response (supports JSON or HTML table responses)
         records = self._parse_search_response(resp, qcode, fab)
 
+        if not records:
+            logger.warning(
+                "[SEARCH WARNING] 0 records parsed from FDM response for QCode '%s'. "
+                "Check whether FDM Vault returned a table or empty result. Body length: %d chars.",
+                qcode,
+                len(resp.text),
+            )
+            # Log sample tags found in HTML for diagnostic debugging
+            if "<html" in resp.text.lower():
+                soup = BeautifulSoup(resp.text, "html.parser")
+                table_count = len(soup.find_all("table"))
+                tr_count = len(soup.find_all("tr"))
+                a_count = len(soup.find_all("a"))
+                logger.debug(
+                    "[SEARCH DIAGNOSTIC] HTML DOM Analysis: found %d <table>, %d <tr>, %d <a> links.",
+                    table_count,
+                    tr_count,
+                    a_count,
+                )
+            raise DrawingNotFoundError(
+                qcode,
+                message=(
+                    f"FDM Vault returned 0 records for QCode '{qcode}'. "
+                    f"HTTP Status: {resp.status_code}, URL: {resp.url}"
+                ),
+            )
+
         # Asset Filter Policy: Skip CAD
         visual_records = [r for r in records if not r.is_cad]
         logger.info(
-            "Found %d total records for QCode '%s', %d non-CAD visual candidates",
+            "[SEARCH RESULT] Total records found: %d. Non-CAD visual candidates: %d",
             len(records),
-            qcode,
             len(visual_records),
         )
 
+        for i, r in enumerate(records[:5]):
+            logger.debug(
+                "[SEARCH RECORD #%d] OID=%s, Type=%s, FileName=%s, Folder=%s",
+                i + 1,
+                r.drawing_oid,
+                r.type_name,
+                r.file_name,
+                r.folder_path,
+            )
+
         if not visual_records:
-            raise DrawingNotFoundError(qcode)
+            all_types = list(set(r.type_name for r in records))
+            msg = (
+                f"Found {len(records)} drawing record(s) for QCode '{qcode}', "
+                f"but ALL are 3D CAD ({all_types}). No raster visual blueprints available."
+            )
+            logger.warning("[SEARCH FILTER] %s", msg)
+            raise DrawingNotFoundError(qcode, message=msg)
 
         return visual_records
 
     def scrape_detail_page(self, record: DrawingRecord) -> str:
         """
         Scrapes direct viewContent URL from Windchill detail Non-CAD JSP.
-        GET /Windchill/extcore/jsp/lgdfdm/drawing/detailNonCAD.jsp
-        Params: drawingOid, fabOid, folderPath, lang=en
+        GET /Windchill/extcore/jsp/vault/drawing/detailNonCAD.jsp
         """
         session = self.get_session()
         params = {
@@ -154,7 +222,12 @@ class DrawingService:
             "lang": "en",
         }
 
-        logger.debug("Scraping detail page %s with params %s", FDM_DETAIL_NONCAD_URL, params)
+        logger.info(
+            "[SCRAPE] Fetching detailNonCAD.jsp for OID '%s' at %s with params %s",
+            record.drawing_oid,
+            FDM_DETAIL_NONCAD_URL,
+            params,
+        )
 
         try:
             resp = session.get(
@@ -162,10 +235,20 @@ class DrawingService:
                 params=params,
                 timeout=(DEFAULT_TIMEOUT_CONNECT, DEFAULT_TIMEOUT_READ),
                 headers={"User-Agent": USER_AGENT},
+                allow_redirects=True,
             )
+            logger.info(
+                "[SCRAPE] Response: HTTP %d (Elapsed: %.2fs, Body Length: %d chars)",
+                resp.status_code,
+                resp.elapsed.total_seconds(),
+                len(resp.text),
+            )
+            logger.debug("[SCRAPE] Detail HTML Preview:\n%s", resp.text[:1000].replace("\r", " ").replace("\n", " ").strip())
+
         except requests.RequestException as e:
-            logger.error("Error scraping detail page for OID %s: %s", record.drawing_oid, e)
-            raise VaultAutomationError(f"Failed to fetch detailNonCAD.jsp: {e}") from e
+            err_msg = f"Network error scraping detailNonCAD.jsp for OID {record.drawing_oid}: {e}"
+            logger.error("[SCRAPE ERROR] %s", err_msg)
+            raise VaultAutomationError(err_msg) from e
 
         if resp.status_code in (401, 403):
             raise AuthExpiredError(f"HTTP {resp.status_code} scraping detail page")
@@ -176,7 +259,7 @@ class DrawingService:
         match = VIEW_CONTENT_REGEX.search(html_text)
         if match:
             url = match.group(1)
-            logger.debug("Found viewContent absolute link: %s", url)
+            logger.info("[SCRAPE SUCCESS] Found viewContent absolute link: %s", url)
             return url
 
         # 2. Secondary Regex: Relative href
@@ -184,22 +267,32 @@ class DrawingService:
         if rel_match:
             rel_url = rel_match.group(1)
             full_url = urllib.parse.urljoin(FDM_BASE_URL, rel_url)
-            logger.debug("Found viewContent relative link resolved to: %s", full_url)
+            logger.info("[SCRAPE SUCCESS] Found viewContent relative link resolved to: %s", full_url)
             return full_url
 
         # 3. Fallback: <img src="...viewContent...">
         src_match = SRC_VIEW_CONTENT_REGEX.search(html_text)
         if src_match:
+            logger.info("[SCRAPE SUCCESS] Found viewContent in src attribute: %s", src_match.group(1))
             return src_match.group(1)
 
         # 4. BeautifulSoup DOM parser fallback
         soup = BeautifulSoup(html_text, "html.parser")
+        found_links = []
         for tag in soup.find_all(["a", "img", "iframe", "embed"]):
             src = tag.get("href") or tag.get("src")
-            if src and "viewContent" in src:
-                return urllib.parse.urljoin(FDM_BASE_URL, src)
+            if src:
+                found_links.append(src)
+                if "viewContent" in src:
+                    resolved = urllib.parse.urljoin(FDM_BASE_URL, src)
+                    logger.info("[SCRAPE SUCCESS] Found viewContent via DOM parser: %s", resolved)
+                    return resolved
 
-        logger.warning("No viewContent link found in detail Non-CAD JSP for OID %s", record.drawing_oid)
+        logger.error(
+            "[SCRAPE ERROR] No viewContent link matched in detailNonCAD.jsp for OID %s. Sample links found: %s",
+            record.drawing_oid,
+            found_links[:5],
+        )
         return ""
 
     def download_record_file(
@@ -212,21 +305,23 @@ class DrawingService:
         """
         Downloads visual blueprint drawing binary stream to disk.
         Detects corrupt payload (HTML login page) and raises CorruptPayloadError.
-        Applies custom_name prefix when provided.
         """
         url = direct_url or self.scrape_detail_page(record)
         if not url:
+            err_detail = f"Could not find direct download link (viewContent) in detailNonCAD.jsp for OID {record.drawing_oid}"
+            logger.error("[DOWNLOAD ERROR] %s", err_detail)
             return DownloadResult(
                 qcode=record.qcode,
                 custom_name=custom_name,
                 status="Failed: Drawing Not Found",
+                error_detail=err_detail,
                 file_name="",
                 local_path="",
                 file_size_bytes=0,
             )
 
         session = self.get_session()
-        logger.info("Downloading binary stream from: %s", url)
+        logger.info("[DOWNLOAD] Streaming binary from URL: %s", url)
 
         try:
             resp = session.get(
@@ -234,18 +329,26 @@ class DrawingService:
                 stream=True,
                 timeout=(DEFAULT_TIMEOUT_CONNECT, DEFAULT_TIMEOUT_READ),
                 headers={"User-Agent": USER_AGENT},
+                allow_redirects=True,
+            )
+            logger.info(
+                "[DOWNLOAD] HTTP %d (Content-Type: %s, Content-Length: %s)",
+                resp.status_code,
+                resp.headers.get("Content-Type"),
+                resp.headers.get("Content-Length"),
             )
         except requests.RequestException as e:
-            logger.error("Download stream error: %s", e)
-            raise VaultAutomationError(f"Download stream error: {e}") from e
+            err_msg = f"Download stream network error for {url}: {e}"
+            logger.error("[DOWNLOAD ERROR] %s", err_msg)
+            raise VaultAutomationError(err_msg) from e
 
         if resp.status_code in (401, 403):
-            raise AuthExpiredError(f"HTTP {resp.status_code} during binary download")
+            raise AuthExpiredError(f"HTTP {resp.status_code} during binary download from {url}")
 
         # Read initial chunk to check if payload is HTML login page
         first_chunk = b""
         chunks = []
-        for chunk in resp.iter_content(chunk_size=4096):
+        for chunk in resp.iter_content(chunk_size=8192):
             if chunk:
                 if not first_chunk:
                     first_chunk = chunk
@@ -253,8 +356,9 @@ class DrawingService:
 
         content_type = resp.headers.get("Content-Type", "").lower()
         if self._is_html_content(first_chunk, content_type):
-            logger.error("Corrupt payload detected: server returned HTML instead of image binary")
-            raise CorruptPayloadError("Server returned HTML login/error page instead of binary stream.")
+            snippet = first_chunk.decode("utf-8", errors="ignore")[:300]
+            logger.error("[DOWNLOAD ERROR] Corrupt payload detected (HTML instead of image binary). Snippet: %s", snippet)
+            raise CorruptPayloadError(f"Server returned HTML login/error page instead of binary stream: {snippet[:150]}")
 
         # Determine target file name
         raw_filename = self._extract_filename(resp, record, url)
@@ -284,7 +388,13 @@ class DrawingService:
         except Exception:
             pass
 
-        logger.info("Successfully saved drawing: %s (%d bytes, %dx%d)", target_path, total_bytes, img_w, img_h)
+        logger.info(
+            "[DOWNLOAD SUCCESS] Saved drawing: %s (%d bytes, %dx%d)",
+            target_path,
+            total_bytes,
+            img_w,
+            img_h,
+        )
 
         return DownloadResult(
             qcode=record.qcode,
@@ -295,6 +405,7 @@ class DrawingService:
             file_size_bytes=total_bytes,
             image_width=img_w,
             image_height=img_h,
+            error_detail="",
         )
 
     def process_item(
@@ -304,20 +415,15 @@ class DrawingService:
         max_retries: int = 1,
     ) -> DownloadResult:
         """
-        Executes search & download for a single item with error recovery:
-        - HTTP_401/403 or CORRUPT_PAYLOAD -> invalidate session, re-auth, retry once.
-        - DRAWING_NOT_FOUND -> return Failed: Drawing Not Found.
+        Executes search & download for a single item with error recovery & diagnostic logging.
         """
         attempt = 0
         while attempt <= max_retries:
             try:
-                # 1. Search drawings
+                logger.info("=== [ITEM PROCESS] Starting QCode '%s' (Attempt %d/%d) ===", item.qcode, attempt + 1, max_retries + 1)
                 records = self.search_drawings(item.qcode)
-
-                # 2. Pick primary visual record (first non-CAD record)
                 primary_record = records[0]
 
-                # 3. Download drawing
                 result = self.download_record_file(
                     record=primary_record,
                     download_dir=download_dir,
@@ -326,11 +432,13 @@ class DrawingService:
                 return result
 
             except DrawingNotFoundError as e:
-                logger.info("Drawing not found for QCode %s: %s", item.qcode, e)
+                err_detail = str(e)
+                logger.warning("[ITEM FAILED] QCode '%s': %s", item.qcode, err_detail)
                 return DownloadResult(
                     qcode=item.qcode,
                     custom_name=item.custom_name,
                     status="Failed: Drawing Not Found",
+                    error_detail=err_detail,
                     file_name="",
                     local_path="",
                     file_size_bytes=0,
@@ -339,10 +447,10 @@ class DrawingService:
             except (AuthExpiredError, CorruptPayloadError) as e:
                 attempt += 1
                 logger.warning(
-                    "Encountered %s (%s) for QCode %s. Attempt %d/%d to re-authenticate and retry.",
+                    "[ITEM RETRY] Encountered %s for QCode '%s': %s. Re-authenticating (Attempt %d/%d)...",
                     type(e).__name__,
-                    e,
                     item.qcode,
+                    e,
                     attempt,
                     max_retries,
                 )
@@ -355,17 +463,19 @@ class DrawingService:
                         qcode=item.qcode,
                         custom_name=item.custom_name,
                         status=f"Failed: {type(e).__name__}",
+                        error_detail=str(e),
                         file_name="",
                         local_path="",
                         file_size_bytes=0,
                     )
 
             except Exception as e:
-                logger.exception("Unexpected error processing QCode %s: %s", item.qcode, e)
+                logger.exception("[ITEM EXCEPTION] Unexpected error processing QCode '%s': %s", item.qcode, e)
                 return DownloadResult(
                     qcode=item.qcode,
                     custom_name=item.custom_name,
-                    status=f"Failed: {str(e)}",
+                    status=f"Failed: {type(e).__name__}",
+                    error_detail=str(e),
                     file_name="",
                     local_path="",
                     file_size_bytes=0,
@@ -375,6 +485,7 @@ class DrawingService:
             qcode=item.qcode,
             custom_name=item.custom_name,
             status="Failed: Max retries exceeded",
+            error_detail="Exceeded max retry attempts after authentication / payload errors.",
         )
 
     def execute_batch(
@@ -389,6 +500,8 @@ class DrawingService:
         """
         start_time = time.time()
         total_requested = len(items)
+        logger.info("=== [BATCH START] Starting batch download of %d item(s) ===", total_requested)
+
         if total_requested == 0:
             return BatchDownloadSummary(
                 total_requested=0,
@@ -402,24 +515,26 @@ class DrawingService:
         try:
             self.get_session()
         except SSOConnectionRefusedError as e:
-            logger.error("SSO Connection failed: %s", e)
+            err_msg = str(e)
+            logger.error("[BATCH ERROR] SSO Connection failed: %s", err_msg)
             return BatchDownloadSummary(
                 total_requested=total_requested,
                 total_downloaded=0,
                 total_failed=total_requested,
                 results=[],
-                error_message=str(e),
-                elapsed_seconds=time.time() - start_time,
+                error_message=err_msg,
+                elapsed_seconds=round(time.time() - start_time, 2),
             )
         except Exception as e:
-            logger.error("Auth initialization failed: %s", e)
+            err_msg = f"Authentication initialization failed: {e}"
+            logger.exception("[BATCH ERROR] %s", err_msg)
             return BatchDownloadSummary(
                 total_requested=total_requested,
                 total_downloaded=0,
                 total_failed=total_requested,
                 results=[],
-                error_message=f"Authentication Failed: {e}",
-                elapsed_seconds=time.time() - start_time,
+                error_message=err_msg,
+                elapsed_seconds=round(time.time() - start_time, 2),
             )
 
         results: List[DownloadResult] = []
@@ -428,7 +543,7 @@ class DrawingService:
 
         for i, item in enumerate(items):
             if cancel_check and cancel_check():
-                logger.info("Batch download cancelled by user at item %d/%d", i + 1, total_requested)
+                logger.warning("[BATCH CANCELLED] Stopped by user at item %d/%d", i + 1, total_requested)
                 break
 
             res = self.process_item(item, download_dir)
@@ -445,7 +560,7 @@ class DrawingService:
                 except Exception as cb_err:
                     logger.debug("Progress callback error: %s", cb_err)
 
-        return BatchDownloadSummary(
+        summary = BatchDownloadSummary(
             total_requested=total_requested,
             total_downloaded=downloaded_count,
             total_failed=failed_count,
@@ -453,16 +568,24 @@ class DrawingService:
             error_message=None,
             elapsed_seconds=round(time.time() - start_time, 2),
         )
+        logger.info(
+            "=== [BATCH COMPLETE] Completed in %.2fs: %d downloaded, %d failed ===",
+            summary.elapsed_seconds,
+            downloaded_count,
+            failed_count,
+        )
+        return summary
 
     # ------------------ Parsing Helpers ------------------
 
     def _parse_search_response(self, resp: requests.Response, qcode: str, fab: str) -> List[DrawingRecord]:
-        """Parses FDM search response from either JSON or HTML table."""
+        """Parses FDM search response from either JSON or HTML table with diagnostic logging."""
         records: List[DrawingRecord] = []
 
         # Try JSON
         try:
             data = resp.json()
+            logger.debug("[PARSE] FDM search returned valid JSON. Type: %s", type(data).__name__)
             items_list = []
             if isinstance(data, list):
                 items_list = data
@@ -487,13 +610,17 @@ class DrawingService:
                     if rec.drawing_oid:
                         records.append(rec)
             if records:
+                logger.info("[PARSE] Extracted %d records from JSON response", len(records))
                 return records
         except (ValueError, json.JSONDecodeError):
-            pass
+            logger.debug("[PARSE] Response is not JSON, parsing as HTML...")
 
         # Parse HTML table
         soup = BeautifulSoup(resp.text, "html.parser")
-        for tr in soup.find_all("tr"):
+        rows = soup.find_all("tr")
+        logger.debug("[PARSE] Found %d <tr> tags in HTML response", len(rows))
+
+        for tr in rows:
             attrs = tr.attrs
             drawing_oid = attrs.get("drawingoid") or attrs.get("data-drawing-oid") or attrs.get("oid")
             type_name = attrs.get("typename") or attrs.get("data-type") or ""
@@ -533,6 +660,7 @@ class DrawingService:
                     )
                 )
 
+        logger.info("[PARSE] Extracted %d records from HTML table rows", len(records))
         return records
 
     @staticmethod
