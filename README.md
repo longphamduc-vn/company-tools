@@ -10,6 +10,8 @@ Kho lưu trữ tập trung (Monorepo) các công cụ, tiện ích phần mềm 
 | :--- | :--- | :--- | :--- |
 | **SCADA-TraceLog** | [`scada-tracelog/`](./scada-tracelog) | Giám sát & tạo nhật ký thay đổi thông số máy SCADA (Change Log), bẫy lỗi mất dữ liệu do giới hạn 256 cột của Excel .xls cũ. | Python, Tkinter/TTK, Pandas |
 | **EMS Nexacro Extension** | [`ems-nexacro-extension/`](./ems-nexacro-extension) | Tiện ích mở rộng trình duyệt (Browser Extension) hỗ trợ tự động hóa và tối ưu giao diện EMS Nexacro. | JavaScript, Chrome Extensions API |
+| **Google Keep Transfer Extension** | [`google-keep-transfer-extension/`](./google-keep-transfer-extension) | Tự động chia nhỏ (chunk) và truyền tải/tải xuống file văn bản qua Google Keep. | JavaScript, Chrome Extensions API |
+| **Google Forms Collector Extension** | [`google-forms-collector-extension/`](./google-forms-collector-extension) | Tự động thu thập câu hỏi, đáp án, điểm số từ Google Forms, hỗ trợ gom nhiều trang và xuất ra Word, Markdown, Excel/CSV, JSON, Aiken. | JavaScript, Chrome Extensions API |
 | **Image Batch Translator** | [`image-batch-translator/`](./image-batch-translator) | Nhận diện chữ (Google Lens OCR), dịch thuật hàng loạt (Google Translate), xóa chữ cũ với màu nền median, vẽ chữ dịch và tự động đổi tên file. | Python, Tkinter, Pillow, Chrome-Lens-Py, Deep-Translator |
 | **Drawing Vault** | [`drawing-vault/`](./drawing-vault) | Tìm kiếm, tải hàng loạt và duyệt xem bản vẽ kỹ thuật (Batch Image Viewer) từ Vault nội bộ (FDM/Windchill) qua SSO. | Python, Tkinter, Pillow, Requests |
 
@@ -36,7 +38,13 @@ Mỗi dự án con được tổ chức độc lập trong thư mục riêng kè
 - Bật **Developer mode** (Chế độ dành cho nhà phát triển).
 - Chọn **Load unpacked** (Tải tiện ích đã giải nén) và trỏ tới thư mục `ems-nexacro-extension/`.
 
-### 3. Image Batch Translator (Dịch thuật ảnh & Đổi tên hàng loạt)
+### 3. Google Forms Collector Extension (Thu thập câu hỏi Google Form)
+- Mở trình duyệt Chrome / Edge và truy cập `chrome://extensions/`.
+- Bật **Developer mode** (Chế độ dành cho nhà phát triển).
+- Chọn **Load unpacked** (Tải tiện ích đã giải nén) và trỏ tới thư mục `google-forms-collector-extension/`.
+- Mở bất kỳ Google Form nào, bấm **"Thu thập trang này"** hoặc **"Duyệt mọi trang"** để trích xuất đề thi.
+
+### 4. Image Batch Translator (Dịch thuật ảnh & Đổi tên hàng loạt)
 - Di chuyển vào thư mục:
   ```bash
   cd image-batch-translator

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Google Forms Question Collector</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-main">
+      <div class="logo-wrapper">
+        <img src="icons/icon32.png" alt="Logo" class="app-logo">
+        <div>
+          <h1 class="app-title">Forms Collector</h1>
+          <p class="app-subtitle" id="form-title" title="Chưa kết nối biểu mẫu">Chưa phát hiện Google Form</p>
+        </div>
+      </div>
+      <div class="stats-chips">
+        <span class="chip chip-purple" id="stat-count" title="Tổng số câu hỏi đã thu thập">0 câu</span>
+        <span class="chip chip-blue" id="stat-page" title="Trang hiện tại">-</span>
+      </div>
+    </div>
+
+    <!-- Quick Action Bar: Unified Single Crawler Button + Quick Tools -->
+    <div class="action-bar">
+      <button class="btn btn-crawl" id="btn-autocrawl" style="flex: 1; padding: 11px 16px; font-weight: 700; font-size: 13.5px;" title="Tự động duyệt qua tất cả các trang, gom câu hỏi và chuyển đổi ảnh Base64">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+        <span id="crawl-btn-text">⚡ Tự động thu thập tất cả các trang</span>
+      </button>
+
+      <button class="btn btn-outline" id="btn-quick-copy" title="Sao chép toàn bộ câu hỏi vào Clipboard">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+      </button>
+
+      <button class="btn btn-danger-subtle" id="btn-clear" title="Xóa toàn bộ câu hỏi đã thu thập">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+      </button>
+    </div>
+
+    <!-- Secondary Action Bar (Web App & Gemini Prompt) -->
+    <div class="action-bar" style="margin-top: 8px;">
+      <button class="btn btn-outline" id="btn-open-quiz-app" style="flex: 1; border-color: var(--primary); color: var(--primary); font-weight: 700;" title="Mở trang web tĩnh để ôn tập, làm bài, kiểm tra đúng sai và xem giải thích">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72L12 15l5-2.73v3.72z"/></svg>
+        <span>Mở Web Ôn Tập (Quiz App)</span>
+      </button>
+      <button class="btn btn-gemini" id="btn-gemini-prompt" style="flex: 1; background: linear-gradient(135deg, #1a73e8, #8e24aa); color: #ffffff;" title="Sao chép câu hỏi và lệnh mẫu để nhờ Gemini Chat điền đáp án & giải thích">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+        <span>Copy Prompt cho Gemini</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="nav-tabs">
+    <button class="tab-btn active" data-tab="tab-questions">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
+      <span>Danh sách câu hỏi</span>
+      <span class="badge" id="tab-count-badge">0</span>
+    </button>
+    <button class="tab-btn" data-tab="tab-export">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2v9.67z"/></svg>
+      <span>Xuất dữ liệu</span>
+    </button>
+    <button class="tab-btn" data-tab="tab-settings">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+      <span>Cài đặt</span>
+    </button>
+  </nav>
+
+  <!-- Main Content Area -->
+  <main class="tab-content-wrapper">
+    <!-- TAB 1: Questions List -->
+    <section class="tab-pane active" id="tab-questions">
+      <div class="search-filter-bar">
+        <div class="search-box">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+          <input type="text" id="input-search" placeholder="Tìm kiếm câu hỏi hoặc đáp án...">
+        </div>
+        <select id="select-filter-section" class="filter-select">
+          <option value="all">Tất cả phần / bài</option>
+        </select>
+      </div>
+
+      <!-- Question Cards List -->
+      <div class="questions-list" id="questions-container">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <!-- Empty State -->
+      <div class="empty-state" id="empty-state">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="#d1c4e9"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+        <h3>Chưa có câu hỏi nào</h3>
+        <p>Mở trang Google Form chứa câu hỏi và bấm nút <strong>"Thu thập trang này"</strong> hoặc <strong>"Duyệt mọi trang"</strong> ở trên.</p>
+      </div>
+    </section>
+
+    <!-- TAB 2: Export Data -->
+    <section class="tab-pane" id="tab-export">
+      <div class="export-controls">
+        <div class="format-chips">
+          <label class="format-chip active">
+            <input type="radio" name="export-format" value="text" checked>
+            <span>Văn bản (.txt)</span>
+          </label>
+          <label class="format-chip">
+            <input type="radio" name="export-format" value="markdown">
+            <span>Markdown (.md)</span>
+          </label>
+          <label class="format-chip">
+            <input type="radio" name="export-format" value="csv">
+            <span>Excel / CSV</span>
+          </label>
+          <label class="format-chip">
+            <input type="radio" name="export-format" value="json">
+            <span>JSON</span>
+          </label>
+          <label class="format-chip">
+            <input type="radio" name="export-format" value="aiken">
+            <span>Aiken (Moodle)</span>
+          </label>
+          <label class="format-chip">
+            <input type="radio" name="export-format" value="html">
+            <span>Đề thi In (HTML)</span>
+          </label>
+        </div>
+
+        <div class="export-options-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="chk-exp-points" checked>
+            <span>Hiển thị điểm</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="chk-exp-sections" checked>
+            <span>Gộp theo bài / mục</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="chk-exp-answers" checked>
+            <span>Kèm đáp án đúng</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="chk-exp-exclude-personal" checked>
+            <span>Bỏ thông tin cá nhân</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Live Preview -->
+      <div class="preview-wrapper">
+        <div class="preview-header">
+          <span>Xem trước dữ liệu xuất</span>
+          <span class="preview-info" id="preview-info">0 dòng</span>
+        </div>
+        <textarea id="export-preview" class="export-preview" readonly></textarea>
+      </div>
+
+      <div class="export-action-footer">
+        <button class="btn btn-outline" id="btn-copy-export">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+          <span>Sao chép vào Clipboard</span>
+        </button>
+
+        <button class="btn btn-primary" id="btn-download-export">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+          <span>Tải file xuống</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- TAB 3: Settings -->
+    <section class="tab-pane" id="tab-settings">
+      <div class="settings-group">
+        <h3 class="settings-title">Cấu hình thu thập tự động</h3>
+
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-name">Tự động tích lũy khi đổi trang</span>
+            <span class="setting-desc">Tự động thu thập câu hỏi mới khi bạn bấm "Tiếp" hoặc chuyển trang thủ công trên biểu mẫu.</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="set-auto-accumulate" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-name">Hiện nút tiện ích nổi trên biểu mẫu</span>
+            <span class="setting-desc">Hiển thị nút tròn nổi ở góc dưới trang Google Forms để thao tác nhanh.</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="set-floating-widget" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-name">Tự động chọn tạm câu hỏi bắt buộc (*)</span>
+            <span class="setting-desc">Chỉ tự động chọn tạm duy nhất các câu có dấu sao đỏ (*) để không bị kẹt khi qua trang (Các câu hỏi thường không có * tuyệt đối giữ nguyên).</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="set-bypass-required" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-name">Tự động bấm "Tiếp" sau khi quét trang (Auto Next)</span>
+            <span class="setting-desc">Tự động chuyển sang trang tiếp theo ngay sau khi bạn bấm "Thu thập".</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="set-auto-next-page">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <h3 class="settings-title">Định dạng hiển thị đáp án</h3>
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-name">Ký hiệu tiền tố đáp án</span>
+            <span class="setting-desc">Chọn kiểu ký tự cho các lựa chọn trắc nghiệm.</span>
+          </div>
+          <select id="set-option-prefix" class="filter-select">
+            <option value="letter">A, B, C, D...</option>
+            <option value="number">1, 2, 3, 4...</option>
+            <option value="bullet">• Gạch đầu dòng</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <h3 class="settings-title">Biểu mẫu đã lưu trữ</h3>
+        <div id="saved-forms-list" class="saved-forms-list">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Toast Notification inside popup -->
+  <div class="popup-toast" id="popup-toast"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

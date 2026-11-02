@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quiz Master - Ứng Dụng Ôn Luyện & Thi Thử</title>
+  <style>
+    :root {
+      --primary: #673ab7;
+      --primary-hover: #5e35b1;
+      --primary-light: #ede7f6;
+      --primary-dark: #311b92;
+      --success: #00c853;
+      --success-light: #e8f5e9;
+      --success-dark: #1b5e20;
+      --danger: #d50000;
+      --danger-light: #ffebee;
+      --danger-dark: #b71c1c;
+      --warning: #ff9100;
+      --warning-light: #fff3e0;
+      --bg: #f8f9fa;
+      --surface: #ffffff;
+      --border: #e0e0e0;
+      --text: #202124;
+      --text-sub: #5f6368;
+      --radius: 12px;
+      --shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    [data-theme="dark"] {
+      --bg: #121212;
+      --surface: #1e1e1e;
+      --border: #333333;
+      --text: #e8eaed;
+      --text-sub: #9aa0a6;
+      --primary-light: #2c1a4d;
+      --success-light: #1b3320;
+      --danger-light: #3a1a1a;
+      --warning-light: #3e2712;
+      --shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font);
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      transition: background-color 0.2s, color 0.2s;
+    }
+
+    /* Header */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    }
+    .header-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: bold;
+      font-size: 18px;
+    }
+    .brand-title {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--primary);
+    }
+    .brand-subtitle {
+      font-size: 12px;
+      color: var(--text-sub);
+      max-width: 380px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-outline { background: transparent; border-color: var(--border); color: var(--text); }
+    .btn-outline:hover { background: var(--primary-light); border-color: var(--primary); color: var(--primary); }
+    .btn-gemini {
+      background: linear-gradient(135deg, #1a73e8, #8e24aa);
+      color: #ffffff;
+      border: none;
+    }
+    .btn-gemini:hover {
+      background: linear-gradient(135deg, #1557b0, #6a1b9a);
+      box-shadow: 0 2px 8px rgba(142, 36, 170, 0.4);
+    }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:hover { background: var(--danger-dark); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-success:hover { background: var(--success-dark); }
+
+    /* Navigation Modes Bar */
+    .modes-bar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 6px 24px;
+    }
+    .modes-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      overflow-x: auto;
+    }
+    .mode-tabs {
+      display: flex;
+      gap: 4px;
+    }
+    .mode-tab {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background: transparent;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-sub);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .mode-tab:hover { color: var(--primary); background: var(--primary-light); }
+    .mode-tab.active {
+      color: #ffffff;
+      background: var(--primary);
+    }
+
+    .tools-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      max-width: 1200px;
+      width: 100%;
+      margin: 20px auto;
+      padding: 0 20px;
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 24px;
+    }
+
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+    }
+
+    /* Question View Area */
+    .content-area {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px;
+      position: relative;
+    }
+
+    /* Question Header */
+    .q-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .q-badges {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 6px;
+    }
+    .badge-primary { background: var(--primary-light); color: var(--primary); }
+    .badge-sec { background: #e3f2fd; color: #1976d2; }
+    .badge-star { background: var(--warning-light); color: var(--warning); cursor: pointer; }
+
+    /* Question Body */
+    .q-title {
+      font-size: 17px;
+      font-weight: 700;
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+    .q-image-wrap {
+      margin: 16px 0;
+      text-align: center;
+      background: #fafafa;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .q-image {
+      max-width: 100%;
+      max-height: 340px;
+      border-radius: 6px;
+      cursor: zoom-in;
+      transition: transform 0.2s;
+    }
+
+    /* Options Grid / List */
+    .options-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin: 20px 0;
+    }
+    .option-btn {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 12px;
+      padding: 14px 18px;
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 14px;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      line-height: 1.4;
+      width: 100%;
+    }
+    .option-btn:hover:not(:disabled) {
+      border-color: var(--primary);
+      background: var(--primary-light);
+    }
+    .option-prefix {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #eee;
+      color: #333;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+    .option-text { flex: 1; }
+    .option-img {
+      max-height: 40px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      margin-left: 8px;
+    }
+
+    /* Option States */
+    .option-btn.selected {
+      border-color: var(--primary);
+      background: var(--primary-light);
+    }
+    .option-btn.selected .option-prefix {
+      background: var(--primary);
+      color: #fff;
+    }
+    .option-btn.correct {
+      border-color: var(--success) !important;
+      background: var(--success-light) !important;
+      color: var(--success-dark) !important;
+      font-weight: 600;
+    }
+    .option-btn.correct .option-prefix {
+      background: var(--success) !important;
+      color: #fff !important;
+    }
+    .option-btn.wrong {
+      border-color: var(--danger) !important;
+      background: var(--danger-light) !important;
+      color: var(--danger-dark) !important;
+    }
+    .option-btn.wrong .option-prefix {
+      background: var(--danger) !important;
+      color: #fff !important;
+    }
+
+    /* Explanation Box */
+    .explanation-box {
+      margin-top: 16px;
+      padding: 16px;
+      background: var(--success-light);
+      border-left: 4px solid var(--success);
+      border-radius: 8px;
+      font-size: 13px;
+      animation: fadeIn 0.25s ease;
+    }
+    .explanation-title {
+      font-weight: 700;
+      color: var(--success-dark);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .explanation-content {
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    /* Nav Buttons */
+    .card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      margin-top: 8px;
+    }
+
+    /* Sidebar / Palette */
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .palette-card {
+      padding: 18px;
+    }
+    .palette-header {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .palette-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      max-height: 380px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .palette-btn {
+      height: 36px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      transition: all 0.15s ease;
+    }
+    .palette-btn:hover { border-color: var(--primary); }
+    .palette-btn.current { outline: 2px solid var(--primary); }
+    .palette-btn.answered { background: #e0e0e0; }
+    .palette-btn.correct { background: var(--success); color: #fff; border-color: var(--success); }
+    .palette-btn.wrong { background: var(--danger); color: #fff; border-color: var(--danger); }
+    .palette-btn.starred::after {
+      content: "★";
+      position: absolute;
+      top: -2px;
+      right: 2px;
+      color: var(--warning);
+      font-size: 10px;
+    }
+
+    /* Stats Widget */
+    .stats-widget {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .stat-item {
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+    }
+    .stat-val { font-size: 18px; font-weight: 700; color: var(--primary); }
+    .stat-label { font-size: 11px; color: var(--text-sub); }
+
+    /* Modal / Popups */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+      backdrop-filter: blur(4px);
+    }
+    .modal {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 24px;
+      max-width: 600px;
+      width: 100%;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .modal-title { font-size: 16px; font-weight: 700; }
+    .modal-body { flex: 1; overflow-y: auto; margin-bottom: 16px; }
+    .json-textarea {
+      width: 100%;
+      height: 240px;
+      font-family: monospace;
+      font-size: 12px;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--text);
+      resize: vertical;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #202124;
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+      z-index: 2000;
+      animation: fadeIn 0.2s ease;
+    }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* Flashcard Mode */
+    .flashcard {
+      min-height: 280px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 30px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .flashcard-hint { font-size: 12px; color: var(--text-sub); margin-top: 16px; }
+
+    /* Study Sheet */
+    .sheet-item {
+      padding: 16px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .sheet-title { font-weight: 700; font-size: 15px; margin-bottom: 8px; }
+    .sheet-ans { color: var(--success-dark); font-weight: 600; font-size: 13px; }
+    .sheet-explain { font-size: 12px; color: var(--text-sub); margin-top: 4px; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-icon">Q</div>
+        <div>
+          <div class="brand-title">Quiz Master</div>
+          <div class="brand-subtitle" id="top-form-title">Chưa tải đề thi nào</div>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button class="btn btn-gemini" id="btn-copy-gemini-prompt" title="Sao chép toàn bộ đề kèm câu lệnh để nhờ Gemini chat box điền đáp án & giải thích">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+          <span>Copy Prompt cho Gemini</span>
+        </button>
+
+        <button class="btn btn-outline" id="btn-import-modal">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
+          <span>Import JSON</span>
+        </button>
+
+        <button class="btn btn-outline" id="btn-export-json">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+          <span>Xuất JSON</span>
+        </button>
+
+        <button class="btn btn-outline" id="btn-toggle-theme" title="Chuyển chế độ Sáng/Tối">
+          🌙
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Modes & Controls Bar -->
+  <div class="modes-bar">
+    <div class="modes-inner">
+      <div class="mode-tabs">
+        <button class="mode-tab active" data-mode="practice">
+          <span>🎯 Luyện tập</span>
+        </button>
+        <button class="mode-tab" data-mode="exam">
+          <span>⏱️ Thi thử</span>
+        </button>
+        <button class="mode-tab" data-mode="flashcard">
+          <span>🗂️ Thẻ ghi nhớ</span>
+        </button>
+        <button class="mode-tab" data-mode="sheet">
+          <span>📖 Bảng đáp án</span>
+        </button>
+      </div>
+
+      <div class="tools-row">
+        <button class="btn btn-outline" id="btn-shuffle" title="Trộn ngẫu nhiên câu hỏi">
+          <span>🔀 Trộn đề</span>
+        </button>
+        <select id="filter-section-select" class="btn btn-outline" style="outline: none;">
+          <option value="all">Tất cả các phần</option>
+        </select>
+        <button class="btn btn-outline" id="btn-reset-progress" title="Xóa lịch sử và làm lại từ đầu">
+          <span>🔄 Làm lại</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <main>
+    <!-- Left Column: Question Card / Sheet View -->
+    <div class="content-area" id="main-content-area">
+      <!-- Question Card (rendered via JS) -->
+      <div class="card" id="question-card">
+        <div class="q-meta">
+          <div class="q-badges">
+            <span class="badge badge-primary" id="q-index-badge">Câu 1 / 10</span>
+            <span class="badge badge-sec" id="q-section-badge">Phần 1</span>
+            <span class="badge" id="q-points-badge">1 điểm</span>
+          </div>
+          <div class="badge badge-star" id="btn-star-question">☆ Đánh dấu</div>
+        </div>
+
+        <div class="q-title" id="q-title-text">Nội dung câu hỏi...</div>
+
+        <div class="q-image-wrap" id="q-image-container" style="display: none;">
+          <img src="" class="q-image" id="q-image-el" alt="Hình ảnh câu hỏi" />
+        </div>
+
+        <div class="options-list" id="options-container">
+          <!-- Options rendered dynamically -->
+        </div>
+
+        <!-- Explanation Accordion -->
+        <div class="explanation-box" id="explanation-box" style="display: none;">
+          <div class="explanation-title">
+            <span>💡 Giải thích chi tiết</span>
+          </div>
+          <div class="explanation-content" id="explanation-text">
+            Chưa có giải thích cho câu hỏi này. Bạn có thể bấm "Copy Prompt cho Gemini" để nhờ AI giải thích!
+          </div>
+        </div>
+
+        <div class="card-footer">
+          <button class="btn btn-outline" id="btn-prev-q">← Câu trước</button>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-outline" id="btn-show-answer">Xem đáp án</button>
+            <button class="btn btn-primary" id="btn-next-q">Câu tiếp →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Study Sheet Mode View -->
+      <div class="card" id="sheet-card" style="display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <h2 style="font-size: 16px;">Tất cả câu hỏi & Đáp án</h2>
+          <button class="btn btn-primary" id="btn-print-sheet">🖨️ In tài liệu / Lưu PDF</button>
+        </div>
+        <div id="sheet-list-container"></div>
+      </div>
+    </div>
+
+    <!-- Right Column: Question Palette & Stats -->
+    <aside class="sidebar">
+      <div class="card palette-card">
+        <div class="stats-widget">
+          <div class="stat-item">
+            <div class="stat-val" id="stat-correct-count" style="color: var(--success);">0</div>
+            <div class="stat-label">Câu đúng</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-val" id="stat-wrong-count" style="color: var(--danger);">0</div>
+            <div class="stat-label">Câu sai</div>
+          </div>
+        </div>
+
+        <div class="palette-header">
+          <span>Danh sách câu hỏi</span>
+          <span style="font-size: 11px; color: var(--text-sub);" id="palette-progress-text">0/0</span>
+        </div>
+
+        <div class="palette-grid" id="palette-grid">
+          <!-- Numbers 1..N rendered dynamically -->
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Import Modal -->
+  <div class="modal-overlay" id="import-modal" style="display: none;">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">Import Dữ Liệu JSON Đề Thi</div>
+        <button class="btn btn-outline" id="btn-close-import" style="padding: 4px 8px;">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 12px; color: var(--text-sub); margin-bottom: 10px;">
+          Dán nội dung JSON đã được Gemini giải đáp (hoặc kéo thả file .json vào đây):
+        </p>
+        <textarea class="json-textarea" id="import-json-input" placeholder='Dán mã JSON tại đây... (Hỗ trợ cả trường correctAnswer và explanation từ Gemini)'></textarea>
+        <div style="margin-top: 12px; display: flex; align-items: center; justify-content: space-between;">
+          <input type="file" id="file-input-json" accept=".json,.txt" style="font-size: 12px;" />
+        </div>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <button class="btn btn-outline" id="btn-cancel-import">Hủy</button>
+        <button class="btn btn-primary" id="btn-confirm-import">Tải Đề Thi Lên</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div class="toast" id="app-toast" style="display: none;"></div>
+
+  <script src="quiz_app.js"></script>
+</body>
+</html>
