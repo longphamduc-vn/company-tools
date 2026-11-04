@@ -40,6 +40,11 @@ class RecorderConfig:
     auto_open_report: bool = True
     dark_mode_report: bool = True
     
+    # Window behavior and capture exclusion
+    exclude_from_screen_capture: bool = True  # Automatically exclude toolbar from screenshots using Windows API
+    always_on_top: bool = True  # Keep toolbar always on top of other windows
+    auto_minimize_on_record: bool = False  # Minimize toolbar to taskbar when recording begins
+
     # Hotkeys
     hotkey_start_pause: str = "<F8>"
     hotkey_stop: str = "<F10>"

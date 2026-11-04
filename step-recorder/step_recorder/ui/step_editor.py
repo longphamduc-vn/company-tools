@@ -19,6 +19,7 @@ from ..annotator import annotate_screenshot
 from ..capture import ScreenCapture
 from ..config import RecorderConfig
 from ..exporter import ReportExporter
+from ..window_info import exclude_window_from_capture
 
 
 class StepEditorWindow:
@@ -62,6 +63,7 @@ class StepEditorWindow:
         if self.steps:
             self._select_step(0)
 
+        self.window.after(50, lambda: exclude_window_from_capture(self.window))
         self.window.focus_force()
 
     def _build_ui(self) -> None:

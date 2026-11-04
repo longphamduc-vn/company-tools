@@ -212,3 +212,32 @@ def _get_macos_window_info(cursor_pos: Optional[Tuple[int, int]] = None) -> Wind
     except Exception:
         pass
     return WindowDetails(title="macOS Window", process_name="app")
+
+
+def exclude_window_from_capture(window) -> bool:
+    """
+    Exclude a Tkinter window from Windows screen capture (WDA_EXCLUDEFROMCAPTURE = 0x00000011).
+    Supported natively on Windows 10 (version 2004 / build 19041) and Windows 11.
+    The window remains completely visible to the human user on monitor, but becomes
+    completely invisible to any screenshot or recording tool (e.g. mss, BitBlt),
+    preventing it from overlaying or blocking desktop content in recorded steps.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        window.update_idletasks()
+        frame_hex = window.wm_frame()
+        hwnd = int(frame_hex, 16) if frame_hex else window.winfo_id()
+        if hwnd:
+            ret = ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x00000011)
+            if ret != 0:
+                return True
+        root_hwnd = ctypes.windll.user32.GetAncestor(window.winfo_id(), 2)  # GA_ROOT
+        if root_hwnd:
+            ret = ctypes.windll.user32.SetWindowDisplayAffinity(root_hwnd, 0x00000011)
+            return bool(ret)
+    except Exception:
+        pass
+    return False
+

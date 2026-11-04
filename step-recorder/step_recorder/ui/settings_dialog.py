@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from ..config import RecorderConfig
+from ..window_info import exclude_window_from_capture
 
 
 class SettingsDialog:
@@ -29,6 +30,8 @@ class SettingsDialog:
 
         self._build_ui()
         self._apply_geometry()
+
+        self.window.after(50, lambda: exclude_window_from_capture(self.window))
 
         # Keyboard shortcuts
         self.window.bind("<Control-s>", lambda e: self._save())
@@ -331,6 +334,15 @@ class SettingsDialog:
         self.open_var = tk.BooleanVar(value=self.config.auto_open_report)
         self._create_checkbox(sec4, "Tự động mở báo cáo trong trình duyệt web sau khi lưu", self.open_var)
 
+        self.exclude_var = tk.BooleanVar(value=getattr(self.config, "exclude_from_screen_capture", True))
+        self._create_checkbox(sec4, "Tự động ẩn thanh công cụ khỏi ảnh chụp màn hình (Windows API)", self.exclude_var)
+
+        self.topmost_var = tk.BooleanVar(value=getattr(self.config, "always_on_top", True))
+        self._create_checkbox(sec4, "Ghim thanh công cụ luôn hiển thị trên cùng (Always on top)", self.topmost_var)
+
+        self.minimize_var = tk.BooleanVar(value=getattr(self.config, "auto_minimize_on_record", False))
+        self._create_checkbox(sec4, "Tự động thu nhỏ thanh công cụ khi bắt đầu ghi hình (Auto-minimize)", self.minimize_var)
+
     def _create_card(self, parent: tk.Frame, title: str) -> tk.Frame:
         """Create a rounded card-like section with title."""
         card = tk.Frame(parent, bg="#1e293b", padx=14, pady=10, relief=tk.FLAT)
@@ -445,6 +457,9 @@ class SettingsDialog:
             self.config.embed_images_in_html = bool(self.embed_var.get())
             self.config.create_zip_package = bool(self.zip_var.get())
             self.config.auto_open_report = bool(self.open_var.get())
+            self.config.exclude_from_screen_capture = bool(self.exclude_var.get())
+            self.config.always_on_top = bool(self.topmost_var.get())
+            self.config.auto_minimize_on_record = bool(self.minimize_var.get())
 
             # 5. Save to disk
             self.config.save()

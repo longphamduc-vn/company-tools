@@ -24,6 +24,7 @@ if sys.platform == "win32":
 from ..config import RecorderConfig
 from ..recorder import RecordingEngine
 from ..exporter import ReportExporter
+from ..window_info import exclude_window_from_capture
 from .comment_dialog import CommentDialog
 from .settings_dialog import SettingsDialog
 from .step_editor import StepEditorWindow
@@ -78,14 +79,36 @@ class MainWindow:
 
     def _init_window(self) -> None:
         self.root.title("Python Step Recorder")
-        self.root.attributes("-topmost", True)
+        self.root.attributes("-topmost", getattr(self.config, "always_on_top", True))
         self.root.configure(bg="#0f172a")
+
+        # Exclude this toolbar from screen captures using Windows WDA_EXCLUDEFROMCAPTURE API
+        self.root.after(80, self._apply_capture_exclusion)
+        self.root.bind("<Map>", lambda e: self.root.after(40, self._apply_capture_exclusion))
+
+    def _apply_capture_exclusion(self) -> None:
+        if getattr(self.config, "exclude_from_screen_capture", True):
+            exclude_window_from_capture(self.root)
+
+    def _toggle_always_on_top(self) -> None:
+        """Toggle floating toolbar between Always-On-Top and normal desktop window."""
+        new_val = not getattr(self.config, "always_on_top", True)
+        self.config.always_on_top = new_val
+        self.root.attributes("-topmost", new_val)
+        if new_val:
+            self.pin_btn.configure(text="📌 On Top", fg="#38bdf8")
+        else:
+            self.pin_btn.configure(text="📍 Normal", fg="#94a3b8")
+        try:
+            self.config.save()
+        except Exception:
+            pass
 
     def _build_ui(self) -> None:
         container = tk.Frame(self.root, bg="#0f172a", padx=12, pady=10)
         container.pack(fill=tk.BOTH, expand=True)
 
-        # Top row: 3 distinct columns (Left: status, Center: steps count, Right: live timer)
+        # Top row: 3 distinct columns (Left: status, Center: steps count, Right: pin toggle & live timer)
         top_row = tk.Frame(container, bg="#0f172a")
         top_row.pack(fill=tk.X, pady=(0, 8))
         top_row.columnconfigure(0, weight=1)
@@ -124,15 +147,33 @@ class MainWindow:
         )
         self.steps_lbl.grid(row=0, column=1)
 
-        # Right: Live timer
+        # Right: Pin toggle & Live timer
+        right_box = tk.Frame(top_row, bg="#0f172a")
+        right_box.grid(row=0, column=2, sticky="e")
+
+        self.pin_btn = tk.Button(
+            right_box,
+            text="📌 On Top" if getattr(self.config, "always_on_top", True) else "📍 Normal",
+            command=self._toggle_always_on_top,
+            bg="#1e293b",
+            fg="#38bdf8" if getattr(self.config, "always_on_top", True) else "#94a3b8",
+            activebackground="#334155",
+            relief=tk.FLAT,
+            font=("Segoe UI", 8),
+            padx=5,
+            pady=0,
+            cursor="hand2"
+        )
+        self.pin_btn.pack(side=tk.LEFT, padx=(0, 8))
+
         self.timer_lbl = tk.Label(
-            top_row,
+            right_box,
             text="00:00",
             font=("Consolas", 11, "bold"),
             bg="#0f172a",
             fg="#38bdf8"
         )
-        self.timer_lbl.grid(row=0, column=2, sticky="e")
+        self.timer_lbl.pack(side=tk.LEFT)
 
         # Bottom row: 6 responsive buttons sharing width equally via grid
         btn_row = tk.Frame(container, bg="#0f172a")
@@ -268,13 +309,18 @@ class MainWindow:
         self._timer_running = True
         self._tick_timer()
 
+        if getattr(self.config, "auto_minimize_on_record", False):
+            self.root.after(200, self.root.iconify)
+
     def _cmd_toggle_pause(self) -> None:
+        self.root.deiconify()
         if self.engine.state == "recording":
             self.engine.pause_recording()
         elif self.engine.state == "paused":
             self.engine.resume_recording()
 
     def _cmd_add_comment(self) -> None:
+        self.root.deiconify()
         CommentDialog(self.root, on_submit=self._on_comment_submitted)
 
     def _on_comment_submitted(self, comment_text: str, rect) -> None:
@@ -282,6 +328,7 @@ class MainWindow:
 
     def _cmd_open_editor(self) -> None:
         """Open the interactive Step Reviewer & Editor."""
+        self.root.deiconify()
         if not self.engine.steps:
             messagebox.showinfo("Review Steps", "Chưa có bước nào được ghi lại để chỉnh sửa.")
             return
@@ -300,6 +347,7 @@ class MainWindow:
         self._reset_ui()
 
     def _cmd_stop(self) -> None:
+        self.root.deiconify()
         self._timer_running = False
         self.engine.stop_recording()
 

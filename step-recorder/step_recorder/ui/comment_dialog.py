@@ -8,6 +8,7 @@ from tkinter import ttk
 from typing import Optional, Tuple, Callable
 from PIL import Image
 
+from ..window_info import exclude_window_from_capture
 from .snipper import ScreenSnipper
 
 
@@ -31,6 +32,8 @@ class CommentDialog:
 
         self._build_ui()
         self._apply_geometry()
+
+        self.window.after(50, lambda: exclude_window_from_capture(self.window))
 
         try:
             self.window.grab_set()
