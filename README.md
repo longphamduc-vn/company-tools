@@ -14,6 +14,7 @@ Kho lưu trữ tập trung (Monorepo) các công cụ, tiện ích phần mềm 
 | **Google Forms Collector Extension** | [`google-forms-collector-extension/`](./google-forms-collector-extension) | Tự động thu thập câu hỏi, đáp án, điểm số từ Google Forms, hỗ trợ gom nhiều trang và xuất ra Word, Markdown, Excel/CSV, JSON, Aiken. | JavaScript, Chrome Extensions API |
 | **Image Batch Translator** | [`image-batch-translator/`](./image-batch-translator) | Nhận diện chữ (Google Lens OCR), dịch thuật hàng loạt (Google Translate), xóa chữ cũ với màu nền median, vẽ chữ dịch và tự động đổi tên file. | Python, Tkinter, Pillow, Chrome-Lens-Py, Deep-Translator |
 | **Drawing Vault** | [`drawing-vault/`](./drawing-vault) | Tìm kiếm, tải hàng loạt và duyệt xem bản vẽ kỹ thuật (Batch Image Viewer) từ Vault nội bộ (FDM/Windchill) qua SSO. | Python, Tkinter, Pillow, Requests |
+| **Python Step Recorder** | [`step-recorder/`](./step-recorder) | Công cụ thay thế Windows Steps Recorder (PSR) mã nguồn mở: ghi lại từng bước thao tác chuột, bàn phím, chụp màn hình gắn chỉ điểm, xuất báo cáo HTML/Markdown/ZIP. | Python, Tkinter, Pillow, MSS, Pynput, Jinja2 |
 
 ---
 
@@ -58,7 +59,7 @@ Mỗi dự án con được tổ chức độc lập trong thư mục riêng kè
   python image_batch_translator.py
   ```
 
-### 4. Drawing Vault (Tải & Xem Bản Vẽ Tự Động)
+### 5. Drawing Vault (Tải & Xem Bản Vẽ Tự Động)
 - Di chuyển vào thư mục:
   ```bash
   cd drawing-vault
@@ -79,6 +80,24 @@ Mỗi dự án con được tổ chức độc lập trong thư mục riêng kè
 - Tải hàng loạt từ file danh sách:
   ```bash
   python main.py batch --file sample_data/sample_qcodes.txt
+  ```
+
+### 6. Python Step Recorder (Thay thế Windows Steps Recorder)
+- Di chuyển vào thư mục:
+  ```bash
+  cd step-recorder
+  ```
+- Cài đặt thư viện:
+  ```bash
+  pip install -r requirements.txt
+  ```
+- Khởi chạy thanh công cụ ghi hình nổi (Floating GUI):
+  ```bash
+  python run.py
+  ```
+- Hoặc ghi hình nhanh bằng dòng lệnh (CLI):
+  ```bash
+  python run.py --cli --title "Kiem thu quy trinh" --output ./recordings
   ```
 
 ---

@@ -1,0 +1,47 @@
+{
+  "session": {
+    "id": "sample_demo_recording",
+    "title": "Báo Cáo Mẫu Kiểm Thử Step Recorder",
+    "description": "Bản ghi tự động minh họa tính năng thay thế Windows Steps Recorder bằng Python.",
+    "start_time": "2026-11-04T10:18:33.908121",
+    "end_time": "2026-11-04T10:18:33.908136",
+    "duration": "00:00",
+    "os": "Linux WSL2 Ubuntu",
+    "screen_resolution": "1920x1200",
+    "total_steps": 2,
+    "apps_used": [
+      "bash",
+      "code"
+    ]
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-11-04 10:18:33.802",
+      "action_type": "left_click",
+      "description": "User Left Click at (450, 320) on [Step Recorder Setup]",
+      "window_title": "Terminal - step-recorder",
+      "process_name": "bash",
+      "cursor_x": 450,
+      "cursor_y": 320,
+      "highlight_rect": null,
+      "user_comment": null,
+      "raw_image_path": null,
+      "annotated_image_path": "/home/longp/projects/company-tools/step-recorder/sample_output/sample_demo_recording/images/step_001_left_click.png"
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-11-04 10:18:33.877",
+      "action_type": "comment",
+      "description": "User verified environment configuration",
+      "window_title": "Code Editor",
+      "process_name": "code",
+      "cursor_x": null,
+      "cursor_y": null,
+      "highlight_rect": null,
+      "user_comment": "Kiem tra toan bo module va thu vien chay hoan hao tren moi he dieu hanh.",
+      "raw_image_path": null,
+      "annotated_image_path": "/home/longp/projects/company-tools/step-recorder/sample_output/sample_demo_recording/images/step_002_comment.png"
+    }
+  ]
+}
