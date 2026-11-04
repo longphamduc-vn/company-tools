@@ -477,7 +477,7 @@
     .modal-body { flex: 1; overflow-y: auto; margin-bottom: 16px; }
     .json-textarea {
       width: 100%;
-      height: 240px;
+      height: 180px;
       font-family: monospace;
       font-size: 12px;
       padding: 10px;
@@ -486,6 +486,84 @@
       background: var(--bg);
       color: var(--text);
       resize: vertical;
+    }
+
+    /* Drop Zone & Folder Import */
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      text-align: center;
+      background: var(--bg);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      margin-bottom: 12px;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: var(--primary);
+      background: var(--primary-light);
+    }
+    .drop-zone-icon { font-size: 32px; margin-bottom: 6px; }
+    .drop-zone-title { font-weight: 700; font-size: 13.5px; color: var(--text); margin-bottom: 3px; }
+    .drop-zone-sub { font-size: 11.5px; color: var(--text-sub); }
+    .import-actions-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .scanned-files-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin-bottom: 10px;
+      max-height: 160px;
+      overflow-y: auto;
+    }
+    .scanned-file-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .scanned-file-item:last-child { border-bottom: none; }
+    .scanned-file-name {
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      word-break: break-all;
+    }
+    .scanned-file-count {
+      color: var(--text-sub);
+      font-size: 11px;
+      background: var(--surface);
+      padding: 2px 8px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+      margin-left: 8px;
+    }
+    .import-merge-options {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 10px;
+      background: var(--bg);
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-size: 12px;
+      border: 1px solid var(--border);
+    }
+    .import-merge-options label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
     }
 
     /* Toast */
@@ -585,6 +663,14 @@
       </div>
 
       <div class="tools-row">
+        <!-- Exam Set Selector (visible when multiple files/sets are loaded) -->
+        <div id="exam-set-container" style="display: none; align-items: center; gap: 6px;">
+          <span style="font-size: 12px; font-weight: 700; color: var(--primary);">📚 Đề thi:</span>
+          <select id="select-exam-set" class="btn btn-outline" style="outline: none; max-width: 220px; font-weight: 600; padding: 6px 10px;">
+            <option value="all">Tất cả đề (Gộp)</option>
+          </select>
+        </div>
+
         <button class="btn btn-outline" id="btn-shuffle" title="Trộn ngẫu nhiên câu hỏi">
           <span>🔀 Trộn đề</span>
         </button>
@@ -678,23 +764,65 @@
     </aside>
   </main>
 
-  <!-- Import Modal -->
+  <!-- Import Modal (Folder & Multi-File Support) -->
   <div class="modal-overlay" id="import-modal" style="display: none;">
-    <div class="modal">
+    <div class="modal" style="max-width: 650px;">
       <div class="modal-header">
-        <div class="modal-title">Import Dữ Liệu JSON Đề Thi</div>
+        <div class="modal-title">📥 Tải Dữ Liệu Đề Thi (Chọn Cả Thư Mục hoặc File)</div>
         <button class="btn btn-outline" id="btn-close-import" style="padding: 4px 8px;">✕</button>
       </div>
       <div class="modal-body">
-        <p style="font-size: 12px; color: var(--text-sub); margin-bottom: 10px;">
-          Dán nội dung JSON đã được Gemini giải đáp (hoặc kéo thả file .json vào đây):
-        </p>
-        <textarea class="json-textarea" id="import-json-input" placeholder='Dán mã JSON tại đây... (Hỗ trợ cả trường correctAnswer và explanation từ Gemini)'></textarea>
-        <div style="margin-top: 12px; display: flex; align-items: center; justify-content: space-between;">
-          <input type="file" id="file-input-json" accept=".json,.txt" style="font-size: 12px;" />
+        <!-- Interactive Drop Zone -->
+        <div class="drop-zone" id="import-drop-zone">
+          <div class="drop-zone-icon">📁</div>
+          <div class="drop-zone-title">Kéo & thả cả thư mục hoặc các file .json vào đây</div>
+          <div class="drop-zone-sub">Tự động quét toàn bộ file JSON trong thư mục và các thư mục con</div>
         </div>
+
+        <!-- Action Buttons Row -->
+        <div class="import-actions-row">
+          <button class="btn btn-primary" id="btn-browse-folder" style="flex: 1; padding: 10px 14px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+            <span>📁 Chọn Cả Thư Mục</span>
+          </button>
+          <input type="file" id="folder-input-json" webkitdirectory directory multiple style="display: none;" />
+
+          <button class="btn btn-outline" id="btn-browse-files" style="flex: 1; padding: 10px 14px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+            <span>📄 Chọn File (Một hoặc Nhiều)</span>
+          </button>
+          <input type="file" id="file-input-json" accept=".json,.txt" multiple style="display: none;" />
+        </div>
+
+        <!-- Scanned Files Box (displayed when folder or multiple files detected) -->
+        <div id="scanned-files-container" style="display: none;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <span style="font-size: 13px; font-weight: 700; color: var(--primary);" id="scanned-summary-text">Đã phát hiện 0 file JSON</span>
+            <button class="btn btn-outline" id="btn-clear-scanned" style="padding: 2px 8px; font-size: 11px;">Xóa danh sách</button>
+          </div>
+          <div class="scanned-files-box" id="scanned-files-list"></div>
+
+          <!-- Merge or Separate Mode Selection -->
+          <div class="import-merge-options">
+            <span style="font-weight: 700; color: var(--text);">Tùy chọn tải lên:</span>
+            <label>
+              <input type="radio" name="import-mode-choice" value="merge" checked />
+              <span><strong>Gộp tất cả câu hỏi thành 1 ngân hàng chung</strong> (Tự động loại bỏ câu hỏi trùng lặp)</span>
+            </label>
+            <label>
+              <input type="radio" name="import-mode-choice" value="separate" />
+              <span><strong>Giữ riêng từng bộ đề</strong> (Có thể chọn và chuyển đổi từng đề thi từ menu "Đề thi" trên thanh công cụ)</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Manual JSON paste toggle / accordion -->
+        <details style="margin-top: 10px; font-size: 12px; color: var(--text-sub);" id="details-manual-json">
+          <summary style="cursor: pointer; font-weight: 600; color: var(--text);">Hoặc dán mã JSON trực tiếp (từ Gemini chat box)...</summary>
+          <textarea class="json-textarea" id="import-json-input" style="margin-top: 8px;" placeholder='Dán mã JSON tại đây... (Hỗ trợ cả trường correctAnswer và explanation từ Gemini)'></textarea>
+        </details>
       </div>
-      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">
         <button class="btn btn-outline" id="btn-cancel-import">Hủy</button>
         <button class="btn btn-primary" id="btn-confirm-import">Tải Đề Thi Lên</button>
       </div>

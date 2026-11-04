@@ -46,9 +46,22 @@
       const btnConfirmImport = document.getElementById('btn-confirm-import');
       const importJsonInput = document.getElementById('import-json-input');
       const fileInputJson = document.getElementById('file-input-json');
+      const folderInputJson = document.getElementById('folder-input-json');
+      const btnBrowseFolder = document.getElementById('btn-browse-folder');
+      const btnBrowseFiles = document.getElementById('btn-browse-files');
+      const importDropZone = document.getElementById('import-drop-zone');
+      const scannedFilesContainer = document.getElementById('scanned-files-container');
+      const scannedSummaryText = document.getElementById('scanned-summary-text');
+      const scannedFilesList = document.getElementById('scanned-files-list');
+      const btnClearScanned = document.getElementById('btn-clear-scanned');
+      const examSetContainer = document.getElementById('exam-set-container');
+      const selectExamSet = document.getElementById('select-exam-set');
       const btnExportJson = document.getElementById('btn-export-json');
       const btnToggleTheme = document.getElementById('btn-toggle-theme');
       const appToast = document.getElementById('app-toast');
+
+      let examSets = []; // [{ id, name, title, description, questions }]
+      let pendingScannedFiles = []; // [{ file, name, path, title, description, questions }]
 
       // Initialize
       initApp();
@@ -60,6 +73,7 @@
         if (examData.questions.length === 0) {
           loadFromLocalStorage();
         }
+        renderExamSetSelector();
         renderExam();
       }
 
@@ -95,6 +109,34 @@
             examData = JSON.parse(saved);
           } catch (e) {}
         }
+        const savedSets = localStorage.getItem('gfc_exam_sets');
+        if (savedSets) {
+          try {
+            examSets = JSON.parse(savedSets);
+          } catch (e) {}
+        }
+      }
+
+      function renderExamSetSelector() {
+        if (!examSetContainer || !selectExamSet) return;
+        if (!examSets || examSets.length <= 1) {
+          examSetContainer.style.display = 'none';
+          return;
+        }
+
+        examSetContainer.style.display = 'flex';
+        let optionsHtml = '';
+
+        const mergedCount = examSets.reduce((acc, s) => acc + (s.questions ? s.questions.length : 0), 0);
+        const isMergedSelected = (!examData.title || examData.title.startsWith('Ngân hàng') || examData.title.startsWith('Tổng hợp')) ? 'selected' : '';
+        optionsHtml += `<option value="all" ${isMergedSelected}>📁 Tất cả các đề (Gộp ${mergedCount} câu)</option>`;
+
+        examSets.forEach((set, i) => {
+          const isSelected = examData.title === set.title ? 'selected' : '';
+          optionsHtml += `<option value="set_${i}" ${isSelected}>📄 Đề ${i + 1}: ${set.title} (${set.questions.length} câu)</option>`;
+        });
+
+        selectExamSet.innerHTML = optionsHtml;
       }
 
       function saveProgressToLocalStorage() {
@@ -443,6 +485,29 @@
           }
         });
 
+        // Select Exam Set from dropdown
+        if (selectExamSet) {
+          selectExamSet.addEventListener('change', () => {
+            const val = selectExamSet.value;
+            if (val === 'all') {
+              examData = mergeMultipleExamFiles(examSets);
+            } else if (val.startsWith('set_')) {
+              const idx = parseInt(val.replace('set_', ''), 10);
+              if (examSets[idx]) {
+                examData = {
+                  title: examSets[idx].title,
+                  description: examSets[idx].description || '',
+                  questions: examSets[idx].questions
+                };
+              }
+            }
+            currentIndex = 0;
+            userAnswers = {};
+            renderExam();
+            showToast(`Đang ôn tập: ${examData.title}`);
+          });
+        }
+
         // Copy Gemini Prompt
         btnCopyGeminiPrompt.addEventListener('click', () => {
           copyGeminiPrompt();
@@ -451,29 +516,119 @@
         // Import Modal Handlers
         btnImportModal.addEventListener('click', () => {
           importJsonInput.value = '';
+          pendingScannedFiles = [];
+          renderScannedFilesPreview();
           importModal.style.display = 'flex';
         });
         btnCloseImport.addEventListener('click', () => { importModal.style.display = 'none'; });
         btnCancelImport.addEventListener('click', () => { importModal.style.display = 'none'; });
 
+        // Browse Folder (webkitdirectory)
+        if (btnBrowseFolder && folderInputJson) {
+          btnBrowseFolder.addEventListener('click', () => {
+            folderInputJson.value = '';
+            folderInputJson.click();
+          });
+          folderInputJson.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files.length > 0) {
+              processSelectedFileList(e.target.files);
+            }
+          });
+        }
+
+        // Browse Files (multiple)
+        if (btnBrowseFiles && fileInputJson) {
+          btnBrowseFiles.addEventListener('click', () => {
+            fileInputJson.value = '';
+            fileInputJson.click();
+          });
+          fileInputJson.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files.length > 0) {
+              processSelectedFileList(e.target.files);
+            }
+          });
+        }
+
+        // Clear Scanned List
+        if (btnClearScanned) {
+          btnClearScanned.addEventListener('click', () => {
+            pendingScannedFiles = [];
+            renderScannedFilesPreview();
+          });
+        }
+
+        // Drop Zone drag & drop (folder & files)
+        if (importDropZone) {
+          importDropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            importDropZone.classList.add('dragover');
+          });
+          importDropZone.addEventListener('dragleave', () => {
+            importDropZone.classList.remove('dragover');
+          });
+          importDropZone.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            importDropZone.classList.remove('dragover');
+            const files = await getDroppedFiles(e.dataTransfer);
+            if (files.length > 0) {
+              processSelectedFileList(files);
+            } else {
+              showToast('Không tìm thấy file .json nào trong thư mục/lựa chọn!');
+            }
+          });
+        }
+
+        // Confirm Import Button
         btnConfirmImport.addEventListener('click', () => {
+          if (pendingScannedFiles.length > 0) {
+            const modeChoice = document.querySelector('input[name="import-mode-choice"]:checked')?.value || 'merge';
+
+            examSets = pendingScannedFiles.map((f, i) => ({
+              id: 'set_' + i,
+              name: f.name,
+              title: f.title || f.name.replace(/\.[^/.]+$/, ''),
+              description: f.description || '',
+              questions: f.questions.map((q, qIdx) => normalizeQuestion(q, null, qIdx))
+            }));
+
+            if (modeChoice === 'merge') {
+              examData = mergeMultipleExamFiles(pendingScannedFiles);
+            } else {
+              examData = {
+                title: examSets[0].title,
+                description: examSets[0].description || '',
+                questions: examSets[0].questions
+              };
+            }
+
+            localStorage.setItem('gfc_quiz_data', JSON.stringify(examData));
+            localStorage.setItem('gfc_exam_sets', JSON.stringify(examSets));
+
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+              chrome.storage.local.get(['forms', 'activeFormKey'], (res) => {
+                const forms = res.forms || {};
+                const key = res.activeFormKey || 'default_form';
+                forms[key] = examData;
+                chrome.storage.local.set({ forms });
+              });
+            }
+
+            importModal.style.display = 'none';
+            currentIndex = 0;
+            userAnswers = {};
+            renderExamSetSelector();
+            renderExam();
+            showToast(`Đã tải thành công ${examData.questions.length} câu hỏi từ ${pendingScannedFiles.length} file!`);
+            pendingScannedFiles = [];
+            return;
+          }
+
           const raw = importJsonInput.value.trim();
           if (!raw) {
-            showToast('Vui lòng dán mã JSON!');
+            showToast('Vui lòng chọn thư mục, chọn file hoặc dán mã JSON!');
             return;
           }
           processJsonImport(raw);
-        });
-
-        fileInputJson.addEventListener('change', (e) => {
-          const file = e.target.files[0];
-          if (file) {
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-              importJsonInput.value = evt.target.result;
-            };
-            reader.readAsText(file);
-          }
         });
 
         // Export JSON
@@ -494,19 +649,248 @@
           btnToggleTheme.innerText = next === 'dark' ? '☀️' : '🌙';
         });
 
-        // Drag and drop JSON into window
+        // Drag and drop JSON/folders anywhere into window
         window.addEventListener('dragover', (e) => { e.preventDefault(); });
-        window.addEventListener('drop', (e) => {
+        window.addEventListener('drop', async (e) => {
           e.preventDefault();
-          if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-            const file = e.dataTransfer.files[0];
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-              processJsonImport(evt.target.result);
-            };
-            reader.readAsText(file);
+          const files = await getDroppedFiles(e.dataTransfer);
+          if (files.length > 0) {
+            importModal.style.display = 'flex';
+            processSelectedFileList(files);
           }
         });
+      }
+
+      // Recursive directory scanner for FileSystemEntry (drag and drop folder)
+      async function scanDirectoryEntry(entry) {
+        const files = [];
+        if (entry.isFile) {
+          if (entry.name.endsWith('.json') || entry.name.endsWith('.txt')) {
+            const file = await new Promise(res => entry.file(res));
+            files.push(file);
+          }
+        } else if (entry.isDirectory) {
+          const reader = entry.createReader();
+          const entries = await new Promise(res => {
+            const results = [];
+            function readNext() {
+              reader.readEntries(batch => {
+                if (batch.length === 0) res(results);
+                else { results.push(...batch); readNext(); }
+              }, () => res(results));
+            }
+            readNext();
+          });
+          for (const sub of entries) {
+            const subFiles = await scanDirectoryEntry(sub);
+            files.push(...subFiles);
+          }
+        }
+        return files;
+      }
+
+      // Extract all files from drop event (handles folder drop)
+      async function getDroppedFiles(dataTransfer) {
+        const files = [];
+        const items = dataTransfer.items;
+        if (items && items.length > 0) {
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (item.webkitGetAsEntry) {
+              const entry = item.webkitGetAsEntry();
+              if (entry) {
+                const scanned = await scanDirectoryEntry(entry);
+                files.push(...scanned);
+                continue;
+              }
+            }
+            const f = item.getAsFile ? item.getAsFile() : null;
+            if (f && (f.name.endsWith('.json') || f.name.endsWith('.txt'))) {
+              files.push(f);
+            }
+          }
+        } else if (dataTransfer.files) {
+          for (const f of dataTransfer.files) {
+            if (f.name.endsWith('.json') || f.name.endsWith('.txt')) {
+              files.push(f);
+            }
+          }
+        }
+        return files;
+      }
+
+      function readFileAsText(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target.result);
+          reader.onerror = reject;
+          reader.readAsText(file);
+        });
+      }
+
+      // Process selected / dropped files list
+      async function processSelectedFileList(fileList) {
+        const files = Array.from(fileList).filter(f => f.name.endsWith('.json') || f.name.endsWith('.txt'));
+        if (files.length === 0) {
+          showToast('Không tìm thấy file .json nào trong thư mục/lựa chọn!');
+          return;
+        }
+
+        showToast(`Đang quét ${files.length} file...`, 1500);
+        pendingScannedFiles = [];
+
+        for (const file of files) {
+          try {
+            const text = await readFileAsText(file);
+            let clean = text.trim();
+            const fence = clean.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+            if (fence && fence[1]) clean = fence[1].trim();
+
+            const parsed = JSON.parse(clean);
+            let questions = [];
+            let title = file.name.replace(/\.[^/.]+$/, '');
+            let desc = '';
+
+            if (parsed.questions && Array.isArray(parsed.questions)) {
+              questions = parsed.questions;
+              if (parsed.title) title = parsed.title;
+              if (parsed.description) desc = parsed.description;
+            } else if (Array.isArray(parsed)) {
+              questions = parsed;
+            }
+
+            if (questions.length > 0) {
+              pendingScannedFiles.push({
+                file: file,
+                name: file.name,
+                path: file.webkitRelativePath || file.name,
+                title: title,
+                description: desc,
+                questions: questions
+              });
+            }
+          } catch (e) {
+            console.warn(`Bỏ qua file lỗi ${file.name}:`, e);
+          }
+        }
+
+        renderScannedFilesPreview();
+      }
+
+      // Render preview of scanned files inside modal
+      function renderScannedFilesPreview() {
+        if (!scannedFilesContainer || !scannedFilesList) return;
+
+        if (pendingScannedFiles.length === 0) {
+          scannedFilesContainer.style.display = 'none';
+          return;
+        }
+
+        scannedFilesContainer.style.display = 'block';
+        const totalQ = pendingScannedFiles.reduce((acc, f) => acc + f.questions.length, 0);
+        scannedSummaryText.innerText = `✅ Đã quét ${pendingScannedFiles.length} file JSON (Tổng: ${totalQ} câu)`;
+
+        scannedFilesList.innerHTML = pendingScannedFiles.map(f => `
+          <div class="scanned-file-item">
+            <div class="scanned-file-name" title="${f.path}">
+              <span>📄</span>
+              <span>${f.name}</span>
+              <span style="font-size: 11px; color: var(--text-sub); font-weight: normal;">(${f.title})</span>
+            </div>
+            <span class="scanned-file-count">${f.questions.length} câu</span>
+          </div>
+        `).join('');
+      }
+
+      // Get question canonical key for deduplication
+      function getQuestionKey(q) {
+        if (q.id && !String(q.id).startsWith('q_')) return 'id:' + q.id;
+        const cleanTitle = (q.title || '')
+          .toLowerCase()
+          .replace(/^(câu|bài|question)\s*\d+[\s\:\.\-]/i, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if ((cleanTitle === '[câu hỏi hình ảnh]' || !cleanTitle) && q.image) {
+          return 'img:' + q.image.slice(0, 100);
+        }
+        return 'title:' + (q.section ? q.section.toLowerCase() + '::' : '') + cleanTitle;
+      }
+
+      // Normalize a question object
+      function normalizeQuestion(q, existing, idx = 0) {
+        let normalizedOptions = [];
+        if (Array.isArray(q.options)) {
+          normalizedOptions = q.options.map((opt, optIdx) => {
+            const optText = typeof opt === 'string' ? opt : (opt.text || '');
+            const existingOpt = existing && existing.options ? existing.options[optIdx] : null;
+            const optImage = (typeof opt === 'object' && opt.image) || (existingOpt && existingOpt.image) || null;
+            return { text: optText, image: optImage };
+          });
+        } else if (existing && existing.options) {
+          normalizedOptions = existing.options;
+        }
+
+        return {
+          id: q.id || (existing && existing.id) || String(idx + 1),
+          title: q.title || (existing && existing.title) || '[Câu hỏi]',
+          description: q.description || (existing && existing.description) || '',
+          section: q.section || (existing && existing.section) || '',
+          type: q.type || (existing && existing.type) || 'multiple_choice',
+          image: q.image || (existing && existing.image) || null,
+          options: normalizedOptions,
+          correctAnswer: q.correctAnswer || (existing && existing.correctAnswer) || '',
+          explanation: q.explanation || q.feedback || (existing && (existing.explanation || existing.feedback)) || '',
+          points: q.points || (existing && existing.points) || ''
+        };
+      }
+
+      // Merge multiple exam files into one combined exam bank with smart deduplication
+      function mergeMultipleExamFiles(filesList) {
+        const map = new Map();
+        let combinedTitle = '';
+
+        filesList.forEach((f, fileIdx) => {
+          if (fileIdx === 0) combinedTitle = f.title;
+          else if (!combinedTitle.includes(f.title) && fileIdx < 3) {
+            combinedTitle += ' + ' + f.title;
+          }
+
+          f.questions.forEach((rawQ, qIdx) => {
+            const q = normalizeQuestion(rawQ, null, qIdx);
+            const key = getQuestionKey(q);
+
+            if (map.has(key)) {
+              const existing = map.get(key);
+              if (!existing.points && q.points) existing.points = q.points;
+              if (!existing.section && q.section) existing.section = q.section;
+              if (!existing.correctAnswer && q.correctAnswer) existing.correctAnswer = q.correctAnswer;
+              if (!existing.explanation && q.explanation) existing.explanation = q.explanation;
+              if ((!existing.image || !existing.image.startsWith('data:image/')) && q.image) {
+                existing.image = q.image;
+              }
+              if (q.options && q.options.length > 0) {
+                if (!existing.options || existing.options.length === 0) {
+                  existing.options = q.options;
+                } else {
+                  q.options.forEach(opt => {
+                    if (!existing.options.some(o => o.text.trim().toLowerCase() === opt.text.trim().toLowerCase())) {
+                      existing.options.push(opt);
+                    }
+                  });
+                }
+              }
+            } else {
+              map.set(key, q);
+            }
+          });
+        });
+
+        const mergedQuestions = Array.from(map.values());
+        return {
+          title: filesList.length > 1 ? `Ngân hàng câu hỏi gộp (${filesList.length} đề thi)` : combinedTitle,
+          description: `Được tổng hợp từ ${filesList.length} file JSON (${mergedQuestions.length} câu hỏi duy nhất)`,
+          questions: mergedQuestions
+        };
       }
 
       // Process and sanitize imported JSON (handles raw JSON or Gemini Markdown response)
@@ -574,6 +958,13 @@
           });
 
           localStorage.setItem('gfc_quiz_data', JSON.stringify(examData));
+          examSets = [{
+            id: 'set_0',
+            name: examData.title || 'Đề thi trắc nghiệm',
+            title: examData.title || 'Đề thi trắc nghiệm',
+            questions: examData.questions
+          }];
+          localStorage.setItem('gfc_exam_sets', JSON.stringify(examSets));
 
           // Also sync to chrome.storage.local if available
           if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
@@ -588,6 +979,7 @@
           importModal.style.display = 'none';
           currentIndex = 0;
           userAnswers = {};
+          renderExamSetSelector();
           renderExam();
           showToast(`Đã import thành công ${examData.questions.length} câu hỏi kèm đáp án & giải thích!`);
         } catch (err) {
