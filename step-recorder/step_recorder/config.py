@@ -45,6 +45,9 @@ class RecorderConfig:
     always_on_top: bool = True  # Keep toolbar always on top of other windows
     auto_minimize_on_record: bool = False  # Minimize toolbar to taskbar when recording begins
 
+    # Language & Localization
+    language: str = "vi"  # "vi" (Tiếng Việt) or "en" (English)
+
     # Hotkeys
     hotkey_start_pause: str = "<F8>"
     hotkey_stop: str = "<F10>"

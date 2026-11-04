@@ -50,6 +50,10 @@
       padding: 0;
     }
 
+    html {
+      scroll-behavior: smooth;
+    }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background-color: var(--bg-primary);
@@ -59,11 +63,195 @@
       transition: background-color 0.2s ease, color 0.2s ease;
     }
 
-    /* Container */
-    .container {
-      max-width: 1100px;
+    /* Overall Documentation Layout: Sidebar + Main */
+    .doc-layout {
+      max-width: 1380px;
       margin: 0 auto;
       padding: 24px 20px;
+      display: flex;
+      gap: 26px;
+      align-items: flex-start;
+    }
+
+    /* TOC Sidebar */
+    .toc-sidebar {
+      width: 290px;
+      flex-shrink: 0;
+      position: sticky;
+      top: 20px;
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      z-index: 50;
+    }
+
+    /* Custom thin scrollbar for sidebar */
+    .toc-sidebar::-webkit-scrollbar {
+      width: 5px;
+    }
+    .toc-sidebar::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: 9999px;
+    }
+
+    .toc-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .toc-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      color: var(--text-primary);
+    }
+
+    .toc-close-btn {
+      display: none;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.1rem;
+      cursor: pointer;
+    }
+
+    .toc-nav {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .toc-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: var(--radius-sm);
+      text-decoration: none;
+      color: var(--text-secondary);
+      font-size: 0.86rem;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+
+    .toc-link:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .toc-link.active {
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--accent-color);
+      font-weight: 600;
+      border-left: 3px solid var(--accent-color);
+    }
+
+    .toc-sec-group {
+      margin-top: 8px;
+      padding-top: 6px;
+      border-top: 1px dashed var(--border-color);
+    }
+
+    .toc-sec-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      border-radius: var(--radius-sm);
+      text-decoration: none;
+      color: var(--text-primary);
+      font-size: 0.88rem;
+      font-weight: 700;
+      transition: background 0.15s ease;
+    }
+
+    .toc-sec-head:hover {
+      background: var(--bg-hover);
+    }
+
+    .toc-sec-head.active {
+      color: var(--accent-color);
+    }
+
+    .toc-sec-title-box {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .toc-sec-count {
+      font-size: 0.72rem;
+      font-weight: 600;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      padding: 2px 6px;
+      border-radius: 9999px;
+      flex-shrink: 0;
+    }
+
+    .toc-sub-items {
+      margin-left: 12px;
+      padding-left: 8px;
+      border-left: 2px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-top: 4px;
+    }
+
+    .toc-step-link {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 8px;
+      border-radius: var(--radius-sm);
+      text-decoration: none;
+      color: var(--text-muted);
+      font-size: 0.80rem;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .toc-step-link:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .toc-step-link.active {
+      color: var(--accent-color);
+      font-weight: 600;
+    }
+
+    .toc-step-num {
+      font-family: monospace;
+      font-weight: 700;
+      color: var(--accent-color);
+      flex-shrink: 0;
+    }
+
+    /* Main Content Pane */
+    .doc-main {
+      flex: 1;
+      min-width: 0;
     }
 
     /* Header */
@@ -71,8 +259,8 @@
       background: var(--bg-card);
       border: 1px solid var(--border-color);
       border-radius: var(--radius);
-      padding: 28px;
-      margin-bottom: 24px;
+      padding: 26px;
+      margin-bottom: 22px;
       box-shadow: var(--shadow-md);
       position: relative;
       overflow: hidden;
@@ -94,10 +282,11 @@
       align-items: flex-start;
       margin-bottom: 20px;
       gap: 16px;
+      flex-wrap: wrap;
     }
 
     .title-group h1 {
-      font-size: 1.75rem;
+      font-size: 1.7rem;
       font-weight: 700;
       color: var(--text-primary);
       display: flex;
@@ -113,23 +302,25 @@
 
     .header-actions {
       display: flex;
-      gap: 10px;
+      gap: 8px;
       align-items: center;
+      flex-wrap: wrap;
     }
 
     button.btn {
       background: var(--bg-secondary);
       color: var(--text-primary);
       border: 1px solid var(--border-color);
-      padding: 8px 14px;
+      padding: 7px 13px;
       border-radius: var(--radius-sm);
       cursor: pointer;
-      font-size: 0.88rem;
+      font-size: 0.85rem;
       font-weight: 500;
       display: inline-flex;
       align-items: center;
       gap: 6px;
       transition: all 0.15s ease;
+      user-select: none;
     }
 
     button.btn:hover {
@@ -141,28 +332,33 @@
       background: var(--accent-color);
       color: #ffffff;
       border-color: transparent;
+      font-weight: 600;
     }
 
     button.btn-primary:hover {
       opacity: 0.9;
     }
 
+    #mobileTocBtn {
+      display: none;
+    }
+
     /* Metadata Grid */
     .stats-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 12px;
     }
 
     .stat-card {
       background: var(--bg-secondary);
       border: 1px solid var(--border-color);
       border-radius: var(--radius-sm);
-      padding: 14px;
+      padding: 12px 14px;
     }
 
     .stat-label {
-      font-size: 0.78rem;
+      font-size: 0.75rem;
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.5px;
@@ -171,7 +367,7 @@
     }
 
     .stat-value {
-      font-size: 1.25rem;
+      font-size: 1.18rem;
       font-weight: 700;
       color: var(--text-primary);
       display: flex;
@@ -184,13 +380,13 @@
       background: var(--bg-card);
       border: 1px solid var(--border-color);
       border-radius: var(--radius);
-      padding: 14px 20px;
-      margin-bottom: 24px;
+      padding: 12px 18px;
+      margin-bottom: 22px;
       display: flex;
       flex-wrap: wrap;
       justify-content: space-between;
       align-items: center;
-      gap: 14px;
+      gap: 12px;
       position: sticky;
       top: 16px;
       z-index: 20;
@@ -200,7 +396,7 @@
 
     .filter-pills {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       flex-wrap: wrap;
     }
 
@@ -208,9 +404,9 @@
       background: var(--bg-secondary);
       border: 1px solid var(--border-color);
       color: var(--text-secondary);
-      padding: 6px 14px;
+      padding: 5px 12px;
       border-radius: 9999px;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       cursor: pointer;
       user-select: none;
       transition: all 0.15s ease;
@@ -230,7 +426,7 @@
 
     .search-box {
       flex: 1;
-      max-width: 320px;
+      max-width: 300px;
       position: relative;
     }
 
@@ -239,9 +435,9 @@
       background: var(--bg-secondary);
       border: 1px solid var(--border-color);
       border-radius: var(--radius-sm);
-      padding: 7px 12px 7px 32px;
+      padding: 6px 12px 6px 32px;
       color: var(--text-primary);
-      font-size: 0.88rem;
+      font-size: 0.85rem;
       outline: none;
     }
 
@@ -255,14 +451,70 @@
       top: 50%;
       transform: translateY(-50%);
       color: var(--text-muted);
-      font-size: 0.9rem;
+      font-size: 0.85rem;
     }
 
-    /* Step Cards */
+    /* Section Banner Cards */
+    .section-banner {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.10) 0%, rgba(129, 140, 248, 0.10) 100%);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-left: 6px solid var(--accent-color);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-top: 26px;
+      margin-bottom: 10px;
+      box-shadow: var(--shadow-sm);
+      transition: all 0.15s ease;
+    }
+
+    [data-theme="light"] .section-banner {
+      background: linear-gradient(135deg, #e0f2fe 0%, #ede9fe 100%);
+      border: 1px solid #bae6fd;
+      border-left: 6px solid #0284c7;
+    }
+
+    .sec-banner-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+
+    .sec-tag-pill {
+      background: var(--accent-color);
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .sec-step-ref {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      font-family: monospace;
+    }
+
+    .sec-banner-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    .sec-banner-desc {
+      font-size: 0.92rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    /* Steps Timeline */
     .steps-container {
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 18px;
     }
 
     .step-card {
@@ -280,7 +532,7 @@
     }
 
     .step-card-header {
-      padding: 16px 20px;
+      padding: 14px 18px;
       border-bottom: 1px solid var(--border-color);
       display: flex;
       justify-content: space-between;
@@ -293,23 +545,23 @@
     .step-title-area {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
     }
 
     .step-badge {
       background: var(--accent-gradient);
       color: #ffffff;
       font-weight: 700;
-      font-size: 0.88rem;
-      padding: 4px 12px;
+      font-size: 0.85rem;
+      padding: 3px 10px;
       border-radius: 9999px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.15);
     }
 
     .action-badge {
-      font-size: 0.82rem;
+      font-size: 0.80rem;
       font-weight: 600;
-      padding: 3px 10px;
+      padding: 3px 9px;
       border-radius: var(--radius-sm);
       display: inline-flex;
       align-items: center;
@@ -323,52 +575,52 @@
     .badge-info { background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
 
     .step-window-tag {
-      font-size: 0.82rem;
+      font-size: 0.80rem;
       color: var(--text-secondary);
       background: var(--bg-secondary);
       border: 1px solid var(--border-color);
-      padding: 3px 10px;
+      padding: 2px 8px;
       border-radius: var(--radius-sm);
-      max-width: 380px;
+      max-width: 340px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
     .step-time {
-      font-size: 0.82rem;
+      font-size: 0.80rem;
       color: var(--text-muted);
       font-family: monospace;
     }
 
     .step-card-body {
-      padding: 20px;
+      padding: 18px;
     }
 
     .step-description {
-      font-size: 1.05rem;
+      font-size: 1.02rem;
       font-weight: 500;
       color: var(--text-primary);
-      margin-bottom: 16px;
+      margin-bottom: 14px;
       line-height: 1.5;
     }
 
     .comment-box {
       background: rgba(16, 185, 129, 0.08);
       border-left: 4px solid var(--badge-info);
-      padding: 12px 16px;
+      padding: 10px 14px;
       border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-      margin-bottom: 16px;
-      font-size: 0.95rem;
+      margin-bottom: 14px;
+      font-size: 0.92rem;
       color: var(--text-primary);
     }
 
     .comment-title {
       font-weight: 700;
       color: var(--badge-info);
-      font-size: 0.82rem;
+      font-size: 0.78rem;
       text-transform: uppercase;
-      margin-bottom: 4px;
+      margin-bottom: 3px;
     }
 
     /* Screenshot container */
@@ -410,11 +662,11 @@
 
     /* Technical details */
     .step-meta-toggle {
-      margin-top: 14px;
+      margin-top: 12px;
     }
 
     details {
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       color: var(--text-muted);
     }
 
@@ -431,21 +683,21 @@
     }
 
     .meta-content {
-      margin-top: 10px;
-      padding: 10px 14px;
+      margin-top: 8px;
+      padding: 10px 12px;
       background: var(--bg-secondary);
       border-radius: var(--radius-sm);
       border: 1px solid var(--border-color);
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 6px;
       font-family: monospace;
-      font-size: 0.82rem;
+      font-size: 0.80rem;
     }
 
     .meta-item {
       display: flex;
-      gap: 8px;
+      gap: 6px;
     }
 
     .meta-label {
@@ -528,7 +780,46 @@
     .lightbox-prev { left: -60px; }
     .lightbox-next { right: -60px; }
 
-    @media (max-width: 768px) {
+    /* Mobile Backdrop for Drawer */
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(4px);
+      z-index: 45;
+    }
+
+    /* Responsive Breakpoints */
+    @media (max-width: 1024px) {
+      .doc-layout {
+        flex-direction: column;
+        padding: 16px 12px;
+      }
+      .toc-sidebar {
+        display: none;
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 310px;
+        max-height: 100vh;
+        border-radius: 0;
+        z-index: 100;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      }
+      .toc-sidebar.drawer-open {
+        display: flex;
+      }
+      .sidebar-backdrop.drawer-open {
+        display: block;
+      }
+      .toc-close-btn {
+        display: block;
+      }
+      #mobileTocBtn {
+        display: inline-flex;
+      }
       .lightbox-prev { left: 10px; }
       .lightbox-next { right: 10px; }
     }
@@ -536,12 +827,39 @@
     /* Print styles */
     @media print {
       body {
-        background: #ffffff;
-        color: #000000;
-        padding-bottom: 0;
+        background: #ffffff !important;
+        color: #000000 !important;
+        padding-bottom: 0 !important;
       }
-      .filter-bar, .header-actions, .zoom-hint, .lightbox-modal {
+      .filter-bar, .header-actions, .zoom-hint, .lightbox-modal, #mobileTocBtn, .toc-close-btn, .sidebar-backdrop {
         display: none !important;
+      }
+      .doc-layout {
+        display: block !important;
+        padding: 0 !important;
+        max-width: 100% !important;
+      }
+      .toc-sidebar {
+        display: block !important;
+        position: static !important;
+        width: 100% !important;
+        max-height: none !important;
+        border: 1px solid #cccccc !important;
+        box-shadow: none !important;
+        margin-bottom: 24px !important;
+        page-break-after: always !important; /* Standalone initial Table of Contents page */
+      }
+      .toc-sec-group {
+        page-break-inside: avoid;
+      }
+      .section-banner {
+        box-shadow: none !important;
+        border: 1px solid #999999 !important;
+        border-left: 6px solid #0284c7 !important;
+        background: #f1f5f9 !important;
+        color: #000000 !important;
+        page-break-before: always !important; /* Force each chapter onto a new page */
+        margin-top: 0 !important;
       }
       header, .step-card {
         box-shadow: none !important;
@@ -557,152 +875,202 @@
 </head>
 <body>
 
-  <div class="container">
-    <!-- Header -->
-    <header>
-      <div class="header-top">
-        <div class="title-group">
-          <h1><span>📋</span> {{ session.title }}</h1>
-          <p>{{ session.description or "Automatically recorded step-by-step problem sequence and actions." }}</p>
+  <!-- Mobile Backdrop -->
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="toggleTocMobile()"></div>
+
+  <div class="doc-layout">
+
+    <!-- Left Sticky Sidebar: Table of Contents -->
+    <aside class="toc-sidebar" id="tocSidebar">
+      <div class="toc-header">
+        <div class="toc-title-row">
+          <span>📑</span>
+          <span data-i18n="toc_title">Mục Lục Hướng Dẫn</span>
         </div>
-        <div class="header-actions">
-          <button class="btn" onclick="toggleTheme()" id="themeBtn">🌓 Theme</button>
-          <button class="btn btn-primary" onclick="window.print()">🖨️ Print / PDF</button>
-        </div>
+        <button class="toc-close-btn" onclick="toggleTocMobile()">✕</button>
       </div>
 
-      <!-- Stats Grid -->
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-label">Total Steps</div>
-          <div class="stat-value"><span>🔢</span> {{ steps|length }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Duration</div>
-          <div class="stat-value"><span>⏱️</span> {{ session.duration_str }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Recorded At</div>
-          <div class="stat-value" style="font-size: 0.92rem;"><span>📅</span> {{ session.start_time.strftime('%Y-%m-%d %H:%M') }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Display & Screen Size</div>
-          <div class="stat-value" style="font-size: 0.92rem;"><span>🖥️</span> {{ session.screen_resolution }}</div>
-          <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">{{ session.os_name }}</div>
-        </div>
-      </div>
-    </header>
+      <nav class="toc-nav" id="tocNav">
+        <a href="#overview" class="toc-link active" data-target="overview">
+          <span>📌</span>
+          <span data-i18n="toc_overview">Tổng Quan Quy Trình</span>
+        </a>
 
-    <!-- Filter & Search Bar -->
-    <div class="filter-bar">
-      <div class="filter-pills">
-        <div class="pill active" onclick="filterSteps('all', this)">All ({{ steps|length }})</div>
-        <div class="pill" onclick="filterSteps('click', this)">Clicks</div>
-        <div class="pill" onclick="filterSteps('key_press', this)">Keys</div>
-        <div class="pill" onclick="filterSteps('comment', this)">Comments</div>
-      </div>
-
-      <div class="search-box">
-        <span class="search-icon">🔍</span>
-        <input type="text" class="search-input" id="searchInput" placeholder="Search steps or window..." oninput="handleSearch()">
-      </div>
-    </div>
-
-    <!-- Steps Timeline -->
-    <div class="steps-container" id="stepsContainer">
-      {% for step in steps %}
-      <div class="step-card" data-action="{{ step.action_type }}" data-step-id="{{ step.step_id }}" data-search="{{ step.description|lower }} {{ step.window_title|lower }} {{ step.process_name|lower }} {{ (step.user_comment or '')|lower }}">
-        
-        <!-- Step Card Header -->
-        <div class="step-card-header">
-          <div class="step-title-area">
-            <span class="step-badge">#{{ step.step_id }}</span>
-            <span class="action-badge {{ step.badge_class }}">
-              {{ step.action_icon }} {{ step.action_type|replace('_', ' ')|title }}
-            </span>
-            <span class="step-window-tag" title="{{ step.window_title }}">
-              🪟 {{ step.window_title }}
-            </span>
-          </div>
-          <div class="step-time">{{ step.time_str }}</div>
-        </div>
-
-        <!-- Step Card Body -->
-        <div class="step-card-body">
-          <div class="step-description">{{ step.description }}</div>
-
-          {% if step.user_comment %}
-          <div class="comment-box">
-            <div class="comment-title">💬 User Note:</div>
-            <div>{{ step.user_comment }}</div>
-          </div>
-          {% endif %}
-
-          {% if config.embed_images_in_html and step.base64_image %}
-          <div class="screenshot-wrapper" onclick="openLightbox({{ loop.index0 }})">
-            <img src="data:image/png;base64,{{ step.base64_image }}" alt="Step {{ step.step_id }} screenshot" loading="lazy">
-            <div class="zoom-hint">🔍 Click to zoom</div>
-          </div>
-          {% else %}
-          <div class="screenshot-wrapper" onclick="openLightbox({{ loop.index0 }})">
-            <img src="images/{{ step.image_filename }}" alt="Step {{ step.step_id }} screenshot" loading="lazy">
-            <div class="zoom-hint">🔍 Click to zoom</div>
-          </div>
-          {% endif %}
-
-          <!-- Technical Details Collapsible -->
-          <div class="step-meta-toggle">
-            <details>
-              <summary>Technical Details & Coordinates</summary>
-              <div class="meta-content">
-                <div class="meta-item">
-                  <span class="meta-label">Timestamp:</span>
-                  <span class="meta-val">{{ step.formatted_time }}</span>
-                </div>
-                {% if step.cursor_x is not none and step.cursor_y is not none %}
-                <div class="meta-item">
-                  <span class="meta-label">Screen Coordinates:</span>
-                  <span class="meta-val">X={{ step.cursor_x }}, Y={{ step.cursor_y }}</span>
-                </div>
-                {% endif %}
-                {% if step.relative_cursor %}
-                <div class="meta-item">
-                  <span class="meta-label">Window Relative:</span>
-                  <span class="meta-val">X={{ step.relative_cursor[0] }}, Y={{ step.relative_cursor[1] }}</span>
-                </div>
-                {% endif %}
-                {% if step.ui_control %}
-                <div class="meta-item">
-                  <span class="meta-label">UI Control:</span>
-                  <span class="meta-val">{{ step.ui_control }}</span>
-                </div>
-                {% endif %}
-                <div class="meta-item">
-                  <span class="meta-label">Process:</span>
-                  <span class="meta-val">{{ step.process_name }}{% if step.pid %} (PID: {{ step.pid }}){% endif %}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">Window Title:</span>
-                  <span class="meta-val">{{ step.window_title }}</span>
-                </div>
-                {% if step.window_rect %}
-                <div class="meta-item">
-                  <span class="meta-label">Window Bounds:</span>
-                  <span class="meta-val">{{ step.window_rect[2] }}x{{ step.window_rect[3] }} at [{{ step.window_rect[0] }}, {{ step.window_rect[1] }}]</span>
-                </div>
-                {% endif %}
-                <div class="meta-item">
-                  <span class="meta-label">Screen Resolution:</span>
-                  <span class="meta-val">{{ session.screen_resolution }}</span>
-                </div>
+        {% if sections %}
+          {% for sec in sections %}
+          <div class="toc-sec-group">
+            <a href="#section-{{ sec.first_step_id }}" class="toc-sec-head" data-target="section-{{ sec.first_step_id }}">
+              <div class="toc-sec-title-box">
+                <span>📁</span>
+                <span title="{{ sec.title }}">{{ sec.title }}</span>
               </div>
-            </details>
+              <span class="toc-sec-count">{{ sec.steps|length }}</span>
+            </a>
+            <div class="toc-sub-items">
+              {% for s in sec.steps %}
+              <a href="#step-{{ s.step_id }}" class="toc-step-link" data-target="step-{{ s.step_id }}">
+                <span class="toc-step-num">#{{ s.step_id }}</span>
+                <span title="{{ s.description }}">{{ (s.description[:26] + '...') if s.description|length > 26 else s.description }}</span>
+              </a>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="toc-sub-items" style="margin-left: 0; border-left: none;">
+            {% for s in steps %}
+            <a href="#step-{{ s.step_id }}" class="toc-step-link" data-target="step-{{ s.step_id }}">
+              <span class="toc-step-num">#{{ s.step_id }}</span>
+              <span title="{{ s.description }}">{{ (s.description[:26] + '...') if s.description|length > 26 else s.description }}</span>
+            </a>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </nav>
+    </aside>
+
+    <!-- Main Content Pane -->
+    <main class="doc-main">
+      <!-- Header -->
+      <header id="overview">
+        <div class="header-top">
+          <div class="title-group">
+            <h1><span>📋</span> {{ session.title }}</h1>
+            <p>{{ session.description or "Automatically recorded step-by-step problem sequence and actions." }}</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn" onclick="toggleTocMobile()" id="mobileTocBtn">📑 <span data-i18n="btn_toc">Mục Lục</span></button>
+            <button class="btn" onclick="toggleLanguage()" id="langBtn">🌐 <span id="langText">🇻🇳 Tiếng Việt</span></button>
+            <button class="btn" onclick="toggleTheme()" id="themeBtn">🌓 <span data-i18n="theme">Theme</span></button>
+            <button class="btn btn-primary" onclick="window.print()">🖨️ <span data-i18n="print">Print / PDF</span></button>
           </div>
         </div>
 
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="stat_steps">Total Steps</div>
+            <div class="stat-value"><span>🔢</span> {{ steps|length }}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="stat_duration">Duration</div>
+            <div class="stat-value"><span>⏱️</span> {{ session.duration_str }}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="stat_recorded_at">Recorded At</div>
+            <div class="stat-value" style="font-size: 0.95rem;"><span>📅</span> {{ session.start_time.strftime('%Y-%m-%d %H:%M') }}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="stat_system">System & Display</div>
+            <div class="stat-value" style="font-size: 0.95rem;"><span>🖥️</span> {{ session.os_name }} ({{ session.screen_resolution }})</div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Filter & Search Bar -->
+      <div class="filter-bar">
+        <div class="filter-pills">
+          <div class="pill active" onclick="filterSteps('all', this)" data-i18n="filter_all">All ({{ steps|length }})</div>
+          <div class="pill" onclick="filterSteps('click', this)" data-i18n="filter_clicks">Clicks</div>
+          <div class="pill" onclick="filterSteps('key_press', this)" data-i18n="filter_keys">Keys</div>
+          <div class="pill" onclick="filterSteps('comment', this)" data-i18n="filter_comments">Comments</div>
+        </div>
+
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" class="search-input" id="searchInput" placeholder="Search steps or window..." oninput="handleSearch()">
+        </div>
       </div>
-      {% endfor %}
-    </div>
+
+      <!-- Steps Timeline -->
+      <div class="steps-container" id="stepsContainer">
+        {% for step in steps %}
+
+        <!-- Section Banner Card -->
+        {% if step.is_section_header %}
+        <div class="section-banner" id="section-{{ step.step_id }}">
+          <div class="sec-banner-top">
+            <span class="sec-tag-pill" data-i18n="section_tag">PHẦN</span>
+            <span class="sec-step-ref">Bước #{{ step.step_id }}</span>
+          </div>
+          <h2 class="sec-banner-title">{{ step.section_title or "Tiêu Đề Phần Mới" }}</h2>
+          {% if step.section_description %}
+          <p class="sec-banner-desc">{{ step.section_description }}</p>
+          {% endif %}
+        </div>
+        {% endif %}
+
+        <div class="step-card" id="step-{{ step.step_id }}" data-action="{{ step.action_type }}" data-step-id="{{ step.step_id }}" data-search="{{ step.description|lower }} {{ step.window_title|lower }} {{ step.process_name|lower }} {{ (step.user_comment or '')|lower }} {{ (step.section_title or '')|lower }} {{ (step.section_description or '')|lower }}">
+          
+          <!-- Step Card Header -->
+          <div class="step-card-header">
+            <div class="step-title-area">
+              <span class="step-badge">#{{ step.step_id }}</span>
+              <span class="action-badge {{ step.badge_class }}">
+                {{ step.action_icon }} {{ step.action_type|replace('_', ' ')|title }}
+              </span>
+              <span class="step-window-tag" title="{{ step.window_title }}">
+                🪟 {{ step.window_title }}
+              </span>
+            </div>
+            <div class="step-time">{{ step.time_str }}</div>
+          </div>
+
+          <!-- Step Card Body -->
+          <div class="step-card-body">
+            <div class="step-description">{{ step.description }}</div>
+
+            {% if step.user_comment %}
+            <div class="comment-box">
+              <div class="comment-title" data-i18n="user_comment_title">💬 User Note:</div>
+              <div>{{ step.user_comment }}</div>
+            </div>
+            {% endif %}
+
+            {% if step.base64_image or step.annotated_image_path %}
+            <div class="screenshot-wrapper" onclick="openLightbox({{ loop.index0 }})">
+              {% if step.base64_image %}
+              <img src="data:image/png;base64,{{ step.base64_image }}" alt="Step {{ step.step_id }} screenshot" loading="lazy">
+              {% else %}
+              <img src="{{ step.annotated_image_path }}" alt="Step {{ step.step_id }} screenshot" loading="lazy">
+              {% endif %}
+              <div class="zoom-hint" data-i18n="zoom_hint">🔍 Click to zoom</div>
+            </div>
+            {% endif %}
+
+            <!-- Technical Details Collapsible -->
+            <div class="step-meta-toggle">
+              <details>
+                <summary data-i18n="tech_details">Technical Details & Coordinates</summary>
+                <div class="meta-content">
+                  <div class="meta-item">
+                    <span class="meta-label">Timestamp:</span>
+                    <span class="meta-val">{{ step.formatted_time }}</span>
+                  </div>
+                  {% if step.cursor_x is not none and step.cursor_y is not none %}
+                  <div class="meta-item">
+                    <span class="meta-label">Coordinates:</span>
+                    <span class="meta-val">X={{ step.cursor_x }}, Y={{ step.cursor_y }}</span>
+                  </div>
+                  {% endif %}
+                  <div class="meta-item">
+                    <span class="meta-label">Process:</span>
+                    <span class="meta-val">{{ step.process_name }}</span>
+                  </div>
+                  <div class="meta-item">
+                    <span class="meta-label">Window:</span>
+                    <span class="meta-val">{{ step.window_title }}</span>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+
+        </div>
+        {% endfor %}
+      </div>
+    </main>
+
   </div>
 
   <!-- Fullscreen Lightbox Modal -->
@@ -719,6 +1087,77 @@
   </div>
 
   <script>
+    // Bilingual Dictionaries
+    const I18N_DATA = {
+      vi: {
+        toc_title: "Mục Lục Hướng Dẫn",
+        toc_overview: "Tổng Quan Quy Trình",
+        btn_toc: "Mục Lục",
+        theme: "Giao diện",
+        print: "In / Xuất PDF",
+        stat_steps: "Tổng số bước",
+        stat_duration: "Thời lượng",
+        stat_recorded_at: "Thời điểm ghi",
+        stat_system: "Hệ thống & Màn hình",
+        filter_all: "Tất cả ({{ steps|length }})",
+        filter_clicks: "Nhấp chuột",
+        filter_keys: "Phím",
+        filter_comments: "Ghi chú",
+        search_placeholder: "Tìm kiếm bước hoặc cửa sổ...",
+        section_tag: "PHẦN",
+        user_comment_title: "💬 Ghi Chú Người Dùng:",
+        zoom_hint: "🔍 Nhấp để phóng to",
+        tech_details: "Chi tiết kỹ thuật & Tọa độ"
+      },
+      en: {
+        toc_title: "Table of Contents",
+        toc_overview: "Process Overview",
+        btn_toc: "Contents",
+        theme: "Theme",
+        print: "Print / PDF",
+        stat_steps: "Total Steps",
+        stat_duration: "Duration",
+        stat_recorded_at: "Recorded At",
+        stat_system: "System & Display",
+        filter_all: "All ({{ steps|length }})",
+        filter_clicks: "Clicks",
+        filter_keys: "Keys",
+        filter_comments: "Comments",
+        search_placeholder: "Search steps or window...",
+        section_tag: "SECTION",
+        user_comment_title: "💬 User Note:",
+        zoom_hint: "🔍 Click to zoom",
+        tech_details: "Technical Details & Coordinates"
+      }
+    };
+
+    let activeLang = "{{ config.language or 'vi' }}";
+
+    function updateLanguage(lang) {
+      activeLang = lang;
+      const dict = I18N_DATA[lang] || I18N_DATA.en;
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (dict[key]) {
+          el.textContent = dict[key];
+        }
+      });
+      const searchInp = document.getElementById('searchInput');
+      if (searchInp && dict.search_placeholder) {
+        searchInp.placeholder = dict.search_placeholder;
+      }
+      const langText = document.getElementById('langText');
+      if (langText) {
+        langText.textContent = lang === 'vi' ? '🇻🇳 Tiếng Việt' : '🇬🇧 English';
+      }
+      localStorage.setItem('sr_lang', lang);
+    }
+
+    function toggleLanguage() {
+      const next = activeLang === 'vi' ? 'en' : 'vi';
+      updateLanguage(next);
+    }
+
     // Theme Management
     function toggleTheme() {
       const html = document.documentElement;
@@ -728,11 +1167,55 @@
       localStorage.setItem('sr_theme', next);
     }
 
-    (function initTheme() {
-      const saved = localStorage.getItem('sr_theme');
-      if (saved) {
-        document.documentElement.setAttribute('data-theme', saved);
+    // Mobile Drawer Toggle
+    function toggleTocMobile() {
+      const sidebar = document.getElementById('tocSidebar');
+      const backdrop = document.getElementById('sidebarBackdrop');
+      sidebar.classList.toggle('drawer-open');
+      backdrop.classList.toggle('drawer-open');
+    }
+
+    // Scrollspy for TOC
+    window.addEventListener('scroll', () => {
+      const links = document.querySelectorAll('.toc-nav a');
+      let currentId = 'overview';
+      const scrollPos = window.scrollY + 100;
+
+      const targets = document.querySelectorAll('#overview, .section-banner, .step-card');
+      targets.forEach(elem => {
+        if (elem.offsetTop <= scrollPos) {
+          currentId = elem.id;
+        }
+      });
+
+      links.forEach(link => {
+        if (link.getAttribute('data-target') === currentId) {
+          link.classList.add('active');
+        } else {
+          link.classList.remove('active');
+        }
+      });
+    });
+
+    // Close drawer on TOC link click on mobile
+    document.querySelectorAll('.toc-nav a').forEach(a => {
+      a.addEventListener('click', () => {
+        if (window.innerWidth <= 1024) {
+          const sidebar = document.getElementById('tocSidebar');
+          const backdrop = document.getElementById('sidebarBackdrop');
+          sidebar.classList.remove('drawer-open');
+          backdrop.classList.remove('drawer-open');
+        }
+      });
+    });
+
+    (function init() {
+      const savedTheme = localStorage.getItem('sr_theme');
+      if (savedTheme) {
+        document.documentElement.setAttribute('data-theme', savedTheme);
       }
+      const savedLang = localStorage.getItem('sr_lang') || activeLang;
+      updateLanguage(savedLang);
     })();
 
     // Filter Steps
@@ -782,10 +1265,12 @@
       {
         id: {{ step.step_id }},
         desc: {{ step.description|tojson }},
-        {% if config.embed_images_in_html and step.base64_image %}
+        {% if step.base64_image %}
         src: "data:image/png;base64,{{ step.base64_image }}"
+        {% elif step.annotated_image_path %}
+        src: "{{ step.annotated_image_path }}"
         {% else %}
-        src: "images/{{ step.image_filename }}"
+        src: ""
         {% endif %}
       }{% if not loop.last %},{% endif %}
       {% endfor %}
@@ -838,4 +1323,3 @@
   </script>
 </body>
 </html>
-

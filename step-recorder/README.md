@@ -13,11 +13,21 @@ Từ Windows 11 bản cập nhật mới, Microsoft đã chính thức thông b�
 | Tính năng | Windows Steps Recorder (PSR) | Python Step Recorder (Dự án này) |
 | :--- | :--- | :--- |
 | **Hệ điều hành** | Chỉ Windows (đang bị xóa bỏ) | **Windows, Linux, macOS** (Đa nền tảng) |
+| **Ngôn ngữ** | Đơn ngữ (theo ngôn ngữ Windows) | 🌐 **Song ngữ hoàn chỉnh (Bilingual: Tiếng Việt 🇻🇳 & English 🇬🇧)** |
+| **Chỉnh sửa sau khi ghi (Review & Editor)** | ❌ Không thể sửa, xóa hay sắp xếp bước | ✅ **Trình duyệt & chỉnh sửa toàn diện**: Xóa, di chuyển, vẽ lại vùng Focus/Highlight, sửa ghi chú |
+| **Công cụ bảo mật Che mờ / Bôi đen (Blur / Redact)** | ❌ Không hỗ trợ | 🛡️ **Che thông tin nhạy cảm**: Làm mờ Gaussian Blur (`💧`), Bôi đen Redact Blackout (`⬛`), Khung đỏ (`🔴`), Hoàn tác (`↺`) |
+| **Cắt xén ảnh chụp (Crop Screenshot)** | ❌ Không hỗ trợ | ✂️ **Cắt xén tức thì**: Kéo chuột để crop ảnh về vùng quan tâm của ứng dụng |
+| **Phím tắt toàn cục (Global Hotkeys)** | Hạn chế phím tắt | ⌨️ **Hands-free Hotkeys**: F7 (Ghi/Dừng), F8 (Tạm dừng), F9 (Ghi chú), F10 (Phân đoạn), F11 (Chỉnh sửa) |
+| **Mở & Chèn tài liệu cũ (Open & Insert)** | ❌ Không hỗ trợ | 📂 **Quản lý đa phiên**: Mở phiên cũ chỉnh sửa tiếp, Chèn gộp nhiều tài liệu lại thành 1 bộ SOP |
 | **Giới hạn số bước** | Mặc định chỉ 25 bước | **Tùy biến không giới hạn** (mặc định 200+) |
-| **Định dạng báo cáo** | MHTML cũ kỹ (khó mở trên Chrome/Edge) | **HTML hiện đại** (Responsive, Dark/Light mode, Lightbox Zoom) |
+| **Định dạng báo cáo** | MHTML cũ kỹ (khó mở trên Chrome/Edge) | **HTML hiện đại** (Responsive, Dark/Light mode, Lightbox Zoom, nút đổi ngôn ngữ trực tiếp) |
+| **Cấu trúc SOP & Phân đoạn (Chapters)** | ❌ Danh sách phẳng, không phân chương mục | 📑 **Phân đoạn / Chương mục SOP chuyên nghiệp**: Đánh dấu tiêu đề phần, mục tiêu, tạo thẻ Section Banner |
+| **Mục lục điều hướng (Table of Contents)** | ❌ Không có mục lục | 🧭 **Mục lục 2 cột (Sticky TOC Sidebar)**: Nhảy nhanh theo chương, Scrollspy tự động theo dõi vị trí cuộn |
+| **In ấn / Xuất file PDF (SOP Manual)** | Bị vỡ trang, không có mục lục trang đầu | 🖨️ **Tối ưu in ấn xuất sắc**: Trang 1 in Mục lục riêng biệt, tự động sang trang mới (`page-break`) cho từng chương |
 | **Tệp tin báo cáo** | Phải giải nén zip để xem ảnh | **Self-contained HTML (Base64)**: 1 file duy nhất gửi qua Slack/Mail xem được ngay |
-| **Xuất Markdown** | ❌ Không hỗ trợ | ✅ **Tự động tạo `report.md`** để dán thẳng vào Jira / GitHub Issue / GitLab PR |
+| **Xuất Markdown** | ❌ Không hỗ trợ | ✅ **Tự động tạo `report.md`** song ngữ có Mục Lục TOC & Anchor links nhảy trực tiếp |
 | **Đóng gói xuất file** | Chỉ file ZIP chứa MHTML | **HTML, Markdown, JSON metadata, file ZIP** chứa ảnh gốc PNG |
+| **Chống che khuất màn hình** | Dễ bị dính giao diện vào ảnh chụp | 🫥 **Windows API WDA_EXCLUDEFROMCAPTURE**: Tự động tàng hình thanh công cụ khỏi ảnh chụp |
 | **Tùy biến chỉ điểm (Click Marker)** | Chỉ có vòng tròn xanh/đỏ cố định | **4 phong cách** (Ring, Crosshair, Glow, Solid) + Chọn màu HEX bất kỳ + Đánh số Badge |
 | **Bảo vệ ứng dụng** | Hay bị ghi đè click chính nó | **Tự động nhận diện toạ độ Toolbar để bỏ qua click trên app** |
 | **Chế độ dòng lệnh (CLI)** | Hạn chế | ✅ Hỗ trợ đầy đủ cờ CLI `--cli` cho headless / automation |
@@ -28,7 +38,8 @@ Từ Windows 11 bản cập nhật mới, Microsoft đã chính thức thông b�
 
 ```text
 step-recorder/
-├── run.py                          # Launcher khởi chạy ứng dụng chính
+├── run.py                          # Launcher khởi chạy ứng dụng chính (auto-bridge Windows Host)
+├── run_app.bat                     # File chạy nhanh trên Windows
 ├── pyproject.toml                  # Cấu hình đóng gói dự án
 ├── requirements.txt                # Thư viện phụ thuộc
 ├── README.md                       # Hướng dẫn chi tiết
@@ -36,21 +47,25 @@ step-recorder/
 │   └── test_all.py                 # Bộ kiểm thử tự động (Unit & Integration tests)
 └── step_recorder/
     ├── __init__.py
-    ├── config.py                   # Quản lý cài đặt (load/save json)
+    ├── i18n.py                     # Quản lý đa ngôn ngữ Song ngữ (VI & EN)
+    ├── config.py                   # Quản lý cài đặt (load/save json nguyên tử)
     ├── models.py                   # Data models (Step, SessionMetadata)
-    ├── window_info.py              # Nhận diện cửa sổ & tiến trình đang kích hoạt (Win/Linux/Mac)
+    ├── window_info.py              # Nhận diện cửa sổ, tiến trình, PID, UI Control & API Exclude Capture
     ├── capture.py                  # Chụp màn hình đa màn hình với mss & Pillow
-    ├── annotator.py                # Vẽ chỉ điểm chuột (Ring, Glow, Badge, Selection Box)
+    ├── annotator.py                # Vẽ chỉ điểm chuột (Ring, Glow, Badge, Blur, Redact, Crop)
+    ├── hotkeys.py                  # Lắng nghe phím tắt toàn cục Global Hotkeys (F7..F11)
     ├── recorder.py                 # Core engine bắt sự kiện mouse & keyboard (pynput)
-    ├── exporter.py                 # Xuất báo cáo HTML, Markdown, JSON, ZIP
+    ├── exporter.py                 # Xuất báo cáo HTML, Markdown song ngữ, JSON, ZIP
     ├── cli.py                      # Giao diện dòng lệnh CLI
     ├── templates/
-    │   └── report_template.html    # Giao diện báo cáo HTML hiện đại tích hợp sẵn
+    │   └── report_template.html    # Giao diện báo cáo HTML hiện đại tích hợp bộ chuyển ngữ VI/EN
     └── ui/
         ├── __init__.py
-        ├── main_window.py          # Thanh công cụ nổi (Floating Toolbar)
-        ├── comment_dialog.py       # Cửa sổ thêm ghi chú / ghi nhận lỗi tại bước
-        └── settings_dialog.py      # Cửa sổ cấu hình thông số
+        ├── main_window.py          # Thanh công cụ nổi với nút ghim, ngôn ngữ & 6 nút chức năng
+        ├── step_editor.py          # Cửa sổ Chỉnh sửa, Xóa, Sắp xếp bước & Vẽ lại Highlight
+        ├── comment_dialog.py       # Cửa sổ thêm ghi chú / khoanh vùng lỗi tại bước
+        ├── snipper.py              # Công cụ đóng băng màn hình kéo chọn vùng Focus/Highlight
+        └── settings_dialog.py      # Cửa sổ cấu hình thông số song ngữ (Scrollable & Responsive)
 ```
 
 ---
@@ -82,11 +97,14 @@ python run.py
 ```
 
 Thanh công cụ nhỏ gọn nổi trên màn hình sẽ xuất hiện:
-- **`⏺ Start Record`**: Bắt đầu ghi lại các thao tác chuột và phím.
-- **`⏸ Pause` / `▶ Resume`**: Tạm dừng hoặc tiếp tục phiên ghi hình.
-- **`💬 Comment`**: Thêm ghi chú mô tả lỗi hoặc ghi chú quan trọng tại màn hình hiện tại.
-- **`⏹ Stop`**: Dừng phiên ghi hình, tự động kết xuất báo cáo và mở trong trình duyệt web.
-- **`⚙ Settings`**: Mở cửa sổ cấu hình (màu sắc điểm nhấn, kiểu marker, thư mục lưu, v.v.).
+- **`🇻🇳 VI` / `🇬🇧 EN`**: Nút chuyển đổi nhanh ngôn ngữ (Tiếng Việt & English) tức thì trên toàn bộ ứng dụng.
+- **`📌 On Top` / `📍 Normal`**: Nút ghim thanh công cụ luôn trên cùng hoặc hạ xuống cửa sổ bình thường.
+- **`⏺ Bắt đầu (Start)`**: Bắt đầu ghi lại các thao tác chuột và bàn phím.
+- **`⏸ Tạm dừng (Pause)` / `▶ Tiếp tục (Resume)`**: Tạm dừng hoặc tiếp tục phiên ghi hình.
+- **`💬 Ghi chú (Comment)`**: Mở hộp thoại thêm ghi chú lỗi và khoanh vùng Focus/Highlight trên màn hình.
+- **`📝 Chỉnh sửa (Review)`**: Mở cửa sổ quản lý bước, xóa bước thừa, sắp xếp, vẽ lại vùng highlight và cập nhật mô tả.
+- **`⏹ Dừng lại (Stop)`**: Dừng phiên ghi và tự động chuyển sang màn hình Review để kiểm tra trước khi xuất báo cáo.
+- **`⚙ Cài đặt (Settings)`**: Cấu hình ngôn ngữ, thư mục lưu, kiểu chỉ điểm click, giới hạn bước, độ trễ và tùy chọn xuất file.
 
 ---
 
@@ -119,18 +137,20 @@ Sau khi nhấn **Stop**, công cụ sẽ tạo ra 1 thư mục chứa đầy đ�
 
 1. **`report.html`**:
    - Tệp HTML độc lập (**Standalone**), toàn bộ ảnh chụp màn hình được mã hoá Base64 nhúng trực tiếp.
+   - **Giao diện tài liệu 2 cột (Documentation Layout)** với thanh **Mục Lục (Table of Contents - TOC)** dính ở cạnh trái (`sticky`), tự động Scrollspy theo dõi vị trí đọc.
+   - Thẻ phân đoạn **Section Banner Cards** nổi bật với nhãn chương mục, tiêu đề và mục tiêu thực hiện SOP.
    - Không cần mạng Internet để mở.
-   - Hỗ trợ chế độ **Sáng / Tối (Dark/Light mode)**.
+   - Hỗ trợ chế độ **Sáng / Tối (Dark/Light mode)** và nút chuyển đổi ngôn ngữ trực tiếp `🌐 Tiếng Việt / English`.
    - Tính năng **Bộ lọc nhanh**: Xem tất cả, chỉ xem Clicks, chỉ xem Phím bấm, chỉ xem Ghi chú.
-   - Tìm kiếm nội dung bước hoặc tên cửa sổ theo thời gian thực.
+   - Tìm kiếm nội dung bước, tiêu đề chương hoặc tên cửa sổ theo thời gian thực.
    - Trình xem ảnh phóng to (**Fullscreen Lightbox Modal**) với các phím mũi tên `←` / `→` và `Esc`.
-   - Nút **Print / PDF** được tối ưu sẵn CSS `@media print`.
+   - Nút **Print / PDF** được tối ưu hóa cho SOP: Trang 1 in Mục lục riêng, mỗi chương tự động ngắt sang trang mới sạch đẹp.
 
 2. **`report.md`**:
-   - Tệp Markdown chuẩn để dán trực tiếp vào **Jira, GitHub Issues, Confluence hoặc Notion**.
+   - Tệp Markdown chuẩn có sẵn **Mục Lục (Table of Contents)** và các thẻ liên kết Anchor để dán trực tiếp vào **Jira, GitHub Issues, Confluence, Notion hoặc Obsidian**.
 
 3. **`session.json`**:
-   - Dữ liệu dạng JSON chứa đầy đủ toạ độ chuột `(x, y)`, thời gian, tên tiến trình, tiêu đề cửa sổ cho các hệ thống phân tích tự động.
+   - Dữ liệu dạng JSON chứa đầy đủ toạ độ chuột `(x, y)`, thông tin chương mục (`is_section_header`, `section_title`), thời gian, tên tiến trình, tiêu đề cửa sổ cho các hệ thống phân tích tự động.
 
 4. **`rec_XXXXXXXX.zip`**:
    - Gói nén chứa toàn bộ ảnh chụp PNG chất lượng cao và các tệp báo cáo.
@@ -145,7 +165,7 @@ Dự án đi kèm bộ test toàn diện:
 python -m unittest tests/test_all.py
 ```
 
-Kết quả: Toàn bộ 8 bài test về Config, Screen Capture, Marker Annotations, Cross-platform Window Info, Jinja2 Template rendering và Lifecycle State đều vượt qua 100%.
+Kết quả: Toàn bộ 12 bài test về Config, Screen Capture, Marker Annotations, Cross-platform Window Info, Section Headers, Table of Contents, Jinja2 Template rendering và Lifecycle State đều vượt qua 100% trên cả Linux và Windows.
 
 ---
 

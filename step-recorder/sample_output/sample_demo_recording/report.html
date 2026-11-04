@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Báo Cáo Mẫu Kiểm Thử Step Recorder - Step Recording Report</title>
+  <title>SOP: Hướng Dẫn Thao Tác Hệ Thống ERP &amp; Quản Lý Kho - Step Recording Report</title>
   <style>
     :root {
       --bg-primary: #0f172a;
@@ -19,7 +19,7 @@
       --badge-primary: #0284c7;
       --badge-secondary: #7c3aed;
       --badge-warning: #d97706;
-      --badge-info: #059669;
+      --badge-info: #059669;  
       --danger: #ef4444;
       --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.25);
       --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
@@ -50,6 +50,10 @@
       padding: 0;
     }
 
+    html {
+      scroll-behavior: smooth;
+    }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background-color: var(--bg-primary);
@@ -59,11 +63,195 @@
       transition: background-color 0.2s ease, color 0.2s ease;
     }
 
-    /* Container */
-    .container {
-      max-width: 1100px;
+    /* Overall Documentation Layout: Sidebar + Main */
+    .doc-layout {
+      max-width: 1380px;
       margin: 0 auto;
       padding: 24px 20px;
+      display: flex;
+      gap: 26px;
+      align-items: flex-start;
+    }
+
+    /* TOC Sidebar */
+    .toc-sidebar {
+      width: 290px;
+      flex-shrink: 0;
+      position: sticky;
+      top: 20px;
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      z-index: 50;
+    }
+
+    /* Custom thin scrollbar for sidebar */
+    .toc-sidebar::-webkit-scrollbar {
+      width: 5px;
+    }
+    .toc-sidebar::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: 9999px;
+    }
+
+    .toc-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .toc-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      color: var(--text-primary);
+    }
+
+    .toc-close-btn {
+      display: none;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.1rem;
+      cursor: pointer;
+    }
+
+    .toc-nav {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .toc-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: var(--radius-sm);
+      text-decoration: none;
+      color: var(--text-secondary);
+      font-size: 0.86rem;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+
+    .toc-link:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .toc-link.active {
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--accent-color);
+      font-weight: 600;
+      border-left: 3px solid var(--accent-color);
+    }
+
+    .toc-sec-group {
+      margin-top: 8px;
+      padding-top: 6px;
+      border-top: 1px dashed var(--border-color);
+    }
+
+    .toc-sec-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      border-radius: var(--radius-sm);
+      text-decoration: none;
+      color: var(--text-primary);
+      font-size: 0.88rem;
+      font-weight: 700;
+      transition: background 0.15s ease;
+    }
+
+    .toc-sec-head:hover {
+      background: var(--bg-hover);
+    }
+
+    .toc-sec-head.active {
+      color: var(--accent-color);
+    }
+
+    .toc-sec-title-box {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .toc-sec-count {
+      font-size: 0.72rem;
+      font-weight: 600;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      padding: 2px 6px;
+      border-radius: 9999px;
+      flex-shrink: 0;
+    }
+
+    .toc-sub-items {
+      margin-left: 12px;
+      padding-left: 8px;
+      border-left: 2px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-top: 4px;
+    }
+
+    .toc-step-link {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 8px;
+      border-radius: var(--radius-sm);
+      text-decoration: none;
+      color: var(--text-muted);
+      font-size: 0.80rem;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .toc-step-link:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .toc-step-link.active {
+      color: var(--accent-color);
+      font-weight: 600;
+    }
+
+    .toc-step-num {
+      font-family: monospace;
+      font-weight: 700;
+      color: var(--accent-color);
+      flex-shrink: 0;
+    }
+
+    /* Main Content Pane */
+    .doc-main {
+      flex: 1;
+      min-width: 0;
     }
 
     /* Header */
@@ -71,8 +259,8 @@
       background: var(--bg-card);
       border: 1px solid var(--border-color);
       border-radius: var(--radius);
-      padding: 28px;
-      margin-bottom: 24px;
+      padding: 26px;
+      margin-bottom: 22px;
       box-shadow: var(--shadow-md);
       position: relative;
       overflow: hidden;
@@ -94,10 +282,11 @@
       align-items: flex-start;
       margin-bottom: 20px;
       gap: 16px;
+      flex-wrap: wrap;
     }
 
     .title-group h1 {
-      font-size: 1.75rem;
+      font-size: 1.7rem;
       font-weight: 700;
       color: var(--text-primary);
       display: flex;
@@ -113,23 +302,25 @@
 
     .header-actions {
       display: flex;
-      gap: 10px;
+      gap: 8px;
       align-items: center;
+      flex-wrap: wrap;
     }
 
     button.btn {
       background: var(--bg-secondary);
       color: var(--text-primary);
       border: 1px solid var(--border-color);
-      padding: 8px 14px;
+      padding: 7px 13px;
       border-radius: var(--radius-sm);
       cursor: pointer;
-      font-size: 0.88rem;
+      font-size: 0.85rem;
       font-weight: 500;
       display: inline-flex;
       align-items: center;
       gap: 6px;
       transition: all 0.15s ease;
+      user-select: none;
     }
 
     button.btn:hover {
@@ -141,28 +332,33 @@
       background: var(--accent-color);
       color: #ffffff;
       border-color: transparent;
+      font-weight: 600;
     }
 
     button.btn-primary:hover {
       opacity: 0.9;
     }
 
+    #mobileTocBtn {
+      display: none;
+    }
+
     /* Metadata Grid */
     .stats-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 12px;
     }
 
     .stat-card {
       background: var(--bg-secondary);
       border: 1px solid var(--border-color);
       border-radius: var(--radius-sm);
-      padding: 14px;
+      padding: 12px 14px;
     }
 
     .stat-label {
-      font-size: 0.78rem;
+      font-size: 0.75rem;
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.5px;
@@ -171,7 +367,7 @@
     }
 
     .stat-value {
-      font-size: 1.25rem;
+      font-size: 1.18rem;
       font-weight: 700;
       color: var(--text-primary);
       display: flex;
@@ -184,13 +380,13 @@
       background: var(--bg-card);
       border: 1px solid var(--border-color);
       border-radius: var(--radius);
-      padding: 14px 20px;
-      margin-bottom: 24px;
+      padding: 12px 18px;
+      margin-bottom: 22px;
       display: flex;
       flex-wrap: wrap;
       justify-content: space-between;
       align-items: center;
-      gap: 14px;
+      gap: 12px;
       position: sticky;
       top: 16px;
       z-index: 20;
@@ -200,7 +396,7 @@
 
     .filter-pills {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       flex-wrap: wrap;
     }
 
@@ -208,9 +404,9 @@
       background: var(--bg-secondary);
       border: 1px solid var(--border-color);
       color: var(--text-secondary);
-      padding: 6px 14px;
+      padding: 5px 12px;
       border-radius: 9999px;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       cursor: pointer;
       user-select: none;
       transition: all 0.15s ease;
@@ -230,7 +426,7 @@
 
     .search-box {
       flex: 1;
-      max-width: 320px;
+      max-width: 300px;
       position: relative;
     }
 
@@ -239,9 +435,9 @@
       background: var(--bg-secondary);
       border: 1px solid var(--border-color);
       border-radius: var(--radius-sm);
-      padding: 7px 12px 7px 32px;
+      padding: 6px 12px 6px 32px;
       color: var(--text-primary);
-      font-size: 0.88rem;
+      font-size: 0.85rem;
       outline: none;
     }
 
@@ -255,14 +451,70 @@
       top: 50%;
       transform: translateY(-50%);
       color: var(--text-muted);
-      font-size: 0.9rem;
+      font-size: 0.85rem;
     }
 
-    /* Step Cards */
+    /* Section Banner Cards */
+    .section-banner {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.10) 0%, rgba(129, 140, 248, 0.10) 100%);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-left: 6px solid var(--accent-color);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-top: 26px;
+      margin-bottom: 10px;
+      box-shadow: var(--shadow-sm);
+      transition: all 0.15s ease;
+    }
+
+    [data-theme="light"] .section-banner {
+      background: linear-gradient(135deg, #e0f2fe 0%, #ede9fe 100%);
+      border: 1px solid #bae6fd;
+      border-left: 6px solid #0284c7;
+    }
+
+    .sec-banner-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+
+    .sec-tag-pill {
+      background: var(--accent-color);
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .sec-step-ref {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      font-family: monospace;
+    }
+
+    .sec-banner-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    .sec-banner-desc {
+      font-size: 0.92rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    /* Steps Timeline */
     .steps-container {
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 18px;
     }
 
     .step-card {
@@ -280,7 +532,7 @@
     }
 
     .step-card-header {
-      padding: 16px 20px;
+      padding: 14px 18px;
       border-bottom: 1px solid var(--border-color);
       display: flex;
       justify-content: space-between;
@@ -293,23 +545,23 @@
     .step-title-area {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
     }
 
     .step-badge {
       background: var(--accent-gradient);
       color: #ffffff;
       font-weight: 700;
-      font-size: 0.88rem;
-      padding: 4px 12px;
+      font-size: 0.85rem;
+      padding: 3px 10px;
       border-radius: 9999px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.15);
     }
 
     .action-badge {
-      font-size: 0.82rem;
+      font-size: 0.80rem;
       font-weight: 600;
-      padding: 3px 10px;
+      padding: 3px 9px;
       border-radius: var(--radius-sm);
       display: inline-flex;
       align-items: center;
@@ -323,52 +575,52 @@
     .badge-info { background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
 
     .step-window-tag {
-      font-size: 0.82rem;
+      font-size: 0.80rem;
       color: var(--text-secondary);
       background: var(--bg-secondary);
       border: 1px solid var(--border-color);
-      padding: 3px 10px;
+      padding: 2px 8px;
       border-radius: var(--radius-sm);
-      max-width: 380px;
+      max-width: 340px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
     .step-time {
-      font-size: 0.82rem;
+      font-size: 0.80rem;
       color: var(--text-muted);
       font-family: monospace;
     }
 
     .step-card-body {
-      padding: 20px;
+      padding: 18px;
     }
 
     .step-description {
-      font-size: 1.05rem;
+      font-size: 1.02rem;
       font-weight: 500;
       color: var(--text-primary);
-      margin-bottom: 16px;
+      margin-bottom: 14px;
       line-height: 1.5;
     }
 
     .comment-box {
       background: rgba(16, 185, 129, 0.08);
       border-left: 4px solid var(--badge-info);
-      padding: 12px 16px;
+      padding: 10px 14px;
       border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-      margin-bottom: 16px;
-      font-size: 0.95rem;
+      margin-bottom: 14px;
+      font-size: 0.92rem;
       color: var(--text-primary);
     }
 
     .comment-title {
       font-weight: 700;
       color: var(--badge-info);
-      font-size: 0.82rem;
+      font-size: 0.78rem;
       text-transform: uppercase;
-      margin-bottom: 4px;
+      margin-bottom: 3px;
     }
 
     /* Screenshot container */
@@ -410,11 +662,11 @@
 
     /* Technical details */
     .step-meta-toggle {
-      margin-top: 14px;
+      margin-top: 12px;
     }
 
     details {
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       color: var(--text-muted);
     }
 
@@ -431,21 +683,21 @@
     }
 
     .meta-content {
-      margin-top: 10px;
-      padding: 10px 14px;
+      margin-top: 8px;
+      padding: 10px 12px;
       background: var(--bg-secondary);
       border-radius: var(--radius-sm);
       border: 1px solid var(--border-color);
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 6px;
       font-family: monospace;
-      font-size: 0.82rem;
+      font-size: 0.80rem;
     }
 
     .meta-item {
       display: flex;
-      gap: 8px;
+      gap: 6px;
     }
 
     .meta-label {
@@ -528,7 +780,46 @@
     .lightbox-prev { left: -60px; }
     .lightbox-next { right: -60px; }
 
-    @media (max-width: 768px) {
+    /* Mobile Backdrop for Drawer */
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(4px);
+      z-index: 45;
+    }
+
+    /* Responsive Breakpoints */
+    @media (max-width: 1024px) {
+      .doc-layout {
+        flex-direction: column;
+        padding: 16px 12px;
+      }
+      .toc-sidebar {
+        display: none;
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 310px;
+        max-height: 100vh;
+        border-radius: 0;
+        z-index: 100;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      }
+      .toc-sidebar.drawer-open {
+        display: flex;
+      }
+      .sidebar-backdrop.drawer-open {
+        display: block;
+      }
+      .toc-close-btn {
+        display: block;
+      }
+      #mobileTocBtn {
+        display: inline-flex;
+      }
       .lightbox-prev { left: 10px; }
       .lightbox-next { right: 10px; }
     }
@@ -536,12 +827,39 @@
     /* Print styles */
     @media print {
       body {
-        background: #ffffff;
-        color: #000000;
-        padding-bottom: 0;
+        background: #ffffff !important;
+        color: #000000 !important;
+        padding-bottom: 0 !important;
       }
-      .filter-bar, .header-actions, .zoom-hint, .lightbox-modal {
+      .filter-bar, .header-actions, .zoom-hint, .lightbox-modal, #mobileTocBtn, .toc-close-btn, .sidebar-backdrop {
         display: none !important;
+      }
+      .doc-layout {
+        display: block !important;
+        padding: 0 !important;
+        max-width: 100% !important;
+      }
+      .toc-sidebar {
+        display: block !important;
+        position: static !important;
+        width: 100% !important;
+        max-height: none !important;
+        border: 1px solid #cccccc !important;
+        box-shadow: none !important;
+        margin-bottom: 24px !important;
+        page-break-after: always !important; /* Standalone initial Table of Contents page */
+      }
+      .toc-sec-group {
+        page-break-inside: avoid;
+      }
+      .section-banner {
+        box-shadow: none !important;
+        border: 1px solid #999999 !important;
+        border-left: 6px solid #0284c7 !important;
+        background: #f1f5f9 !important;
+        color: #000000 !important;
+        page-break-before: always !important; /* Force each chapter onto a new page */
+        margin-top: 0 !important;
       }
       header, .step-card {
         box-shadow: none !important;
@@ -557,182 +875,350 @@
 </head>
 <body>
 
-  <div class="container">
-    <!-- Header -->
-    <header>
-      <div class="header-top">
-        <div class="title-group">
-          <h1><span>📋</span> Báo Cáo Mẫu Kiểm Thử Step Recorder</h1>
-          <p>Bản ghi tự động minh họa tính năng thay thế Windows Steps Recorder bằng Python.</p>
+  <!-- Mobile Backdrop -->
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="toggleTocMobile()"></div>
+
+  <div class="doc-layout">
+
+    <!-- Left Sticky Sidebar: Table of Contents -->
+    <aside class="toc-sidebar" id="tocSidebar">
+      <div class="toc-header">
+        <div class="toc-title-row">
+          <span>📑</span>
+          <span data-i18n="toc_title">Mục Lục Hướng Dẫn</span>
         </div>
-        <div class="header-actions">
-          <button class="btn" onclick="toggleTheme()" id="themeBtn">🌓 Theme</button>
-          <button class="btn btn-primary" onclick="window.print()">🖨️ Print / PDF</button>
-        </div>
+        <button class="toc-close-btn" onclick="toggleTocMobile()">✕</button>
       </div>
 
-      <!-- Stats Grid -->
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-label">Total Steps</div>
-          <div class="stat-value"><span>🔢</span> 2</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Duration</div>
-          <div class="stat-value"><span>⏱️</span> 00:00</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Recorded At</div>
-          <div class="stat-value" style="font-size: 0.95rem;"><span>📅</span> 2026-11-04 10:18</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">System & Display</div>
-          <div class="stat-value" style="font-size: 0.95rem;"><span>🖥️</span> Linux WSL2 Ubuntu (1920x1200)</div>
-        </div>
-      </div>
-    </header>
+      <nav class="toc-nav" id="tocNav">
+        <a href="#overview" class="toc-link active" data-target="overview">
+          <span>📌</span>
+          <span data-i18n="toc_overview">Tổng Quan Quy Trình</span>
+        </a>
 
-    <!-- Filter & Search Bar -->
-    <div class="filter-bar">
-      <div class="filter-pills">
-        <div class="pill active" onclick="filterSteps('all', this)">All (2)</div>
-        <div class="pill" onclick="filterSteps('click', this)">Clicks</div>
-        <div class="pill" onclick="filterSteps('key_press', this)">Keys</div>
-        <div class="pill" onclick="filterSteps('comment', this)">Comments</div>
-      </div>
-
-      <div class="search-box">
-        <span class="search-icon">🔍</span>
-        <input type="text" class="search-input" id="searchInput" placeholder="Search steps or window..." oninput="handleSearch()">
-      </div>
-    </div>
-
-    <!-- Steps Timeline -->
-    <div class="steps-container" id="stepsContainer">
-      
-      <div class="step-card" data-action="left_click" data-step-id="1" data-search="user left click at (450, 320) on [step recorder setup] terminal - step-recorder bash ">
         
-        <!-- Step Card Header -->
-        <div class="step-card-header">
-          <div class="step-title-area">
-            <span class="step-badge">#1</span>
-            <span class="action-badge badge-primary">
-              👆 Left Click
-            </span>
-            <span class="step-window-tag" title="Terminal - step-recorder">
-              🪟 Terminal - step-recorder
-            </span>
-          </div>
-          <div class="step-time">10:18:33</div>
-        </div>
-
-        <!-- Step Card Body -->
-        <div class="step-card-body">
-          <div class="step-description">User Left Click at (450, 320) on [Step Recorder Setup]</div>
-
           
-
-          
-          <div class="screenshot-wrapper" onclick="openLightbox(0)">
-            
-            <img src="data:image/png;base64,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AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMGv/Ab/aDzzJfvxGAAAAAElFTkSuQmCC" alt="Step 1 screenshot" loading="lazy">
-            
-            <div class="zoom-hint">🔍 Click to zoom</div>
-          </div>
-          
-
-          <!-- Technical Details Collapsible -->
-          <div class="step-meta-toggle">
-            <details>
-              <summary>Technical Details & Coordinates</summary>
-              <div class="meta-content">
-                <div class="meta-item">
-                  <span class="meta-label">Timestamp:</span>
-                  <span class="meta-val">2026-11-04 10:18:33.802</span>
-                </div>
-                
-                <div class="meta-item">
-                  <span class="meta-label">Coordinates:</span>
-                  <span class="meta-val">X=450, Y=320</span>
-                </div>
-                
-                <div class="meta-item">
-                  <span class="meta-label">Process:</span>
-                  <span class="meta-val">bash</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">Window:</span>
-                  <span class="meta-val">Terminal - step-recorder</span>
-                </div>
+          <div class="toc-sec-group">
+            <a href="#section-1" class="toc-sec-head" data-target="section-1">
+              <div class="toc-sec-title-box">
+                <span>📁</span>
+                <span title="Phần 1: Khởi Tạo &amp; Đăng Nhập Hệ Thống">Phần 1: Khởi Tạo &amp; Đăng Nhập Hệ Thống</span>
               </div>
-            </details>
+              <span class="toc-sec-count">2</span>
+            </a>
+            <div class="toc-sub-items">
+              
+              <a href="#step-1" class="toc-step-link" data-target="step-1">
+                <span class="toc-step-num">#1</span>
+                <span title="Người dùng nhấp chuột trái vào menu Thiết Lập (Settings)">Người dùng nhấp chuột trái...</span>
+              </a>
+              
+              <a href="#step-2" class="toc-step-link" data-target="step-2">
+                <span class="toc-step-num">#2</span>
+                <span title="Kiểm tra phân quyền tài khoản quản trị và cấu hình proxy">Kiểm tra phân quyền tài kh...</span>
+              </a>
+              
+            </div>
           </div>
-        </div>
-
-      </div>
-      
-      <div class="step-card" data-action="comment" data-step-id="2" data-search="user verified environment configuration code editor code kiem tra toan bo module va thu vien chay hoan hao tren moi he dieu hanh.">
+          
+          <div class="toc-sec-group">
+            <a href="#section-3" class="toc-sec-head" data-target="section-3">
+              <div class="toc-sec-title-box">
+                <span>📁</span>
+                <span title="Phần 2: Thao Tác Chỉnh Sửa Dữ Liệu Vật Tư">Phần 2: Thao Tác Chỉnh Sửa Dữ Liệu Vật Tư</span>
+              </div>
+              <span class="toc-sec-count">1</span>
+            </a>
+            <div class="toc-sub-items">
+              
+              <a href="#step-3" class="toc-step-link" data-target="step-3">
+                <span class="toc-step-num">#3</span>
+                <span title="Nhấp đúp chuột vào bảng dữ liệu để kích hoạt chế độ chỉnh sửa chi tiết">Nhấp đúp chuột vào bảng dữ...</span>
+              </a>
+              
+            </div>
+          </div>
+          
         
-        <!-- Step Card Header -->
-        <div class="step-card-header">
-          <div class="step-title-area">
-            <span class="step-badge">#2</span>
-            <span class="action-badge badge-info">
-              💬 Comment
-            </span>
-            <span class="step-window-tag" title="Code Editor">
-              🪟 Code Editor
-            </span>
+      </nav>
+    </aside>
+
+    <!-- Main Content Pane -->
+    <main class="doc-main">
+      <!-- Header -->
+      <header id="overview">
+        <div class="header-top">
+          <div class="title-group">
+            <h1><span>📋</span> SOP: Hướng Dẫn Thao Tác Hệ Thống ERP &amp; Quản Lý Kho</h1>
+            <p>Tài liệu hướng dẫn thao tác chuẩn (Standard Operating Procedure) xuất báo cáo tự động bằng Python Step Recorder.</p>
           </div>
-          <div class="step-time">10:18:33</div>
-        </div>
-
-        <!-- Step Card Body -->
-        <div class="step-card-body">
-          <div class="step-description">User verified environment configuration</div>
-
-          
-          <div class="comment-box">
-            <div class="comment-title">💬 User Note:</div>
-            <div>Kiem tra toan bo module va thu vien chay hoan hao tren moi he dieu hanh.</div>
-          </div>
-          
-
-          
-          <div class="screenshot-wrapper" onclick="openLightbox(1)">
-            
-            <img src="data:image/png;base64,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AAAA+Nr4CCEAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASx40AvhKn7m8YAgAAAACLxAY0AAAAAAAJARoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgvvwL9KOWpJQNn2oAAAAASUVORK5CYII=" alt="Step 2 screenshot" loading="lazy">
-            
-            <div class="zoom-hint">🔍 Click to zoom</div>
-          </div>
-          
-
-          <!-- Technical Details Collapsible -->
-          <div class="step-meta-toggle">
-            <details>
-              <summary>Technical Details & Coordinates</summary>
-              <div class="meta-content">
-                <div class="meta-item">
-                  <span class="meta-label">Timestamp:</span>
-                  <span class="meta-val">2026-11-04 10:18:33.877</span>
-                </div>
-                
-                <div class="meta-item">
-                  <span class="meta-label">Process:</span>
-                  <span class="meta-val">code</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">Window:</span>
-                  <span class="meta-val">Code Editor</span>
-                </div>
-              </div>
-            </details>
+          <div class="header-actions">
+            <button class="btn" onclick="toggleTocMobile()" id="mobileTocBtn">📑 <span data-i18n="btn_toc">Mục Lục</span></button>
+            <button class="btn" onclick="toggleLanguage()" id="langBtn">🌐 <span id="langText">🇻🇳 Tiếng Việt</span></button>
+            <button class="btn" onclick="toggleTheme()" id="themeBtn">🌓 <span data-i18n="theme">Theme</span></button>
+            <button class="btn btn-primary" onclick="window.print()">🖨️ <span data-i18n="print">Print / PDF</span></button>
           </div>
         </div>
 
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="stat_steps">Total Steps</div>
+            <div class="stat-value"><span>🔢</span> 3</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="stat_duration">Duration</div>
+            <div class="stat-value"><span>⏱️</span> 00:00</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="stat_recorded_at">Recorded At</div>
+            <div class="stat-value" style="font-size: 0.95rem;"><span>📅</span> 2026-11-04 16:17</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="stat_system">System & Display</div>
+            <div class="stat-value" style="font-size: 0.95rem;"><span>🖥️</span> Windows 11 Pro / WSL2 Ubuntu (1920x1080)</div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Filter & Search Bar -->
+      <div class="filter-bar">
+        <div class="filter-pills">
+          <div class="pill active" onclick="filterSteps('all', this)" data-i18n="filter_all">All (3)</div>
+          <div class="pill" onclick="filterSteps('click', this)" data-i18n="filter_clicks">Clicks</div>
+          <div class="pill" onclick="filterSteps('key_press', this)" data-i18n="filter_keys">Keys</div>
+          <div class="pill" onclick="filterSteps('comment', this)" data-i18n="filter_comments">Comments</div>
+        </div>
+
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" class="search-input" id="searchInput" placeholder="Search steps or window..." oninput="handleSearch()">
+        </div>
       </div>
-      
-    </div>
+
+      <!-- Steps Timeline -->
+      <div class="steps-container" id="stepsContainer">
+        
+
+        <!-- Section Banner Card -->
+        
+        <div class="section-banner" id="section-1">
+          <div class="sec-banner-top">
+            <span class="sec-tag-pill" data-i18n="section_tag">PHẦN</span>
+            <span class="sec-step-ref">Bước #1</span>
+          </div>
+          <h2 class="sec-banner-title">Phần 1: Khởi Tạo &amp; Đăng Nhập Hệ Thống</h2>
+          
+          <p class="sec-banner-desc">Hướng dẫn nhân viên mở phần mềm ERP và truy cập vào giao diện quản trị phân quyền.</p>
+          
+        </div>
+        
+
+        <div class="step-card" id="step-1" data-action="left_click" data-step-id="1" data-search="người dùng nhấp chuột trái vào menu thiết lập (settings) hệ thống quản lý doanh nghiệp (erp nexacro) nexacro.exe  phần 1: khởi tạo &amp; đăng nhập hệ thống hướng dẫn nhân viên mở phần mềm erp và truy cập vào giao diện quản trị phân quyền.">
+          
+          <!-- Step Card Header -->
+          <div class="step-card-header">
+            <div class="step-title-area">
+              <span class="step-badge">#1</span>
+              <span class="action-badge badge-primary">
+                👆 Left Click
+              </span>
+              <span class="step-window-tag" title="Hệ Thống Quản Lý Doanh Nghiệp (ERP Nexacro)">
+                🪟 Hệ Thống Quản Lý Doanh Nghiệp (ERP Nexacro)
+              </span>
+            </div>
+            <div class="step-time">16:17:17</div>
+          </div>
+
+          <!-- Step Card Body -->
+          <div class="step-card-body">
+            <div class="step-description">Người dùng nhấp chuột trái vào menu Thiết Lập (Settings)</div>
+
+            
+
+            
+            <div class="screenshot-wrapper" onclick="openLightbox(0)">
+              
+              <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABQAAAALQCAIAAABAH0oBAAAW+UlEQVR4nO3dv8sk933A8a/kw8hGlhsRQYrDbhKfIY1BlRqDVMVWrcaVmgQiUqSyCpP8BSlCaqdJERUJGOFOBjeuDC5tSOOgQiAkFzLCNkaCFINGc7O7s3vPr32079eLK+55bnb2e+Wbz3e+89TDRy8NAAAAuHRPn3sBAAAAcBcEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAA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CGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAAS/h+/S0CM1JIVXwAAAABJRU5ErkJggg==" alt="Step 1 screenshot" loading="lazy">
+              
+              <div class="zoom-hint" data-i18n="zoom_hint">🔍 Click to zoom</div>
+            </div>
+            
+
+            <!-- Technical Details Collapsible -->
+            <div class="step-meta-toggle">
+              <details>
+                <summary data-i18n="tech_details">Technical Details & Coordinates</summary>
+                <div class="meta-content">
+                  <div class="meta-item">
+                    <span class="meta-label">Timestamp:</span>
+                    <span class="meta-val">2026-11-04 16:17:17.306</span>
+                  </div>
+                  
+                  <div class="meta-item">
+                    <span class="meta-label">Coordinates:</span>
+                    <span class="meta-val">X=450, Y=320</span>
+                  </div>
+                  
+                  <div class="meta-item">
+                    <span class="meta-label">Process:</span>
+                    <span class="meta-val">nexacro.exe</span>
+                  </div>
+                  <div class="meta-item">
+                    <span class="meta-label">Window:</span>
+                    <span class="meta-val">Hệ Thống Quản Lý Doanh Nghiệp (ERP Nexacro)</span>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+
+        </div>
+        
+
+        <!-- Section Banner Card -->
+        
+
+        <div class="step-card" id="step-2" data-action="comment" data-step-id="2" data-search="kiểm tra phân quyền tài khoản quản trị và cấu hình proxy hệ thống quản lý doanh nghiệp (erp nexacro) nexacro.exe lưu ý: nếu không thấy nút cấu hình, hãy liên hệ it để cấp quyền quản trị viên (role admin).  ">
+          
+          <!-- Step Card Header -->
+          <div class="step-card-header">
+            <div class="step-title-area">
+              <span class="step-badge">#2</span>
+              <span class="action-badge badge-info">
+                💬 Comment
+              </span>
+              <span class="step-window-tag" title="Hệ Thống Quản Lý Doanh Nghiệp (ERP Nexacro)">
+                🪟 Hệ Thống Quản Lý Doanh Nghiệp (ERP Nexacro)
+              </span>
+            </div>
+            <div class="step-time">16:17:17</div>
+          </div>
+
+          <!-- Step Card Body -->
+          <div class="step-card-body">
+            <div class="step-description">Kiểm tra phân quyền tài khoản quản trị và cấu hình proxy</div>
+
+            
+            <div class="comment-box">
+              <div class="comment-title" data-i18n="user_comment_title">💬 User Note:</div>
+              <div>Lưu ý: Nếu không thấy nút Cấu Hình, hãy liên hệ IT để cấp quyền Quản Trị Viên (Role Admin).</div>
+            </div>
+            
+
+            
+            <div class="screenshot-wrapper" onclick="openLightbox(1)">
+              
+              <img src="data:image/png;base64,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YAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJCwY+gBeM6NT+8fegQAAIDRyAYYAACACAEMAABAwnhhee/QMwAAAMC2swEGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQ8C86CJlraVOX6gAAAABJRU5ErkJggg==" alt="Step 2 screenshot" loading="lazy">
+              
+              <div class="zoom-hint" data-i18n="zoom_hint">🔍 Click to zoom</div>
+            </div>
+            
+
+            <!-- Technical Details Collapsible -->
+            <div class="step-meta-toggle">
+              <details>
+                <summary data-i18n="tech_details">Technical Details & Coordinates</summary>
+                <div class="meta-content">
+                  <div class="meta-item">
+                    <span class="meta-label">Timestamp:</span>
+                    <span class="meta-val">2026-11-04 16:17:17.306</span>
+                  </div>
+                  
+                  <div class="meta-item">
+                    <span class="meta-label">Process:</span>
+                    <span class="meta-val">nexacro.exe</span>
+                  </div>
+                  <div class="meta-item">
+                    <span class="meta-label">Window:</span>
+                    <span class="meta-val">Hệ Thống Quản Lý Doanh Nghiệp (ERP Nexacro)</span>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+
+        </div>
+        
+
+        <!-- Section Banner Card -->
+        
+        <div class="section-banner" id="section-3">
+          <div class="sec-banner-top">
+            <span class="sec-tag-pill" data-i18n="section_tag">PHẦN</span>
+            <span class="sec-step-ref">Bước #3</span>
+          </div>
+          <h2 class="sec-banner-title">Phần 2: Thao Tác Chỉnh Sửa Dữ Liệu Vật Tư</h2>
+          
+          <p class="sec-banner-desc">Quy trình cập nhật mã vật tư, điều chỉnh số lượng tồn kho và xác nhận phê duyệt xuất kho.</p>
+          
+        </div>
+        
+
+        <div class="step-card" id="step-3" data-action="double_click" data-step-id="3" data-search="nhấp đúp chuột vào bảng dữ liệu để kích hoạt chế độ chỉnh sửa chi tiết quản lý kho vật tư &amp; thiết bị nexacro.exe  phần 2: thao tác chỉnh sửa dữ liệu vật tư quy trình cập nhật mã vật tư, điều chỉnh số lượng tồn kho và xác nhận phê duyệt xuất kho.">
+          
+          <!-- Step Card Header -->
+          <div class="step-card-header">
+            <div class="step-title-area">
+              <span class="step-badge">#3</span>
+              <span class="action-badge badge-accent">
+                ✌️ Double Click
+              </span>
+              <span class="step-window-tag" title="Quản Lý Kho Vật Tư &amp; Thiết Bị">
+                🪟 Quản Lý Kho Vật Tư &amp; Thiết Bị
+              </span>
+            </div>
+            <div class="step-time">16:17:17</div>
+          </div>
+
+          <!-- Step Card Body -->
+          <div class="step-card-body">
+            <div class="step-description">Nhấp đúp chuột vào bảng dữ liệu để kích hoạt chế độ chỉnh sửa chi tiết</div>
+
+            
+
+            
+            <div class="screenshot-wrapper" onclick="openLightbox(2)">
+              
+              <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABQAAAALQCAIAAABAH0oBAAATw0lEQVR4nO3dv4uk9R3A8dlgcdXVA1vKQeAsvL8gHrGMhcWZ5nIEImo6WVIbVEJQwuU0CGJtoVikCWiqzX+gggdi8J+45uC8IsWEYd1l53Z+PM+zN+/Xqxp2n5n5tG8+3+eZg/n8cAYAAAD77hdTDwAAAABjEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDA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IEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAICE/wEB4l6pABI1QAAAAABJRU5ErkJggg==" alt="Step 3 screenshot" loading="lazy">
+              
+              <div class="zoom-hint" data-i18n="zoom_hint">🔍 Click to zoom</div>
+            </div>
+            
+
+            <!-- Technical Details Collapsible -->
+            <div class="step-meta-toggle">
+              <details>
+                <summary data-i18n="tech_details">Technical Details & Coordinates</summary>
+                <div class="meta-content">
+                  <div class="meta-item">
+                    <span class="meta-label">Timestamp:</span>
+                    <span class="meta-val">2026-11-04 16:17:17.306</span>
+                  </div>
+                  
+                  <div class="meta-item">
+                    <span class="meta-label">Coordinates:</span>
+                    <span class="meta-val">X=640, Y=360</span>
+                  </div>
+                  
+                  <div class="meta-item">
+                    <span class="meta-label">Process:</span>
+                    <span class="meta-val">nexacro.exe</span>
+                  </div>
+                  <div class="meta-item">
+                    <span class="meta-label">Window:</span>
+                    <span class="meta-val">Quản Lý Kho Vật Tư &amp; Thiết Bị</span>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+
+        </div>
+        
+      </div>
+    </main>
+
   </div>
 
   <!-- Fullscreen Lightbox Modal -->
@@ -749,6 +1235,77 @@
   </div>
 
   <script>
+    // Bilingual Dictionaries
+    const I18N_DATA = {
+      vi: {
+        toc_title: "Mục Lục Hướng Dẫn",
+        toc_overview: "Tổng Quan Quy Trình",
+        btn_toc: "Mục Lục",
+        theme: "Giao diện",
+        print: "In / Xuất PDF",
+        stat_steps: "Tổng số bước",
+        stat_duration: "Thời lượng",
+        stat_recorded_at: "Thời điểm ghi",
+        stat_system: "Hệ thống & Màn hình",
+        filter_all: "Tất cả (3)",
+        filter_clicks: "Nhấp chuột",
+        filter_keys: "Phím",
+        filter_comments: "Ghi chú",
+        search_placeholder: "Tìm kiếm bước hoặc cửa sổ...",
+        section_tag: "PHẦN",
+        user_comment_title: "💬 Ghi Chú Người Dùng:",
+        zoom_hint: "🔍 Nhấp để phóng to",
+        tech_details: "Chi tiết kỹ thuật & Tọa độ"
+      },
+      en: {
+        toc_title: "Table of Contents",
+        toc_overview: "Process Overview",
+        btn_toc: "Contents",
+        theme: "Theme",
+        print: "Print / PDF",
+        stat_steps: "Total Steps",
+        stat_duration: "Duration",
+        stat_recorded_at: "Recorded At",
+        stat_system: "System & Display",
+        filter_all: "All (3)",
+        filter_clicks: "Clicks",
+        filter_keys: "Keys",
+        filter_comments: "Comments",
+        search_placeholder: "Search steps or window...",
+        section_tag: "SECTION",
+        user_comment_title: "💬 User Note:",
+        zoom_hint: "🔍 Click to zoom",
+        tech_details: "Technical Details & Coordinates"
+      }
+    };
+
+    let activeLang = "vi";
+
+    function updateLanguage(lang) {
+      activeLang = lang;
+      const dict = I18N_DATA[lang] || I18N_DATA.en;
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (dict[key]) {
+          el.textContent = dict[key];
+        }
+      });
+      const searchInp = document.getElementById('searchInput');
+      if (searchInp && dict.search_placeholder) {
+        searchInp.placeholder = dict.search_placeholder;
+      }
+      const langText = document.getElementById('langText');
+      if (langText) {
+        langText.textContent = lang === 'vi' ? '🇻🇳 Tiếng Việt' : '🇬🇧 English';
+      }
+      localStorage.setItem('sr_lang', lang);
+    }
+
+    function toggleLanguage() {
+      const next = activeLang === 'vi' ? 'en' : 'vi';
+      updateLanguage(next);
+    }
+
     // Theme Management
     function toggleTheme() {
       const html = document.documentElement;
@@ -758,11 +1315,55 @@
       localStorage.setItem('sr_theme', next);
     }
 
-    (function initTheme() {
-      const saved = localStorage.getItem('sr_theme');
-      if (saved) {
-        document.documentElement.setAttribute('data-theme', saved);
+    // Mobile Drawer Toggle
+    function toggleTocMobile() {
+      const sidebar = document.getElementById('tocSidebar');
+      const backdrop = document.getElementById('sidebarBackdrop');
+      sidebar.classList.toggle('drawer-open');
+      backdrop.classList.toggle('drawer-open');
+    }
+
+    // Scrollspy for TOC
+    window.addEventListener('scroll', () => {
+      const links = document.querySelectorAll('.toc-nav a');
+      let currentId = 'overview';
+      const scrollPos = window.scrollY + 100;
+
+      const targets = document.querySelectorAll('#overview, .section-banner, .step-card');
+      targets.forEach(elem => {
+        if (elem.offsetTop <= scrollPos) {
+          currentId = elem.id;
+        }
+      });
+
+      links.forEach(link => {
+        if (link.getAttribute('data-target') === currentId) {
+          link.classList.add('active');
+        } else {
+          link.classList.remove('active');
+        }
+      });
+    });
+
+    // Close drawer on TOC link click on mobile
+    document.querySelectorAll('.toc-nav a').forEach(a => {
+      a.addEventListener('click', () => {
+        if (window.innerWidth <= 1024) {
+          const sidebar = document.getElementById('tocSidebar');
+          const backdrop = document.getElementById('sidebarBackdrop');
+          sidebar.classList.remove('drawer-open');
+          backdrop.classList.remove('drawer-open');
+        }
+      });
+    });
+
+    (function init() {
+      const savedTheme = localStorage.getItem('sr_theme');
+      if (savedTheme) {
+        document.documentElement.setAttribute('data-theme', savedTheme);
       }
+      const savedLang = localStorage.getItem('sr_lang') || activeLang;
+      updateLanguage(savedLang);
     })();
 
     // Filter Steps
@@ -811,17 +1412,25 @@
       
       {
         id: 1,
-        desc: "User Left Click at (450, 320) on [Step Recorder Setup]",
+        desc: "Ng\u01b0\u1eddi d\u00f9ng nh\u1ea5p chu\u1ed9t tr\u00e1i v\u00e0o menu Thi\u1ebft L\u1eadp (Settings)",
         
-        src: "data:image/png;base64,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AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMGv/Ab/aDzzJfvxGAAAAAElFTkSuQmCC"
+        src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABQAAAALQCAIAAABAH0oBAAAW+UlEQVR4nO3dv8sk933A8a/kw8hGlhsRQYrDbhKfIY1BlRqDVMVWrcaVmgQiUqSyCpP8BSlCaqdJERUJGOFOBjeuDC5tSOOgQiAkFzLCNkaCFINGc7O7s3vPr32079eLK+55bnb2e+Wbz3e+89TDRy8NAAAAuHRPn3sBAAAAcBcEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAA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CGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAAS/h+/S0CM1JIVXwAAAABJRU5ErkJggg=="
         
       },
       
       {
         id: 2,
-        desc: "User verified environment configuration",
+        desc: "Ki\u1ec3m tra ph\u00e2n quy\u1ec1n t\u00e0i kho\u1ea3n qu\u1ea3n tr\u1ecb v\u00e0 c\u1ea5u h\u00ecnh proxy",
         
-        src: "data:image/png;base64,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AAAA+Nr4CCEAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASAjQAAAAAAAkBGgAAAACAhAANAAAAAEBCgAYAAAAAICFAAwAAAACQEKABAAAAAEgI0AAAAAAAJARoAAAAAAASx40AvhKn7m8YAgAAAACLxAY0AAAAAAAJARoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgvvwL9KOWpJQNn2oAAAAASUVORK5CYII="
+        src: "data:image/png;base64,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YAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJCwY+gBeM6NT+8fegQAAIDRyAYYAACACAEMAABAwnhhee/QMwAAAMC2swEGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQ8C86CJlraVOX6gAAAABJRU5ErkJggg=="
+        
+      },
+      
+      {
+        id: 3,
+        desc: "Nh\u1ea5p \u0111\u00fap chu\u1ed9t v\u00e0o b\u1ea3ng d\u1eef li\u1ec7u \u0111\u1ec3 k\u00edch ho\u1ea1t ch\u1ebf \u0111\u1ed9 ch\u1ec9nh s\u1eeda chi ti\u1ebft",
+        
+        src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABQAAAALQCAIAAABAH0oBAAATw0lEQVR4nO3dv4uk9R3A8dlgcdXVA1vKQeAsvL8gHrGMhcWZ5nIEImo6WVIbVEJQwuU0CGJtoVikCWiqzX+gggdi8J+45uC8IsWEYd1l53Z+PM+zN+/Xqxp2n5n5tG8+3+eZg/n8cAYAAAD77hdTDwAAAABjEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDA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IEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAIAEAQwAAECCAAYAACBBAAMAAJAggAEAAEgQwAAAACQIYAAAABIEMAAAAAkCGAAAgAQBDAAAQIIABgAAIEEAAwAAkCCAAQAASBDAAAAAJAhgAAAAEgQwAAAACQIYAACABAEMAABAggAGAAAgQQADAACQIIABAABIEMAAAAAkCGAAAAASBDAAAAAJAhgAAICE/wEB4l6pABI1QAAAAABJRU5ErkJggg=="
         
       }
       

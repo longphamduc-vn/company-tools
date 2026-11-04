@@ -1,6 +1,7 @@
 """
 Settings configuration dialog for Step Recorder.
-Allows user to customize recording folders, highlight styles, limits, delays, and export options.
+Provides comprehensive bilingual configuration: language, output folders,
+indicator styles, limits, delays, and export preferences.
 """
 
 import os
@@ -12,6 +13,7 @@ from typing import Callable, Optional
 
 from ..config import RecorderConfig
 from ..window_info import exclude_window_from_capture
+from ..i18n import t, I18nManager
 
 
 class SettingsDialog:
@@ -22,8 +24,11 @@ class SettingsDialog:
         self.config = config
         self.on_save = on_save
 
+        # Ensure active language matches config
+        I18nManager.set_language(getattr(self.config, "language", "vi"))
+
         self.window = tk.Toplevel(parent)
-        self.window.title("Step Recorder - Cài Đặt (Settings)")
+        self.window.title(t("settings_win_title"))
         self.window.attributes("-topmost", True)
         self.window.transient(parent)
         self.window.configure(bg="#0f172a")
@@ -45,22 +50,20 @@ class SettingsDialog:
     def _apply_geometry(self) -> None:
         """Calculate responsive geometry to prevent any button clipping on high-DPI displays."""
         self.window.update_idletasks()
-        req_w = max(620, self.window.winfo_reqwidth() + 20)
-        req_h = max(720, self.window.winfo_reqheight() + 20)
+        req_w = max(640, self.window.winfo_reqwidth() + 20)
+        req_h = max(740, self.window.winfo_reqheight() + 20)
 
-        # Center on screen
         screen_w = self.window.winfo_screenwidth()
         screen_h = self.window.winfo_screenheight()
         
-        # Don't exceed 90% of screen height
-        final_h = min(req_h, int(screen_h * 0.9))
-        final_w = min(req_w, int(screen_w * 0.9))
+        final_h = min(req_h, int(screen_h * 0.92))
+        final_w = min(req_w, int(screen_w * 0.92))
         
         pos_x = max(20, (screen_w - final_w) // 2)
         pos_y = max(20, (screen_h - final_h) // 2)
 
         self.window.geometry(f"{final_w}x{final_h}+{pos_x}+{pos_y}")
-        self.window.minsize(560, 480)
+        self.window.minsize(580, 500)
         self.window.resizable(True, True)
 
     def _build_ui(self) -> None:
@@ -70,7 +73,7 @@ class SettingsDialog:
 
         self.status_msg_lbl = tk.Label(
             bottom_bar,
-            text="Ctrl+S: Lưu cấu hình | Esc: Hủy",
+            text=t("hotkey_save_hint"),
             font=("Segoe UI", 8),
             bg="#0b1120",
             fg="#64748b"
@@ -79,7 +82,7 @@ class SettingsDialog:
 
         cancel_btn = tk.Button(
             bottom_bar,
-            text="Hủy (Cancel)",
+            text=t("btn_cancel_settings"),
             command=self.window.destroy,
             bg="#334155",
             fg="#f8fafc",
@@ -95,7 +98,7 @@ class SettingsDialog:
 
         save_btn = tk.Button(
             bottom_bar,
-            text="✓ Lưu Cài Đặt (Save)",
+            text=t("btn_save_settings"),
             command=self._save,
             bg="#0284c7",
             fg="#ffffff",
@@ -110,52 +113,96 @@ class SettingsDialog:
         save_btn.pack(side=tk.RIGHT)
 
         # 2. SCROLLABLE CONTENT AREA
-        canvas = tk.Canvas(self.window, bg="#0f172a", highlightthickness=0)
-        scrollbar = ttk.Scrollbar(self.window, orient="vertical", command=canvas.yview)
-        scroll_content = tk.Frame(canvas, bg="#0f172a", padx=20, pady=16)
+        self.canvas = tk.Canvas(self.window, bg="#0f172a", highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self.window, orient="vertical", command=self.canvas.yview)
+        self.scroll_content = tk.Frame(self.canvas, bg="#0f172a", padx=20, pady=16)
 
-        scroll_content.bind(
+        self.scroll_content.bind(
             "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
 
-        canvas_window = canvas.create_window((0, 0), window=scroll_content, anchor="nw")
+        canvas_window = self.canvas.create_window((0, 0), window=self.scroll_content, anchor="nw")
         
         def _on_canvas_configure(event):
-            # Keep content stretched horizontally with canvas
-            canvas.itemconfig(canvas_window, width=event.width)
+            self.canvas.itemconfig(canvas_window, width=event.width)
 
-        canvas.bind("<Configure>", _on_canvas_configure)
-        canvas.configure(yscrollcommand=scrollbar.set)
+        self.canvas.bind("<Configure>", _on_canvas_configure)
+        self.canvas.configure(yscrollcommand=scrollbar.set)
 
-        # Mouse wheel scrolling on canvas
         def _on_mousewheel(event):
-            delta = -1 if event.delta > 0 else 1
-            if event.num == 4:
-                delta = -1
-            elif event.num == 5:
-                delta = 1
-            canvas.yview_scroll(delta * 2, "units")
+            try:
+                if getattr(self, "canvas", None) and self.canvas.winfo_exists():
+                    delta = -1 if event.delta > 0 else 1
+                    if event.num == 4:
+                        delta = -1
+                    elif event.num == 5:
+                        delta = 1
+                    self.canvas.yview_scroll(delta * 2, "units")
+            except Exception:
+                pass
 
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        canvas.bind_all("<Button-4>", _on_mousewheel)
-        canvas.bind_all("<Button-5>", _on_mousewheel)
+        self.window.bind("<MouseWheel>", _on_mousewheel)
+        self.window.bind("<Button-4>", _on_mousewheel)
+        self.window.bind("<Button-5>", _on_mousewheel)
 
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self.canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-        # --- SECTION: Title ---
+        self._render_sections()
+
+    def _render_sections(self) -> None:
+        """Render all settings cards into scroll_content."""
+        for w in self.scroll_content.winfo_children():
+            w.destroy()
+
+        # --- Title ---
         header = tk.Label(
-            scroll_content,
-            text="⚙️ Cài Đặt Ứng Dụng (Settings)",
+            self.scroll_content,
+            text=t("settings_heading"),
             font=("Segoe UI", 12, "bold"),
             bg="#0f172a",
             fg="#f8fafc"
         )
         header.pack(anchor="w", pady=(0, 14))
 
+        # --- SECTION 0: Language Selection ---
+        sec_lang = self._create_card(self.scroll_content, t("sec_language"))
+        lang_frame = tk.Frame(sec_lang, bg="#1e293b")
+        lang_frame.pack(fill=tk.X, pady=6)
+
+        self.lang_var = tk.StringVar(value=getattr(self.config, "language", "vi"))
+
+        rb_vi = tk.Radiobutton(
+            lang_frame,
+            text="🇻🇳 " + t("lang_vietnamese"),
+            value="vi",
+            variable=self.lang_var,
+            bg="#1e293b", fg="#f8fafc",
+            selectcolor="#0f172a",
+            activebackground="#1e293b",
+            activeforeground="#38bdf8",
+            font=("Segoe UI", 9, "bold"),
+            command=self._on_language_switched
+        )
+        rb_vi.pack(side=tk.LEFT, padx=(0, 20))
+
+        rb_en = tk.Radiobutton(
+            lang_frame,
+            text="🇬🇧 " + t("lang_english"),
+            value="en",
+            variable=self.lang_var,
+            bg="#1e293b", fg="#f8fafc",
+            selectcolor="#0f172a",
+            activebackground="#1e293b",
+            activeforeground="#38bdf8",
+            font=("Segoe UI", 9, "bold"),
+            command=self._on_language_switched
+        )
+        rb_en.pack(side=tk.LEFT)
+
         # --- SECTION 1: Output Folder ---
-        sec1 = self._create_card(scroll_content, "📁 Thư Mục Lưu Báo Cáo (Output Directory)")
+        sec1 = self._create_card(self.scroll_content, t("sec_output_dir"))
         
         dir_frame = tk.Frame(sec1, bg="#1e293b")
         dir_frame.pack(fill=tk.X, pady=6)
@@ -174,7 +221,7 @@ class SettingsDialog:
 
         browse_btn = tk.Button(
             dir_frame,
-            text="📂 Chọn Thư Mục...",
+            text=t("btn_browse_folder"),
             command=self._browse_dir,
             bg="#334155",
             fg="#f8fafc",
@@ -189,7 +236,7 @@ class SettingsDialog:
         browse_btn.pack(side=tk.RIGHT)
 
         # --- SECTION 2: Highlight & Visual Styling ---
-        sec2 = self._create_card(scroll_content, "🎨 Hiệu Ứng Con Trỏ Chuột (Click Indicator)")
+        sec2 = self._create_card(self.scroll_content, t("sec_click_indicator"))
         
         vis_grid = tk.Frame(sec2, bg="#1e293b")
         vis_grid.pack(fill=tk.X, pady=6)
@@ -197,7 +244,7 @@ class SettingsDialog:
 
         # Style dropdown
         tk.Label(
-            vis_grid, text="Kiểu hiển thị:", font=("Segoe UI", 9),
+            vis_grid, text=t("lbl_style"), font=("Segoe UI", 9),
             bg="#1e293b", fg="#cbd5e1"
         ).grid(row=0, column=0, sticky="w", pady=4, padx=(0, 10))
 
@@ -213,7 +260,7 @@ class SettingsDialog:
 
         # Color picker
         tk.Label(
-            vis_grid, text="Màu sắc highlight:", font=("Segoe UI", 9),
+            vis_grid, text=t("lbl_color"), font=("Segoe UI", 9),
             bg="#1e293b", fg="#cbd5e1"
         ).grid(row=1, column=0, sticky="w", pady=4, padx=(0, 10))
 
@@ -233,7 +280,7 @@ class SettingsDialog:
 
         pick_btn = tk.Button(
             color_frame,
-            text="Chọn Màu...",
+            text=t("btn_pick_color"),
             command=self._pick_color,
             bg="#334155",
             fg="#f8fafc",
@@ -247,7 +294,7 @@ class SettingsDialog:
 
         # Indicator Radius
         tk.Label(
-            vis_grid, text="Bán kính vòng tròn (px):", font=("Segoe UI", 9),
+            vis_grid, text=t("lbl_radius"), font=("Segoe UI", 9),
             bg="#1e293b", fg="#cbd5e1"
         ).grid(row=2, column=0, sticky="w", pady=4, padx=(0, 10))
 
@@ -266,14 +313,14 @@ class SettingsDialog:
         radius_spin.grid(row=2, column=1, sticky="w", pady=4)
 
         # --- SECTION 3: Recording Limits & Delays ---
-        sec3 = self._create_card(scroll_content, "⏱️ Giới Hạn & Độ Trễ Ghi Hình (Limits & Delay)")
+        sec3 = self._create_card(self.scroll_content, t("sec_limits_delays"))
 
         lim_grid = tk.Frame(sec3, bg="#1e293b")
         lim_grid.pack(fill=tk.X, pady=6)
         lim_grid.columnconfigure(1, weight=1)
 
         tk.Label(
-            lim_grid, text="Số bước tối đa (Max steps):", font=("Segoe UI", 9),
+            lim_grid, text=t("lbl_max_steps"), font=("Segoe UI", 9),
             bg="#1e293b", fg="#cbd5e1"
         ).grid(row=0, column=0, sticky="w", pady=4, padx=(0, 10))
 
@@ -292,7 +339,7 @@ class SettingsDialog:
         max_spin.grid(row=0, column=1, sticky="w", pady=4)
 
         tk.Label(
-            lim_grid, text="Độ trễ chụp ảnh (Screenshot delay ms):", font=("Segoe UI", 9),
+            lim_grid, text=t("lbl_delay_ms"), font=("Segoe UI", 9),
             bg="#1e293b", fg="#cbd5e1"
         ).grid(row=1, column=0, sticky="w", pady=4, padx=(0, 10))
 
@@ -311,37 +358,45 @@ class SettingsDialog:
         delay_spin.grid(row=1, column=1, sticky="w", pady=4)
 
         # --- SECTION 4: Capture & Export Options ---
-        sec4 = self._create_card(scroll_content, "⚙️ Tùy Chọn Sự Kiện & Xuất File (Options)")
+        sec4 = self._create_card(self.scroll_content, t("sec_options"))
 
         self.key_var = tk.BooleanVar(value=self.config.capture_keys)
-        self._create_checkbox(sec4, "Ghi lại các phím đặc biệt (Enter, Tab, Esc, Hotkey)", self.key_var)
+        self._create_checkbox(sec4, t("opt_capture_keys"), self.key_var)
 
         self.double_click_var = tk.BooleanVar(value=self.config.capture_double_clicks)
-        self._create_checkbox(sec4, "Tự động phân biệt Double Click", self.double_click_var)
+        self._create_checkbox(sec4, t("opt_double_clicks"), self.double_click_var)
 
         self.badge_var = tk.BooleanVar(value=self.config.show_step_badge_on_screenshot)
-        self._create_checkbox(sec4, "Hiển thị huy hiệu số bước (#1, #2...) góc ảnh", self.badge_var)
+        self._create_checkbox(sec4, t("opt_step_badge"), self.badge_var)
 
         self.dark_mode_var = tk.BooleanVar(value=self.config.dark_mode_report)
-        self._create_checkbox(sec4, "Báo cáo HTML mặc định giao diện Dark Mode", self.dark_mode_var)
+        self._create_checkbox(sec4, t("opt_dark_mode"), self.dark_mode_var)
 
         self.embed_var = tk.BooleanVar(value=self.config.embed_images_in_html)
-        self._create_checkbox(sec4, "Nhúng toàn bộ ảnh trực tiếp vào 1 file HTML duy nhất (Base64)", self.embed_var)
+        self._create_checkbox(sec4, t("opt_embed_images"), self.embed_var)
 
         self.zip_var = tk.BooleanVar(value=self.config.create_zip_package)
-        self._create_checkbox(sec4, "Đóng gói toàn bộ báo cáo + ảnh vào file .ZIP", self.zip_var)
+        self._create_checkbox(sec4, t("opt_zip_package"), self.zip_var)
 
         self.open_var = tk.BooleanVar(value=self.config.auto_open_report)
-        self._create_checkbox(sec4, "Tự động mở báo cáo trong trình duyệt web sau khi lưu", self.open_var)
+        self._create_checkbox(sec4, t("opt_auto_open"), self.open_var)
 
         self.exclude_var = tk.BooleanVar(value=getattr(self.config, "exclude_from_screen_capture", True))
-        self._create_checkbox(sec4, "Tự động ẩn thanh công cụ khỏi ảnh chụp màn hình (Windows API)", self.exclude_var)
+        self._create_checkbox(sec4, t("opt_exclude_capture"), self.exclude_var)
 
         self.topmost_var = tk.BooleanVar(value=getattr(self.config, "always_on_top", True))
-        self._create_checkbox(sec4, "Ghim thanh công cụ luôn hiển thị trên cùng (Always on top)", self.topmost_var)
+        self._create_checkbox(sec4, t("opt_always_on_top"), self.topmost_var)
 
         self.minimize_var = tk.BooleanVar(value=getattr(self.config, "auto_minimize_on_record", False))
-        self._create_checkbox(sec4, "Tự động thu nhỏ thanh công cụ khi bắt đầu ghi hình (Auto-minimize)", self.minimize_var)
+        self._create_checkbox(sec4, t("opt_auto_minimize"), self.minimize_var)
+
+    def _on_language_switched(self) -> None:
+        """Called when user changes language radio button."""
+        new_lang = self.lang_var.get()
+        I18nManager.set_language(new_lang)
+        self.config.language = new_lang
+        self.window.title(t("settings_win_title"))
+        self._render_sections()
 
     def _create_card(self, parent: tk.Frame, title: str) -> tk.Frame:
         """Create a rounded card-like section with title."""
@@ -384,7 +439,7 @@ class SettingsDialog:
         except Exception:
             pass
 
-        chosen = filedialog.askdirectory(parent=self.window, initialdir=init_dir, title="Chọn Thư Mục Lưu Báo Cáo")
+        chosen = filedialog.askdirectory(parent=self.window, initialdir=init_dir, title=t("choose_folder_title"))
         
         try:
             self.window.grab_set()
@@ -401,7 +456,7 @@ class SettingsDialog:
         except Exception:
             pass
 
-        chosen = colorchooser.askcolor(color=self.color_var.get(), parent=self.window, title="Chọn Màu Highlight")
+        chosen = colorchooser.askcolor(color=self.color_var.get(), parent=self.window, title=t("choose_color_title"))
         
         try:
             self.window.grab_set()
@@ -415,6 +470,10 @@ class SettingsDialog:
     def _save(self) -> None:
         """Validate, persist settings to JSON, update runtime, and close dialog."""
         try:
+            # 0. Language
+            self.config.language = self.lang_var.get()
+            I18nManager.set_language(self.config.language)
+
             # 1. Output directory
             out_dir = self.dir_var.get().strip()
             if not out_dir:
@@ -472,7 +531,7 @@ class SettingsDialog:
 
         except Exception as e:
             messagebox.showerror(
-                "Lỗi Lưu Cài Đặt",
+                "Lỗi Lưu Cài Đặt / Error",
                 f"Không thể lưu cấu hình cài đặt:\n\n{e}",
                 parent=self.window
             )

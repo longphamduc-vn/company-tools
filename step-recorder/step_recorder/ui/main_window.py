@@ -6,10 +6,11 @@ Provides modern, compact controls: Start, Pause, Resume, Add Comment, Review & E
 import os
 import sys
 import time
+import json
 import traceback
 import webbrowser
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from pathlib import Path
 from typing import Optional
 
@@ -22,9 +23,12 @@ if sys.platform == "win32":
         pass
 
 from ..config import RecorderConfig
+from ..models import Step, SessionMetadata
 from ..recorder import RecordingEngine
 from ..exporter import ReportExporter
 from ..window_info import exclude_window_from_capture
+from ..i18n import t, I18nManager
+from ..hotkeys import GlobalHotkeyManager
 from .comment_dialog import CommentDialog
 from .settings_dialog import SettingsDialog
 from .step_editor import StepEditorWindow
@@ -46,6 +50,7 @@ class MainWindow:
     def __init__(self, root: Optional[tk.Tk] = None):
         self.root = root or tk.Tk()
         self.config = RecorderConfig.load()
+        I18nManager.set_language(getattr(self.config, "language", "vi"))
         self.engine = RecordingEngine(self.config)
         self.exporter = ReportExporter(self.config)
 
@@ -59,6 +64,7 @@ class MainWindow:
         self._init_window()
         self._build_ui()
         self._bind_events()
+        self._init_hotkeys()
 
         # Connect engine callbacks to UI
         self.engine.on_step_added = self._on_step_added
@@ -78,7 +84,7 @@ class MainWindow:
             pass
 
     def _init_window(self) -> None:
-        self.root.title("Python Step Recorder")
+        self.root.title(t("app_title"))
         self.root.attributes("-topmost", getattr(self.config, "always_on_top", True))
         self.root.configure(bg="#0f172a")
 
@@ -96,19 +102,60 @@ class MainWindow:
         self.config.always_on_top = new_val
         self.root.attributes("-topmost", new_val)
         if new_val:
-            self.pin_btn.configure(text="📌 On Top", fg="#38bdf8")
+            self.pin_btn.configure(text=t("pin_on_top"), fg="#38bdf8")
         else:
-            self.pin_btn.configure(text="📍 Normal", fg="#94a3b8")
+            self.pin_btn.configure(text=t("pin_normal"), fg="#94a3b8")
         try:
             self.config.save()
         except Exception:
             pass
 
+    def _toggle_language(self) -> None:
+        """Toggle UI between Vietnamese and English."""
+        curr = I18nManager.get_language()
+        new_lang = "en" if curr == "vi" else "vi"
+        I18nManager.set_language(new_lang)
+        self.config.language = new_lang
+        self.engine.config.language = new_lang
+        self.exporter.config.language = new_lang
+        try:
+            self.config.save()
+        except Exception:
+            pass
+        self._update_ui_language()
+
+    def _update_ui_language(self) -> None:
+        """Update all text in toolbar to match active language."""
+        self.root.title(t("app_title"))
+        curr_lang = I18nManager.get_language()
+        self.lang_btn.configure(text="🇻🇳 VI" if curr_lang == "vi" else "🇬🇧 EN")
+        self.pin_btn.configure(text=t("pin_on_top") if getattr(self.config, "always_on_top", True) else t("pin_normal"))
+
+        # State label
+        if self.engine.state == "recording":
+            self.status_lbl.configure(text=t("status_recording"))
+        elif self.engine.state == "paused":
+            self.status_lbl.configure(text=t("status_paused"))
+        elif self.engine.state == "stopped":
+            self.status_lbl.configure(text=t("status_stopped"))
+        else:
+            self.status_lbl.configure(text=t("status_ready"))
+
+        self.steps_lbl.configure(text=t("steps_count", count=len(self.engine.steps), max=self.config.max_steps))
+        self.start_btn.configure(text=t("btn_start"))
+        self.pause_btn.configure(text=t("btn_resume") if self.engine.state == "paused" else t("btn_pause"))
+        self.comment_btn.configure(text=t("btn_comment"))
+        self.review_btn.configure(text=t("btn_review"))
+        self.open_btn.configure(text=t("btn_open"))
+        self.stop_btn.configure(text=t("btn_stop"))
+        self.settings_btn.configure(text=t("btn_settings"))
+        self.hotkey_hint_lbl.configure(text=t("hotkey_bar_hint"))
+
     def _build_ui(self) -> None:
         container = tk.Frame(self.root, bg="#0f172a", padx=12, pady=10)
         container.pack(fill=tk.BOTH, expand=True)
 
-        # Top row: 3 distinct columns (Left: status, Center: steps count, Right: pin toggle & live timer)
+        # Top row: 3 distinct columns (Left: status, Center: steps count, Right: lang, pin toggle & live timer)
         top_row = tk.Frame(container, bg="#0f172a")
         top_row.pack(fill=tk.X, pady=(0, 8))
         top_row.columnconfigure(0, weight=1)
@@ -130,7 +177,7 @@ class MainWindow:
 
         self.status_lbl = tk.Label(
             status_frame,
-            text="Ready",
+            text=t("status_ready"),
             font=("Segoe UI", 9, "bold"),
             bg="#0f172a",
             fg="#cbd5e1"
@@ -140,20 +187,35 @@ class MainWindow:
         # Center: Steps counter
         self.steps_lbl = tk.Label(
             top_row,
-            text=f"Steps: 0 / {self.config.max_steps}",
+            text=t("steps_count", count=0, max=self.config.max_steps),
             font=("Segoe UI", 9),
             bg="#0f172a",
             fg="#94a3b8"
         )
         self.steps_lbl.grid(row=0, column=1)
 
-        # Right: Pin toggle & Live timer
+        # Right: Language toggle, Pin toggle & Live timer
         right_box = tk.Frame(top_row, bg="#0f172a")
         right_box.grid(row=0, column=2, sticky="e")
 
+        self.lang_btn = tk.Button(
+            right_box,
+            text="🇻🇳 VI" if I18nManager.get_language() == "vi" else "🇬🇧 EN",
+            command=self._toggle_language,
+            bg="#1e293b",
+            fg="#38bdf8",
+            activebackground="#334155",
+            relief=tk.FLAT,
+            font=("Segoe UI", 8, "bold"),
+            padx=5,
+            pady=0,
+            cursor="hand2"
+        )
+        self.lang_btn.pack(side=tk.LEFT, padx=(0, 6))
+
         self.pin_btn = tk.Button(
             right_box,
-            text="📌 On Top" if getattr(self.config, "always_on_top", True) else "📍 Normal",
+            text=t("pin_on_top") if getattr(self.config, "always_on_top", True) else t("pin_normal"),
             command=self._toggle_always_on_top,
             bg="#1e293b",
             fg="#38bdf8" if getattr(self.config, "always_on_top", True) else "#94a3b8",
@@ -175,16 +237,16 @@ class MainWindow:
         )
         self.timer_lbl.pack(side=tk.LEFT)
 
-        # Bottom row: 6 responsive buttons sharing width equally via grid
+        # Bottom row: 7 responsive buttons sharing width equally via grid
         btn_row = tk.Frame(container, bg="#0f172a")
         btn_row.pack(fill=tk.X, expand=True)
-        for col in range(6):
+        for col in range(7):
             btn_row.columnconfigure(col, weight=1)
 
         # Start Record Button
         self.start_btn = tk.Button(
             btn_row,
-            text="⏺ Start",
+            text=t("btn_start"),
             command=self._cmd_start,
             bg="#059669",
             fg="#ffffff",
@@ -200,7 +262,7 @@ class MainWindow:
         # Pause / Resume Button
         self.pause_btn = tk.Button(
             btn_row,
-            text="⏸ Pause",
+            text=t("btn_pause"),
             command=self._cmd_toggle_pause,
             state=tk.DISABLED,
             bg="#334155",
@@ -215,7 +277,7 @@ class MainWindow:
         # Add Comment Button
         self.comment_btn = tk.Button(
             btn_row,
-            text="💬 Comment",
+            text=t("btn_comment"),
             command=self._cmd_add_comment,
             state=tk.DISABLED,
             bg="#334155",
@@ -230,7 +292,7 @@ class MainWindow:
         # Review & Edit Steps Button
         self.review_btn = tk.Button(
             btn_row,
-            text="📝 Review",
+            text=t("btn_review"),
             command=self._cmd_open_editor,
             state=tk.DISABLED,
             bg="#334155",
@@ -244,10 +306,26 @@ class MainWindow:
         )
         self.review_btn.grid(row=0, column=3, sticky="ew", padx=2)
 
+        # Open Saved Session Button
+        self.open_btn = tk.Button(
+            btn_row,
+            text=t("btn_open"),
+            command=self._cmd_open_saved_session,
+            bg="#1e293b",
+            fg="#38bdf8",
+            activebackground="#334155",
+            activeforeground="#ffffff",
+            relief=tk.FLAT,
+            font=("Segoe UI", 9),
+            pady=5,
+            cursor="hand2"
+        )
+        self.open_btn.grid(row=0, column=4, sticky="ew", padx=2)
+
         # Stop & Save Button
         self.stop_btn = tk.Button(
             btn_row,
-            text="⏹ Stop",
+            text=t("btn_stop"),
             command=self._cmd_stop,
             state=tk.DISABLED,
             bg="#334155",
@@ -257,12 +335,12 @@ class MainWindow:
             pady=5,
             cursor="hand2"
         )
-        self.stop_btn.grid(row=0, column=4, sticky="ew", padx=2)
+        self.stop_btn.grid(row=0, column=5, sticky="ew", padx=2)
 
         # Settings Button
         self.settings_btn = tk.Button(
             btn_row,
-            text="⚙ Settings",
+            text=t("btn_settings"),
             command=self._cmd_open_settings,
             bg="#1e293b",
             fg="#cbd5e1",
@@ -273,20 +351,64 @@ class MainWindow:
             pady=5,
             cursor="hand2"
         )
-        self.settings_btn.grid(row=0, column=5, sticky="ew", padx=2)
+        self.settings_btn.grid(row=0, column=6, sticky="ew", padx=2)
+
+        # Global Hotkey bar hint
+        hint_frame = tk.Frame(container, bg="#0f172a")
+        hint_frame.pack(fill=tk.X, pady=(6, 0))
+        self.hotkey_hint_lbl = tk.Label(
+            hint_frame,
+            text=t("hotkey_bar_hint"),
+            font=("Segoe UI", 7),
+            bg="#0f172a",
+            fg="#64748b"
+        )
+        self.hotkey_hint_lbl.pack(anchor="center")
 
         # Auto-compute natural size to ensure NO button or label is ever cut off
         self.root.update_idletasks()
-        req_w = max(620, self.root.winfo_reqwidth() + 30)
-        req_h = max(100, self.root.winfo_reqheight() + 10)
+        req_w = max(720, self.root.winfo_reqwidth() + 30)
+        req_h = max(115, self.root.winfo_reqheight() + 10)
         self.root.geometry(f"{req_w}x{req_h}+100+100")
-        self.root.minsize(540, 95)
+        self.root.minsize(600, 105)
         self.root.resizable(True, False)
 
     def _bind_events(self) -> None:
-        """Bind position tracking to ignore toolbar region from clicks."""
+        """Bind position tracking to ignore toolbar region from clicks and local hotkeys."""
         self.root.bind("<Configure>", self._update_ignore_bounds)
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
+
+        # Local window hotkeys for convenience
+        self.root.bind("<F7>", lambda e: self._hotkey_toggle_start_stop())
+        self.root.bind("<F8>", lambda e: self._cmd_toggle_pause())
+        self.root.bind("<F9>", lambda e: self._cmd_add_comment())
+        self.root.bind("<F10>", lambda e: self._hotkey_add_section())
+        self.root.bind("<F11>", lambda e: self._cmd_open_editor())
+        self.root.bind("<Control-o>", lambda e: self._cmd_open_saved_session())
+
+    def _init_hotkeys(self) -> None:
+        """Start background global hotkeys listener."""
+        self.hotkey_mgr = GlobalHotkeyManager(
+            on_start_stop=lambda: self.root.after(0, self._hotkey_toggle_start_stop),
+            on_pause_resume=lambda: self.root.after(0, self._cmd_toggle_pause),
+            on_comment=lambda: self.root.after(0, self._cmd_add_comment),
+            on_mark_section=lambda: self.root.after(0, self._hotkey_add_section),
+            on_open_review=lambda: self.root.after(0, self._cmd_open_editor),
+            on_open_saved=lambda: self.root.after(0, self._cmd_open_saved_session),
+        )
+        self.hotkey_mgr.start()
+
+    def _hotkey_toggle_start_stop(self) -> None:
+        if self.engine.state in ("idle", "stopped"):
+            self._cmd_start()
+        elif self.engine.state in ("recording", "paused"):
+            self._cmd_stop()
+
+    def _hotkey_add_section(self) -> None:
+        self.root.deiconify()
+        dlg = CommentDialog(self.root, on_submit=self._on_comment_submitted)
+        dlg.is_section_var.set(True)
+        dlg._on_section_chk_toggled()
 
     def _update_ignore_bounds(self, event=None) -> None:
         """Update window bounding box to ignore toolbar clicks in recorder engine."""
@@ -323,14 +445,25 @@ class MainWindow:
         self.root.deiconify()
         CommentDialog(self.root, on_submit=self._on_comment_submitted)
 
-    def _on_comment_submitted(self, comment_text: str, rect) -> None:
-        self.engine.add_comment(comment_text, rect)
+    def _on_comment_submitted(
+        self,
+        comment_text: str,
+        rect,
+        is_section: bool = False,
+        section_title: Optional[str] = None
+    ) -> None:
+        self.engine.add_comment(
+            comment_text,
+            rect,
+            is_section_header=is_section,
+            section_title=section_title
+        )
 
     def _cmd_open_editor(self) -> None:
         """Open the interactive Step Reviewer & Editor."""
         self.root.deiconify()
         if not self.engine.steps:
-            messagebox.showinfo("Review Steps", "Chưa có bước nào được ghi lại để chỉnh sửa.")
+            messagebox.showinfo(t("btn_review"), t("no_steps_to_review"))
             return
 
         StepEditorWindow(
@@ -346,13 +479,77 @@ class MainWindow:
         """Called when export finishes from StepEditor."""
         self._reset_ui()
 
+    def _cmd_open_saved_session(self, filepath: Optional[str] = None) -> None:
+        """Open a previously saved recording session for review and editing."""
+        self.root.deiconify()
+        if not filepath:
+            filepath = filedialog.askopenfilename(
+                title=t("open_session_title"),
+                filetypes=[("Session JSON", "session.json"), ("JSON Files", "*.json"), ("All Files", "*.*")],
+                parent=self.root
+            )
+        if not filepath or not os.path.exists(filepath):
+            return
+
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            sess_info = data.get("session", {})
+            metadata = SessionMetadata(
+                session_id=sess_info.get("id", "saved_session"),
+                title=sess_info.get("title", "Saved Session"),
+                description=sess_info.get("description", ""),
+                os_name=sess_info.get("os", ""),
+                screen_resolution=sess_info.get("screen_resolution", ""),
+                total_steps=sess_info.get("total_steps", 0),
+                apps_used=sess_info.get("apps_used", [])
+            )
+
+            steps_data = data.get("steps", [])
+            loaded_steps = [Step.from_dict(s) for s in steps_data]
+            base_folder = Path(filepath).parent
+
+            for s in loaded_steps:
+                target_p = None
+                if s.annotated_image_path:
+                    p = Path(s.annotated_image_path)
+                    if not p.is_absolute():
+                        p = base_folder / p
+                    if p.exists():
+                        target_p = p
+                if not target_p and s.raw_image_path:
+                    p = Path(s.raw_image_path)
+                    if not p.is_absolute():
+                        p = base_folder / p
+                    if p.exists():
+                        target_p = p
+
+                if target_p and target_p.exists():
+                    s.annotated_image_path = str(target_p)
+                    with open(target_p, "rb") as imf:
+                        s.annotated_image_bytes = imf.read()
+                        if not s.raw_image_bytes:
+                            s.raw_image_bytes = s.annotated_image_bytes
+
+            StepEditorWindow(
+                parent=self.root,
+                steps=loaded_steps,
+                metadata=metadata,
+                config=self.config,
+                exporter=self.exporter,
+                on_export_complete=self._on_export_completed
+            )
+        except Exception as e:
+            messagebox.showerror(t("editor_title"), f"Error opening session: {e}", parent=self.root)
+
     def _cmd_stop(self) -> None:
         self.root.deiconify()
         self._timer_running = False
         self.engine.stop_recording()
 
         if not self.engine.steps:
-            messagebox.showinfo("Step Recorder", "No steps were recorded.")
+            messagebox.showinfo(t("app_title"), t("no_steps_recorded"))
             self._reset_ui()
             return
 
@@ -366,8 +563,9 @@ class MainWindow:
         self.config = new_config
         self.engine.config = new_config
         self.exporter.config = new_config
-        self.steps_lbl.configure(text=f"Steps: {len(self.engine.steps)} / {self.config.max_steps}")
-        self.status_lbl.configure(text="Settings Saved! ✓", fg="#34d399")
+        I18nManager.set_language(getattr(new_config, "language", "vi"))
+        self._update_ui_language()
+        self.status_lbl.configure(text=t("settings_saved"), fg="#34d399")
         if self._flash_job:
             try:
                 self.root.after_cancel(self._flash_job)
@@ -382,13 +580,12 @@ class MainWindow:
     def _ui_step_update(self, step) -> None:
         try:
             count = len(self.engine.steps)
-            self.steps_lbl.configure(text=f"Steps: {count} / {self.config.max_steps}")
+            self.steps_lbl.configure(text=t("steps_count", count=count, max=self.config.max_steps))
             
             # Enable Review button as soon as at least 1 step is recorded
             self.review_btn.configure(state=tk.NORMAL, bg="#0284c7", fg="#ffffff")
 
-            verb = "Clicked" if "click" in step.action_type else ("Key" if "key" in step.action_type else "Note")
-            self.status_lbl.configure(text=f"Step #{step.step_id} {verb}! 📸", fg="#38bdf8")
+            self.status_lbl.configure(text=t("step_recorded_flash", id=step.step_id), fg="#38bdf8")
             
             if self._flash_job:
                 try:
@@ -406,7 +603,7 @@ class MainWindow:
         self._flash_job = None
         if self.engine.state == "recording":
             try:
-                self.status_lbl.configure(text="Recording...", fg="#f8fafc")
+                self.status_lbl.configure(text=t("status_recording"), fg="#f8fafc")
             except Exception:
                 pass
 
@@ -418,10 +615,10 @@ class MainWindow:
         try:
             if state == "recording":
                 self.status_dot.configure(fg="#ef4444")
-                self.status_lbl.configure(text="Recording...", fg="#f8fafc")
+                self.status_lbl.configure(text=t("status_recording"), fg="#f8fafc")
                 self.start_btn.configure(state=tk.DISABLED, bg="#1e293b", fg="#64748b")
                 self.pause_btn.configure(
-                    state=tk.NORMAL, text="⏸ Pause", bg="#d97706", fg="#ffffff"
+                    state=tk.NORMAL, text=t("btn_pause"), bg="#d97706", fg="#ffffff"
                 )
                 self.comment_btn.configure(
                     state=tk.NORMAL, bg="#0284c7", fg="#ffffff"
@@ -433,9 +630,9 @@ class MainWindow:
                     self.review_btn.configure(state=tk.NORMAL, bg="#0284c7", fg="#ffffff")
             elif state == "paused":
                 self.status_dot.configure(fg="#f59e0b")
-                self.status_lbl.configure(text="Paused", fg="#f59e0b")
+                self.status_lbl.configure(text=t("status_paused"), fg="#fbbf24")
                 self.pause_btn.configure(
-                    text="▶ Resume", bg="#059669", fg="#ffffff"
+                    text=t("btn_resume"), bg="#059669", fg="#ffffff"
                 )
             elif state in ("stopped", "idle"):
                 self._reset_ui()
@@ -445,12 +642,12 @@ class MainWindow:
     def _reset_ui(self) -> None:
         try:
             self.status_dot.configure(fg="#94a3b8")
-            self.status_lbl.configure(text="Ready", fg="#cbd5e1")
+            self.status_lbl.configure(text=t("status_ready"), fg="#cbd5e1")
             self.timer_lbl.configure(text="00:00")
-            self.steps_lbl.configure(text=f"Steps: 0 / {self.config.max_steps}")
+            self.steps_lbl.configure(text=t("steps_count", count=0, max=self.config.max_steps))
 
-            self.start_btn.configure(state=tk.NORMAL, text="⏺ Start", bg="#059669", fg="#ffffff")
-            self.pause_btn.configure(state=tk.DISABLED, text="⏸ Pause", bg="#334155", fg="#94a3b8")
+            self.start_btn.configure(state=tk.NORMAL, text=t("btn_start"), bg="#059669", fg="#ffffff")
+            self.pause_btn.configure(state=tk.DISABLED, text=t("btn_pause"), bg="#334155", fg="#94a3b8")
             self.comment_btn.configure(state=tk.DISABLED, bg="#334155", fg="#94a3b8")
             self.review_btn.configure(state=tk.DISABLED, bg="#334155", fg="#94a3b8")
             self.stop_btn.configure(state=tk.DISABLED, bg="#334155", fg="#94a3b8")
@@ -475,6 +672,11 @@ class MainWindow:
             self.root.after(1000, self._tick_timer)
 
     def _on_closing(self) -> None:
+        if hasattr(self, "hotkey_mgr"):
+            try:
+                self.hotkey_mgr.stop()
+            except Exception:
+                pass
         if self.engine.state in ("recording", "paused"):
             if messagebox.askyesno("Exit Step Recorder", "Recording is in progress. Stop and exit?"):
                 self.engine.stop_recording()

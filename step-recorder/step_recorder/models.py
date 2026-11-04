@@ -27,6 +27,11 @@ class Step:
     highlight_rect: Optional[Tuple[int, int, int, int]] = None
     user_comment: Optional[str] = None
     
+    # SOP Section / Chapter markers
+    is_section_header: bool = False
+    section_title: Optional[str] = None
+    section_description: Optional[str] = None
+    
     # Image file paths
     raw_image_path: Optional[str] = None
     annotated_image_path: Optional[str] = None
@@ -113,9 +118,49 @@ class Step:
             "cursor_y": self.cursor_y,
             "highlight_rect": self.highlight_rect,
             "user_comment": self.user_comment,
+            "is_section_header": self.is_section_header,
+            "section_title": self.section_title,
+            "section_description": self.section_description,
             "raw_image_path": self.raw_image_path,
             "annotated_image_path": self.annotated_image_path,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Step":
+        """Reconstruct Step from dictionary."""
+        ts = data.get("timestamp")
+        if isinstance(ts, str):
+            try:
+                ts = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S.%f")
+            except Exception:
+                try:
+                    ts = datetime.fromisoformat(ts)
+                except Exception:
+                    ts = datetime.now()
+        elif not isinstance(ts, datetime):
+            ts = datetime.now()
+
+        return cls(
+            step_id=data.get("step_id", 1),
+            timestamp=ts,
+            action_type=data.get("action_type", "click"),
+            description=data.get("description", ""),
+            window_title=data.get("window_title", "Unknown Window"),
+            process_name=data.get("process_name", "Unknown Process"),
+            pid=data.get("pid"),
+            ui_control=data.get("ui_control"),
+            window_rect=tuple(data["window_rect"]) if data.get("window_rect") else None,
+            relative_cursor=tuple(data["relative_cursor"]) if data.get("relative_cursor") else None,
+            cursor_x=data.get("cursor_x"),
+            cursor_y=data.get("cursor_y"),
+            highlight_rect=tuple(data["highlight_rect"]) if data.get("highlight_rect") else None,
+            user_comment=data.get("user_comment"),
+            is_section_header=data.get("is_section_header", False),
+            section_title=data.get("section_title"),
+            section_description=data.get("section_description"),
+            raw_image_path=data.get("raw_image_path"),
+            annotated_image_path=data.get("annotated_image_path"),
+        )
 
 
 @dataclass

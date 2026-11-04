@@ -9,6 +9,7 @@ from typing import Tuple, Optional, Callable
 from PIL import Image, ImageTk, ImageDraw
 
 from ..capture import ScreenCapture
+from ..i18n import t
 
 
 class ScreenSnipper:
@@ -68,7 +69,7 @@ class ScreenSnipper:
         )
         self.canvas.create_text(
             cx, 16 + banner_h // 2,
-            text="🎯 Kéo chuột để chọn vùng Focus / Highlight (Nhấn Esc để hủy)",
+            text=t("snipper_overlay_instructions"),
             fill="#f8fafc", font=("Segoe UI", 10, "bold")
         )
 

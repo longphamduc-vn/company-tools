@@ -9,6 +9,7 @@ from typing import Optional, Tuple, Callable
 from PIL import Image
 
 from ..window_info import exclude_window_from_capture
+from ..i18n import t
 from .snipper import ScreenSnipper
 
 
@@ -25,7 +26,7 @@ class CommentDialog:
         self.selected_rect: Optional[Tuple[int, int, int, int]] = None
 
         self.window = tk.Toplevel(parent)
-        self.window.title("Thêm Ghi Chú & Highlight Vùng Lỗi")
+        self.window.title(t("comment_win_title"))
         self.window.attributes("-topmost", True)
         self.window.transient(parent)
         self.window.configure(bg="#1e293b")
@@ -62,7 +63,7 @@ class CommentDialog:
 
         cancel_btn = tk.Button(
             btn_frame,
-            text="Hủy (Esc)",
+            text=t("btn_cancel"),
             command=self._cancel,
             bg="#334155",
             fg="#f8fafc",
@@ -78,7 +79,7 @@ class CommentDialog:
 
         save_btn = tk.Button(
             btn_frame,
-            text="✓ Lưu Bước Ghi Chú (Ctrl+Enter)",
+            text=t("btn_save_comment"),
             command=self._submit,
             bg="#0284c7",
             fg="#ffffff",
@@ -98,7 +99,7 @@ class CommentDialog:
 
         title_lbl = tk.Label(
             main_frame,
-            text="💬 Thêm Ghi Chú / Mô Tả Lỗi (Comment)",
+            text=t("comment_heading"),
             font=("Segoe UI", 11, "bold"),
             bg="#1e293b",
             fg="#f8fafc"
@@ -107,7 +108,7 @@ class CommentDialog:
 
         subtitle_lbl = tk.Label(
             main_frame,
-            text="Nhập mô tả vấn đề hoặc khoanh vùng khu vực cần Focus:",
+            text=t("comment_subheading"),
             font=("Segoe UI", 9),
             bg="#1e293b",
             fg="#94a3b8"
@@ -131,11 +132,11 @@ class CommentDialog:
 
         # Highlight Snipping tool row
         snip_row = tk.Frame(main_frame, bg="#1e293b")
-        snip_row.pack(fill=tk.X, pady=(0, 12))
+        snip_row.pack(fill=tk.X, pady=(0, 10))
 
         self.snip_btn = tk.Button(
             snip_row,
-            text="🎯 Khoanh vùng Focus / Highlight trên màn hình",
+            text=t("btn_launch_snipper"),
             command=self._launch_snipper,
             bg="#334155",
             fg="#38bdf8",
@@ -151,12 +152,52 @@ class CommentDialog:
 
         self.region_lbl = tk.Label(
             snip_row,
-            text="Khu vực: Toàn màn hình",
+            text=t("region_fullscreen"),
             font=("Segoe UI", 8),
             bg="#1e293b",
             fg="#64748b"
         )
         self.region_lbl.pack(side=tk.LEFT, padx=(10, 0))
+
+        # Section Header Checkbox & Title Entry
+        sec_box = tk.Frame(main_frame, bg="#1e293b")
+        sec_box.pack(fill=tk.X, pady=(0, 6))
+
+        self.is_section_var = tk.BooleanVar(value=False)
+        self.sec_chk = tk.Checkbutton(
+            sec_box,
+            text=t("comment_chk_section"),
+            variable=self.is_section_var,
+            command=self._on_section_chk_toggled,
+            bg="#1e293b",
+            fg="#cbd5e1",
+            activebackground="#1e293b",
+            activeforeground="#f8fafc",
+            selectcolor="#0f172a",
+            font=("Segoe UI", 9)
+        )
+        self.sec_chk.pack(anchor="w")
+
+        self.sec_title_frame = tk.Frame(sec_box, bg="#1e293b")
+        self.sec_title_lbl = tk.Label(
+            self.sec_title_frame,
+            text=t("comment_lbl_section_title"),
+            font=("Segoe UI", 8),
+            bg="#1e293b",
+            fg="#94a3b8"
+        )
+        self.sec_title_lbl.pack(anchor="w", pady=(2, 2))
+        self.sec_title_var = tk.StringVar()
+        self.sec_title_entry = tk.Entry(
+            self.sec_title_frame,
+            textvariable=self.sec_title_var,
+            bg="#0f172a",
+            fg="#f8fafc",
+            insertbackground="#38bdf8",
+            relief=tk.FLAT,
+            font=("Segoe UI", 9)
+        )
+        self.sec_title_entry.pack(fill=tk.X, ipady=3)
 
         # Key bindings
         self.window.bind("<Control-Return>", lambda e: self._submit())
@@ -173,22 +214,39 @@ class CommentDialog:
         if rect:
             w = rect[2] - rect[0]
             h = rect[3] - rect[1]
-            self.region_lbl.configure(text=f"Đã chọn: ({rect[0]}, {rect[1]}) - {w}x{h} px", fg="#10b981")
-            self.snip_btn.configure(text="✓ Đã khoanh vùng (Nhấn để chọn lại)", fg="#10b981")
+            self.region_lbl.configure(text=t("region_custom", x1=rect[0], y1=rect[1], w=w, h=h), fg="#10b981")
+            self.snip_btn.configure(text=t("btn_snip_selected"), fg="#10b981")
         else:
-            self.region_lbl.configure(text="Khu vực: Toàn màn hình", fg="#64748b")
-            self.snip_btn.configure(text="🎯 Khoanh vùng Focus / Highlight trên màn hình", fg="#38bdf8")
+            self.region_lbl.configure(text=t("region_fullscreen"), fg="#64748b")
+            self.snip_btn.configure(text=t("btn_launch_snipper"), fg="#38bdf8")
 
         self.window.deiconify()
         self.window.attributes("-topmost", True)
         self.window.focus_force()
         self.text_entry.focus_set()
 
+    def _on_section_chk_toggled(self) -> None:
+        """Show or hide section title input based on checkbox."""
+        if self.is_section_var.get():
+            self.sec_title_frame.pack(fill=tk.X, pady=(4, 0))
+            self.sec_title_entry.focus_set()
+        else:
+            self.sec_title_frame.pack_forget()
+
     def _submit(self) -> None:
         content = self.text_entry.get("1.0", tk.END).strip()
         if not content:
-            content = "Ghi chú người dùng / User flagged observation"
-        self.on_submit(content, self.selected_rect)
+            content = t("default_comment_text")
+        is_sec = self.is_section_var.get()
+        sec_title = self.sec_title_var.get().strip() if is_sec else None
+        if is_sec and not sec_title:
+            sec_title = content.split('\n')[0][:50]
+
+        try:
+            self.on_submit(content, self.selected_rect, is_sec, sec_title)
+        except TypeError:
+            self.on_submit(content, self.selected_rect)
+
         self.window.destroy()
 
     def _cancel(self) -> None:

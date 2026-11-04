@@ -16,6 +16,7 @@ from .config import RecorderConfig
 from .capture import ScreenCapture
 from .annotator import annotate_screenshot
 from .window_info import get_active_window_info
+from .i18n import t, I18nManager
 
 
 class RecordingEngine:
@@ -23,6 +24,7 @@ class RecordingEngine:
 
     def __init__(self, config: Optional[RecorderConfig] = None):
         self.config = config or RecorderConfig()
+        I18nManager.set_language(getattr(self.config, "language", "vi"))
         self.capture = ScreenCapture()
         
         self.state = "idle"  # "idle", "recording", "paused", "stopped"
@@ -116,8 +118,15 @@ class RecordingEngine:
             if self.on_state_changed:
                 self.on_state_changed(self.state)
 
-    def add_comment(self, comment_text: str, highlight_rect: Optional[Tuple[int, int, int, int]] = None) -> None:
-        """Manually insert a user comment/note step with a screenshot."""
+    def add_comment(
+        self,
+        comment_text: str,
+        highlight_rect: Optional[Tuple[int, int, int, int]] = None,
+        is_section_header: bool = False,
+        section_title: Optional[str] = None,
+        section_description: Optional[str] = None
+    ) -> None:
+        """Manually insert a user comment/note step with a screenshot and optional section header."""
         if self.state in ("stopped", "idle"):
             return
 
@@ -166,6 +175,9 @@ class RecordingEngine:
                 cursor_y=cur_y,
                 highlight_rect=adj_rect,
                 user_comment=comment_text,
+                is_section_header=is_section_header,
+                section_title=section_title,
+                section_description=section_description,
                 raw_image_bytes=self.capture.image_to_bytes(raw_img),
                 annotated_image_bytes=self.capture.image_to_bytes(annotated_img),
                 thumbnail_bytes=self.capture.image_to_bytes(thumb_img)
@@ -272,13 +284,23 @@ class RecordingEngine:
 
             btn_name = "Left" if button == mouse.Button.left else ("Right" if button == mouse.Button.right else "Middle")
             action_type = "double_click" if is_double_click else (f"{btn_name.lower()}_click")
-            action_verb = "Double Click" if is_double_click else f"{btn_name} Click"
 
-            # Enriched action description (PSR style)
-            if win_details.ui_control:
-                desc = f"User {action_verb} on {win_details.ui_control} at ({x}, {y}) in [{window_title}]"
+            # Localized enriched action description (PSR style)
+            if is_double_click:
+                if win_details.ui_control:
+                    desc = t("action_double_click_control", control=win_details.ui_control, x=x, y=y, window=window_title)
+                else:
+                    desc = t("action_double_click", x=x, y=y, window=window_title)
+            elif button == mouse.Button.right:
+                if win_details.ui_control:
+                    desc = t("action_right_click_control", control=win_details.ui_control, x=x, y=y, window=window_title)
+                else:
+                    desc = t("action_right_click", x=x, y=y, window=window_title)
             else:
-                desc = f"User {action_verb} at ({x}, {y}) on [{window_title}]"
+                if win_details.ui_control:
+                    desc = t("action_left_click_control", control=win_details.ui_control, x=x, y=y, window=window_title)
+                else:
+                    desc = t("action_left_click", x=x, y=y, window=window_title)
 
             annotated_img = annotate_screenshot(
                 raw_img,
@@ -372,7 +394,7 @@ class RecordingEngine:
                 self._apps_used.add(win_details.process_name)
 
             step_id = len(self.steps) + 1
-            desc = f"User pressed [{key_name.upper()}] key in [{win_details.title}]"
+            desc = t("action_key_press", key=key_name.upper(), window=win_details.title)
 
             # Annotate with badge
             annotated_img = annotate_screenshot(

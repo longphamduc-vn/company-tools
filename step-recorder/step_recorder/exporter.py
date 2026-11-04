@@ -53,10 +53,14 @@ class ReportExporter:
                 step.annotated_image_path = str(dest_img_path)
 
         # 2. Render & Save HTML Report
+        is_vi = getattr(self.config, "language", "vi") == "vi"
+        sections = self._group_sections(steps, is_vi=is_vi)
+
         template = self.jinja_env.get_template("report_template.html")
         html_content = template.render(
             session=metadata,
             steps=steps,
+            sections=sections,
             config=self.config
         )
         html_file = out_path / "report.html"
@@ -105,14 +109,75 @@ class ReportExporter:
 
         return results
 
+    def _group_sections(self, steps: List[Step], is_vi: bool = True) -> List[dict]:
+        """Group steps into chapters/sections for TOC generation."""
+        sections = []
+        if not steps:
+            return sections
+
+        has_custom = any(s.is_section_header for s in steps)
+        if not has_custom:
+            sections.append({
+                "index": 1,
+                "title": "Tổng quan các bước" if is_vi else "All Recorded Steps",
+                "description": "",
+                "first_step_id": steps[0].step_id,
+                "steps": steps,
+            })
+            return sections
+
+        sec_idx = 0
+        current_sec = None
+        for step in steps:
+            if step.is_section_header:
+                sec_idx += 1
+                current_sec = {
+                    "index": sec_idx,
+                    "title": step.section_title or (f"Phần {sec_idx}" if is_vi else f"Section {sec_idx}"),
+                    "description": step.section_description or "",
+                    "first_step_id": step.step_id,
+                    "steps": [step],
+                }
+                sections.append(current_sec)
+            else:
+                if current_sec is None:
+                    sec_idx += 1
+                    current_sec = {
+                        "index": sec_idx,
+                        "title": "Khởi đầu & Chuẩn bị" if is_vi else "Initial & Preparation",
+                        "description": "",
+                        "first_step_id": step.step_id,
+                        "steps": [step],
+                    }
+                    sections.append(current_sec)
+                else:
+                    current_sec["steps"].append(step)
+        return sections
+
     def _generate_markdown(self, steps: List[Step], metadata: SessionMetadata) -> str:
-        """Generate a GitHub/GitLab-friendly Markdown summary."""
+        """Generate a GitHub/GitLab-friendly Markdown summary in active language with TOC."""
+        is_vi = getattr(self.config, "language", "vi") == "vi"
+        sections = self._group_sections(steps, is_vi=is_vi)
+        has_custom_sections = any(s.is_section_header for s in steps)
+
+        title_steps = "Các Bước Đã Ghi Hình" if is_vi else "Recorded Steps"
+        lbl_date = "Ngày" if is_vi else "Date"
+        lbl_duration = "Thời lượng" if is_vi else "Duration"
+        lbl_total = "Tổng số bước" if is_vi else "Total Steps"
+        lbl_time = "Thời điểm" if is_vi else "Time"
+        lbl_window = "Cửa sổ" if is_vi else "Window"
+        lbl_coords = "Tọa độ" if is_vi else "Coordinates"
+        lbl_action = "Thao tác" if is_vi else "Action"
+        lbl_note = "Ghi chú người dùng" if is_vi else "User Comment"
+        step_word = "Bước" if is_vi else "Step"
+        toc_title = "Mục Lục Hướng Dẫn" if is_vi else "Table of Contents"
+
         lines = [
             f"# 📋 {metadata.title}",
             "",
-            f"> **Date**: {metadata.start_time.strftime('%Y-%m-%d %H:%M')} | "
-            f"**Duration**: {metadata.duration_str} | "
-            f"**Total Steps**: {len(steps)} | "
+            f"> **{lbl_date}**: {metadata.start_time.strftime('%Y-%m-%d %H:%M')} | "
+            f"**{lbl_duration}**: {metadata.duration_str} | "
+            f"**{lbl_total}**: {len(steps)} | "
             f"**OS**: {metadata.os_name}",
             "",
         ]
@@ -121,23 +186,54 @@ class ReportExporter:
             lines.append(f"{metadata.description}")
             lines.append("")
 
-        lines.append("## 📌 Recorded Steps")
+        # Generate Table of Contents
+        if len(steps) > 0:
+            lines.append(f"## 📑 {toc_title}")
+            lines.append("")
+            if has_custom_sections:
+                for sec in sections:
+                    anchor_sec = f"section-{sec['first_step_id']}"
+                    lines.append(f"- [**{sec['title']}**](#{anchor_sec}) ({len(sec['steps'])} {step_word.lower()})")
+                    for s in sec["steps"]:
+                        anchor_step = f"step-{s.step_id}"
+                        s_desc = (s.description[:45] + "...") if len(s.description) > 45 else s.description
+                        lines.append(f"  - [{step_word} {s.step_id}: {s_desc}](#{anchor_step})")
+            else:
+                for s in steps:
+                    anchor_step = f"step-{s.step_id}"
+                    s_desc = (s.description[:45] + "...") if len(s.description) > 45 else s.description
+                    lines.append(f"- [{step_word} {s.step_id}: {s_desc}](#{anchor_step})")
+            lines.append("")
+
+        lines.append(f"## 📌 {title_steps}")
         lines.append("")
 
+        sec_counter = 0
         for step in steps:
-            lines.append(f"### Step {step.step_id}: {step.action_type.replace('_', ' ').title()}")
-            lines.append(f"- **Time**: `{step.time_str}`")
-            lines.append(f"- **Window**: `{step.window_title}` (`{step.process_name}`)")
+            if step.is_section_header:
+                sec_counter += 1
+                sec_title = step.section_title or (f"Phần {sec_counter}" if is_vi else f"Section {sec_counter}")
+                lines.append(f"<a id=\"section-{step.step_id}\"></a>")
+                lines.append("---")
+                lines.append(f"## 📑 {sec_title}")
+                if step.section_description:
+                    lines.append(f"> 🎯 **Mục tiêu**: {step.section_description}\n")
+                lines.append("")
+
+            lines.append(f"<a id=\"step-{step.step_id}\"></a>")
+            lines.append(f"### {step_word} {step.step_id}: {step.action_type.replace('_', ' ').title()}")
+            lines.append(f"- **{lbl_time}**: `{step.time_str}`")
+            lines.append(f"- **{lbl_window}**: `{step.window_title}` (`{step.process_name}`)")
             if step.cursor_x is not None and step.cursor_y is not None:
-                lines.append(f"- **Coordinates**: `({step.cursor_x}, {step.cursor_y})`")
-            lines.append(f"- **Action**: {step.description}")
+                lines.append(f"- **{lbl_coords}**: `({step.cursor_x}, {step.cursor_y})`")
+            lines.append(f"- **{lbl_action}**: {step.description}")
 
             if step.user_comment:
-                lines.append(f"\n> 💬 **User Comment**: {step.user_comment}\n")
+                lines.append(f"\n> 💬 **{lbl_note}**: {step.user_comment}\n")
 
             if step.annotated_image_path:
                 rel_img_path = f"images/{os.path.basename(step.annotated_image_path)}"
-                lines.append(f"\n![Step {step.step_id}]({rel_img_path})\n")
+                lines.append(f"\n![{step_word} {step.step_id}]({rel_img_path})\n")
 
             lines.append("---")
             lines.append("")
