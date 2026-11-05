@@ -1,9 +1,8 @@
 """
 Interactive Step Reviewer and Editor window.
-Allows user to review, search/filter, edit descriptions, add/edit comments,
-delete unwanted steps, reorder steps, adjust highlight/focus regions,
-blur or redact sensitive privacy areas, crop screenshots, undo changes,
-insert steps from saved documents, and export final reports in bilingual mode.
+Studio-grade, modern Dark-Mode workspace for reviewing, searching, editing descriptions,
+adding comments, deleting, reordering, cropping, blurring/redacting privacy regions,
+inserting saved steps, and exporting publication-ready SOP guides.
 """
 
 import io
@@ -32,8 +31,47 @@ from ..window_info import exclude_window_from_capture
 from ..i18n import t, I18nManager
 
 
+# UI Design Palette - Studio Dark Theme
+COLOR_BG = "#090d16"           # Deep space background
+COLOR_PANEL = "#111827"        # Card / panel background
+COLOR_PANEL_ALT = "#162036"    # Toolbar & header container
+COLOR_BORDER = "#1e293b"       # Subtle border
+COLOR_BORDER_FOCUS = "#0ea5e9" # Active / focus highlight
+COLOR_INPUT_BG = "#060911"     # Recessed dark inputs
+COLOR_TEXT_MAIN = "#f8fafc"    # High-contrast white
+COLOR_TEXT_MUTED = "#94a3b8"   # Secondary slate
+COLOR_TEXT_DIM = "#64748b"     # Dim text & shortcut hints
+COLOR_CYAN = "#0ea5e9"         # Brand electric cyan
+COLOR_EMERALD = "#10b981"      # Success / Apply / Export
+COLOR_ROSE = "#f43f5e"         # Danger / Delete
+COLOR_AMBER = "#f59e0b"        # Chapter / Warning / Crop
+COLOR_PURPLE = "#8b5cf6"       # Blur / Privacy
+
+
+def bind_hover(widget: tk.Widget, normal_bg: str, hover_bg: str, normal_fg: str = None, hover_fg: str = None) -> None:
+    """Add smooth hover background & foreground transition to flat buttons."""
+    def _on_enter(e):
+        try:
+            widget.configure(bg=hover_bg)
+            if hover_fg:
+                widget.configure(fg=hover_fg)
+        except Exception:
+            pass
+
+    def _on_leave(e):
+        try:
+            widget.configure(bg=normal_bg)
+            if normal_fg:
+                widget.configure(fg=normal_fg)
+        except Exception:
+            pass
+
+    widget.bind("<Enter>", _on_enter, add="+")
+    widget.bind("<Leave>", _on_leave, add="+")
+
+
 class StepEditorWindow:
-    """Window for reviewing, editing, reordering, redacting, cropping, and exporting recorded steps."""
+    """Studio Review, Drawing & Editing workspace for recorded steps."""
 
     def __init__(
         self,
@@ -61,23 +99,23 @@ class StepEditorWindow:
         self.preview_scale_x = 1.0
         self.preview_scale_y = 1.0
         self.canvas_img_offset = (0, 0)
-        self.new_highlight_rect = None
+        self.raw_img_size = (0, 0)
         self.filtered_indices = list(range(len(self.steps)))
 
-        # Per-step undo stack for drawing/privacy/crop actions: Dict[step_id, List[bytes]]
+        # Per-step undo stack: Dict[step_id, List[bytes]]
         self.undo_stack: Dict[int, List[bytes]] = {}
 
-        # Active drawing tool: "highlight", "blur", "redact", "red_box", "crop"
+        # Active drawing tool
         self.active_tool: str = "highlight"
 
         self.window = tk.Toplevel(parent)
         self.window.title(t("editor_title"))
         self.window.attributes("-topmost", True)
-        self.window.configure(bg="#0f172a")
+        self.window.configure(bg=COLOR_BG)
 
         # Set spacious comfortable geometry
-        self.window.geometry("1100x740+40+20")
-        self.window.minsize(920, 620)
+        self.window.geometry("1160x780+40+20")
+        self.window.minsize(980, 660)
         self.window.resizable(True, True)
 
         self._build_ui()
@@ -85,7 +123,7 @@ class StepEditorWindow:
         if self.steps:
             self._select_step(0)
 
-        # Bind keyboard shortcuts
+        # Keyboard shortcuts
         self.window.bind("<Delete>", lambda e: self._delete_current_step())
         self.window.bind("<Control-s>", lambda e: self._apply_current_step_edits())
         self.window.bind("<Control-z>", lambda e: self._undo_last_action())
@@ -97,23 +135,37 @@ class StepEditorWindow:
         self.window.focus_force()
 
     def _build_ui(self) -> None:
-        main_frame = tk.Frame(self.window, bg="#0f172a", padx=14, pady=12)
+        main_frame = tk.Frame(self.window, bg=COLOR_BG, padx=14, pady=12)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Top Header Bar
-        header_frame = tk.Frame(main_frame, bg="#0f172a")
+        # ================= TOP HEADER BAR =================
+        header_frame = tk.Frame(main_frame, bg=COLOR_PANEL, padx=14, pady=8, highlightbackground=COLOR_BORDER, highlightthickness=1)
         header_frame.pack(fill=tk.X, pady=(0, 10))
 
+        # Brand / Title
+        header_left = tk.Frame(header_frame, bg=COLOR_PANEL)
+        header_left.pack(side=tk.LEFT)
+
+        self.logo_badge = tk.Label(
+            header_left,
+            text=" 📸 STEP STUDIO ",
+            font=("Segoe UI", 9, "bold"),
+            bg="#0369a1",
+            fg="#ffffff"
+        )
+        self.logo_badge.pack(side=tk.LEFT, padx=(0, 8))
+
         self.title_lbl = tk.Label(
-            header_frame,
+            header_left,
             text=t("editor_header"),
-            font=("Segoe UI", 13, "bold"),
-            bg="#0f172a",
-            fg="#f8fafc"
+            font=("Segoe UI", 12, "bold"),
+            bg=COLOR_PANEL,
+            fg=COLOR_TEXT_MAIN
         )
         self.title_lbl.pack(side=tk.LEFT)
 
-        header_right = tk.Frame(header_frame, bg="#0f172a")
+        # Header Right Controls
+        header_right = tk.Frame(header_frame, bg=COLOR_PANEL)
         header_right.pack(side=tk.RIGHT)
 
         # Open Saved Session button
@@ -121,109 +173,128 @@ class StepEditorWindow:
             header_right,
             text=t("btn_open_session"),
             command=self._open_saved_document,
-            bg="#1e293b",
-            fg="#38bdf8",
-            activebackground="#334155",
+            bg=COLOR_PANEL_ALT,
+            fg=COLOR_CYAN,
+            activebackground="#1e293b",
             relief=tk.FLAT,
             font=("Segoe UI", 8, "bold"),
-            padx=8,
-            pady=2,
+            padx=9,
+            pady=3,
             cursor="hand2"
         )
-        self.open_doc_btn.pack(side=tk.LEFT, padx=(0, 6))
+        self.open_doc_btn.pack(side=tk.LEFT, padx=(0, 5))
+        bind_hover(self.open_doc_btn, COLOR_PANEL_ALT, "#1e293b", COLOR_CYAN, "#38bdf8")
 
         # Insert Steps from file button
         self.insert_steps_btn = tk.Button(
             header_right,
             text=t("btn_insert_steps"),
             command=self._insert_steps_from_file,
-            bg="#1e293b",
-            fg="#10b981",
-            activebackground="#334155",
+            bg=COLOR_PANEL_ALT,
+            fg=COLOR_EMERALD,
+            activebackground="#1e293b",
             relief=tk.FLAT,
             font=("Segoe UI", 8, "bold"),
-            padx=8,
-            pady=2,
+            padx=9,
+            pady=3,
             cursor="hand2"
         )
         self.insert_steps_btn.pack(side=tk.LEFT, padx=(0, 8))
+        bind_hover(self.insert_steps_btn, COLOR_PANEL_ALT, "#1e293b", COLOR_EMERALD, "#34d399")
 
-        # Language toggle
+        # Language toggle pill
         self.lang_btn = tk.Button(
             header_right,
             text="🇻🇳 VI" if I18nManager.get_language() == "vi" else "🇬🇧 EN",
             command=self._toggle_language,
-            bg="#1e293b",
-            fg="#38bdf8",
-            activebackground="#334155",
+            bg=COLOR_PANEL_ALT,
+            fg="#cbd5e1",
+            activebackground="#1e293b",
             relief=tk.FLAT,
             font=("Segoe UI", 8, "bold"),
             padx=8,
-            pady=2,
+            pady=3,
             cursor="hand2"
         )
         self.lang_btn.pack(side=tk.LEFT, padx=(0, 10))
+        bind_hover(self.lang_btn, COLOR_PANEL_ALT, "#1e293b", "#cbd5e1", "#ffffff")
 
+        # Total steps pill
         self.total_lbl = tk.Label(
             header_right,
             text=t("total_steps", count=len(self.steps)),
-            font=("Segoe UI", 10),
-            bg="#0f172a",
-            fg="#94a3b8"
+            font=("Segoe UI", 9, "bold"),
+            bg="#030712",
+            fg=COLOR_CYAN,
+            padx=10,
+            pady=3,
+            highlightbackground=COLOR_BORDER,
+            highlightthickness=1
         )
         self.total_lbl.pack(side=tk.LEFT)
 
-        # Split content: Left list, Right editor
-        content_frame = tk.Frame(main_frame, bg="#0f172a")
+        # ================= WORKSPACE SPLIT =================
+        content_frame = tk.Frame(main_frame, bg=COLOR_BG)
         content_frame.pack(fill=tk.BOTH, expand=True)
-        content_frame.columnconfigure(0, weight=4)  # Left list
-        content_frame.columnconfigure(1, weight=7)  # Right editor
+        content_frame.columnconfigure(0, weight=4)  # Left list navigator
+        content_frame.columnconfigure(1, weight=8)  # Right drawing & editing studio
         content_frame.rowconfigure(0, weight=1)
 
-        # === LEFT COLUMN: Step List & Filter ===
-        left_frame = tk.Frame(content_frame, bg="#1e293b", padx=10, pady=10)
-        left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        # === LEFT COLUMN: Step Navigator & Filters ===
+        left_frame = tk.Frame(content_frame, bg=COLOR_PANEL, padx=12, pady=12, highlightbackground=COLOR_BORDER, highlightthickness=1)
+        left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+
+        # Title row with icon
+        list_header_row = tk.Frame(left_frame, bg=COLOR_PANEL)
+        list_header_row.pack(fill=tk.X, pady=(0, 6))
 
         self.list_header = tk.Label(
-            left_frame, text=t("step_list_title"),
-            font=("Segoe UI", 10, "bold"), bg="#1e293b", fg="#cbd5e1"
+            list_header_row,
+            text=t("step_list_title"),
+            font=("Segoe UI", 9, "bold"),
+            bg=COLOR_PANEL,
+            fg="#cbd5e1"
         )
-        self.list_header.pack(anchor="w", pady=(0, 6))
+        self.list_header.pack(side=tk.LEFT)
 
-        # Search / Quick Filter Bar
-        search_frame = tk.Frame(left_frame, bg="#1e293b")
-        search_frame.pack(fill=tk.X, pady=(0, 6))
+        # Modern Search / Filter Pill
+        search_frame = tk.Frame(left_frame, bg=COLOR_INPUT_BG, highlightbackground=COLOR_BORDER, highlightthickness=1, padx=6, pady=2)
+        search_frame.pack(fill=tk.X, pady=(0, 8))
+
+        search_icon = tk.Label(search_frame, text="🔍", font=("Segoe UI", 8), bg=COLOR_INPUT_BG, fg=COLOR_TEXT_DIM)
+        search_icon.pack(side=tk.LEFT, padx=(2, 4))
 
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *args: self._on_filter_changed())
         search_entry = tk.Entry(
             search_frame,
             textvariable=self.search_var,
-            bg="#0f172a",
-            fg="#f8fafc",
-            insertbackground="#38bdf8",
+            bg=COLOR_INPUT_BG,
+            fg=COLOR_TEXT_MAIN,
+            insertbackground=COLOR_CYAN,
             relief=tk.FLAT,
             font=("Segoe UI", 9)
         )
-        search_entry.pack(fill=tk.X, ipady=4)
+        search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=2)
 
-        # Listbox with scrollbar
-        list_container = tk.Frame(left_frame, bg="#1e293b")
+        # Step Listbox Container with custom scrollbar
+        list_container = tk.Frame(left_frame, bg=COLOR_PANEL)
         list_container.pack(fill=tk.BOTH, expand=True)
 
         scrollbar = tk.Scrollbar(list_container, orient=tk.VERTICAL)
         self.step_listbox = tk.Listbox(
             list_container,
             yscrollcommand=scrollbar.set,
-            bg="#0f172a",
-            fg="#f8fafc",
-            selectbackground="#0284c7",
+            bg=COLOR_INPUT_BG,
+            fg=COLOR_TEXT_MAIN,
+            selectbackground=COLOR_CYAN,
             selectforeground="#ffffff",
             font=("Segoe UI", 9),
             relief=tk.FLAT,
             activestyle="none",
             highlightthickness=1,
-            highlightcolor="#38bdf8"
+            highlightcolor=COLOR_BORDER_FOCUS,
+            selectborderwidth=0
         )
         scrollbar.config(command=self.step_listbox.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -231,99 +302,162 @@ class StepEditorWindow:
         self.step_listbox.bind("<<ListboxSelect>>", self._on_list_select)
 
         # List Action Buttons (Delete, Move Up, Move Down)
-        list_btn_frame = tk.Frame(left_frame, bg="#1e293b")
+        list_btn_frame = tk.Frame(left_frame, bg=COLOR_PANEL)
         list_btn_frame.pack(fill=tk.X, pady=(8, 0))
 
         self.del_btn = tk.Button(
             list_btn_frame,
             text=t("btn_delete_step"),
             command=self._delete_current_step,
-            bg="#dc2626", fg="#ffffff",
-            activebackground="#ef4444",
-            font=("Segoe UI", 9, "bold"),
+            bg="#991b1b", fg="#ffffff",
+            activebackground=COLOR_ROSE,
+            font=("Segoe UI", 8, "bold"),
             relief=tk.FLAT, padx=8, pady=4, cursor="hand2"
         )
         self.del_btn.pack(side=tk.LEFT, padx=(0, 4))
+        bind_hover(self.del_btn, "#991b1b", COLOR_ROSE)
 
         self.up_btn = tk.Button(
             list_btn_frame,
             text=t("btn_move_up"),
             command=self._move_step_up,
-            bg="#334155", fg="#f8fafc",
-            activebackground="#475569",
-            font=("Segoe UI", 9),
+            bg=COLOR_PANEL_ALT, fg=COLOR_TEXT_MAIN,
+            activebackground="#1e293b",
+            font=("Segoe UI", 8),
             relief=tk.FLAT, padx=8, pady=4, cursor="hand2"
         )
         self.up_btn.pack(side=tk.LEFT, padx=(0, 4))
+        bind_hover(self.up_btn, COLOR_PANEL_ALT, "#1e293b")
 
         self.down_btn = tk.Button(
             list_btn_frame,
             text=t("btn_move_down"),
             command=self._move_step_down,
-            bg="#334155", fg="#f8fafc",
-            activebackground="#475569",
-            font=("Segoe UI", 9),
+            bg=COLOR_PANEL_ALT, fg=COLOR_TEXT_MAIN,
+            activebackground="#1e293b",
+            font=("Segoe UI", 8),
             relief=tk.FLAT, padx=8, pady=4, cursor="hand2"
         )
         self.down_btn.pack(side=tk.LEFT)
+        bind_hover(self.down_btn, COLOR_PANEL_ALT, "#1e293b")
 
-        # === RIGHT COLUMN: Step Editor & Preview ===
-        right_frame = tk.Frame(content_frame, bg="#1e293b", padx=12, pady=10)
+        # Step count footer
+        self.list_footer_lbl = tk.Label(
+            left_frame,
+            text="",
+            font=("Segoe UI", 7),
+            bg=COLOR_PANEL,
+            fg=COLOR_TEXT_DIM
+        )
+        self.list_footer_lbl.pack(anchor="w", pady=(6, 0))
+
+        # === RIGHT COLUMN: Studio Editor, Toolbar & Canvas ===
+        right_frame = tk.Frame(content_frame, bg=COLOR_PANEL, padx=14, pady=12, highlightbackground=COLOR_BORDER, highlightthickness=1)
         right_frame.grid(row=0, column=1, sticky="nsew")
 
-        # Step meta header
-        self.step_header_lbl = tk.Label(
-            right_frame,
-            text="",
-            font=("Segoe UI", 11, "bold"),
-            bg="#1e293b", fg="#38bdf8"
-        )
-        self.step_header_lbl.pack(anchor="w", pady=(0, 4))
+        # Stylized Step Metadata Card Header
+        meta_card = tk.Frame(right_frame, bg=COLOR_PANEL_ALT, padx=10, pady=6, highlightbackground=COLOR_BORDER, highlightthickness=1)
+        meta_card.pack(fill=tk.X, pady=(0, 8))
 
-        # Description Edit
-        self.desc_lbl = tk.Label(
-            right_frame, text=t("desc_label"),
-            font=("Segoe UI", 9, "bold"), bg="#1e293b", fg="#cbd5e1"
+        self.step_badge_pill = tk.Label(
+            meta_card,
+            text="#01",
+            font=("Segoe UI", 9, "bold"),
+            bg=COLOR_CYAN,
+            fg="#ffffff",
+            padx=6,
+            pady=1
         )
-        self.desc_lbl.pack(anchor="w", pady=(2, 1))
+        self.step_badge_pill.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.action_pill = tk.Label(
+            meta_card,
+            text="Action",
+            font=("Segoe UI", 8, "bold"),
+            bg="#030712",
+            fg="#38bdf8",
+            padx=6,
+            pady=1,
+            highlightbackground=COLOR_BORDER,
+            highlightthickness=1
+        )
+        self.action_pill.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.time_pill = tk.Label(
+            meta_card,
+            text="00:00:00",
+            font=("Consolas", 8),
+            bg=COLOR_PANEL_ALT,
+            fg=COLOR_TEXT_MUTED
+        )
+        self.time_pill.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.window_tag_lbl = tk.Label(
+            meta_card,
+            text="",
+            font=("Segoe UI", 8),
+            bg=COLOR_PANEL_ALT,
+            fg=COLOR_TEXT_DIM,
+            anchor="w"
+        )
+        self.window_tag_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Fields Grid for Description and Comment
+        fields_row = tk.Frame(right_frame, bg=COLOR_PANEL)
+        fields_row.pack(fill=tk.X, pady=(0, 6))
+        fields_row.columnconfigure(0, weight=1)
+        fields_row.columnconfigure(1, weight=1)
+
+        # Description Field Card
+        desc_box = tk.Frame(fields_row, bg=COLOR_PANEL)
+        desc_box.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+
+        self.desc_lbl = tk.Label(
+            desc_box, text=t("desc_label"),
+            font=("Segoe UI", 8, "bold"), bg=COLOR_PANEL, fg="#cbd5e1"
+        )
+        self.desc_lbl.pack(anchor="w", pady=(0, 2))
 
         self.desc_var = tk.StringVar()
         self.desc_entry = tk.Entry(
-            right_frame,
+            desc_box,
             textvariable=self.desc_var,
-            bg="#0f172a", fg="#f8fafc",
-            insertbackground="#38bdf8",
-            font=("Segoe UI", 9), relief=tk.FLAT
+            bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN,
+            insertbackground=COLOR_CYAN,
+            font=("Segoe UI", 9), relief=tk.FLAT,
+            highlightbackground=COLOR_BORDER, highlightthickness=1
         )
-        self.desc_entry.pack(fill=tk.X, ipady=3, pady=(0, 4))
+        self.desc_entry.pack(fill=tk.X, ipady=3)
 
-        # Comment Edit
+        # Comment Field Card
+        comment_box = tk.Frame(fields_row, bg=COLOR_PANEL)
+        comment_box.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+
         self.comment_lbl = tk.Label(
-            right_frame, text=t("comment_label"),
-            font=("Segoe UI", 9, "bold"), bg="#1e293b", fg="#cbd5e1"
+            comment_box, text=t("comment_label"),
+            font=("Segoe UI", 8, "bold"), bg=COLOR_PANEL, fg="#cbd5e1"
         )
-        self.comment_lbl.pack(anchor="w", pady=(1, 1))
+        self.comment_lbl.pack(anchor="w", pady=(0, 2))
 
         self.comment_var = tk.StringVar()
         self.comment_entry = tk.Entry(
-            right_frame,
+            comment_box,
             textvariable=self.comment_var,
-            bg="#0f172a", fg="#f8fafc",
-            insertbackground="#38bdf8",
-            font=("Segoe UI", 9), relief=tk.FLAT
+            bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN,
+            insertbackground=COLOR_CYAN,
+            font=("Segoe UI", 9), relief=tk.FLAT,
+            highlightbackground=COLOR_BORDER, highlightthickness=1
         )
-        self.comment_entry.pack(fill=tk.X, ipady=3, pady=(0, 6))
+        self.comment_entry.pack(fill=tk.X, ipady=3)
 
-        # Section & Chapter Header Frame (SOP Section)
-        self.sec_box = tk.LabelFrame(
+        # Section & Chapter Header Card (SOP Section)
+        self.sec_box = tk.Frame(
             right_frame,
-            text=f" {t('sec_group_title')} ",
-            bg="#1e293b",
-            fg="#38bdf8",
-            font=("Segoe UI", 8, "bold"),
-            padx=8,
-            pady=4,
-            relief=tk.GROOVE
+            bg=COLOR_PANEL_ALT,
+            padx=10,
+            pady=6,
+            highlightbackground=COLOR_BORDER,
+            highlightthickness=1
         )
         self.sec_box.pack(fill=tk.X, pady=(0, 6))
 
@@ -333,161 +467,204 @@ class StepEditorWindow:
             text=t("chk_section_header"),
             variable=self.is_section_var,
             command=self._on_section_chk_changed,
-            bg="#1e293b",
-            fg="#cbd5e1",
-            activebackground="#1e293b",
-            activeforeground="#f8fafc",
-            selectcolor="#0f172a",
-            font=("Segoe UI", 8)
+            bg=COLOR_PANEL_ALT,
+            fg=COLOR_AMBER,
+            activebackground=COLOR_PANEL_ALT,
+            activeforeground="#fbbf24",
+            selectcolor="#030712",
+            font=("Segoe UI", 8, "bold")
         )
         self.sec_chk.pack(anchor="w")
 
-        self.sec_inputs_frame = tk.Frame(self.sec_box, bg="#1e293b")
+        self.sec_inputs_frame = tk.Frame(self.sec_box, bg=COLOR_PANEL_ALT)
         # Unpacked by default until is_section_var is True
 
+        sec_input_row = tk.Frame(self.sec_inputs_frame, bg=COLOR_PANEL_ALT)
+        sec_input_row.pack(fill=tk.X, pady=(2, 0))
+        sec_input_row.columnconfigure(0, weight=1)
+        sec_input_row.columnconfigure(1, weight=1)
+
+        # Title column
+        title_col = tk.Frame(sec_input_row, bg=COLOR_PANEL_ALT)
+        title_col.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+
         self.sec_title_lbl = tk.Label(
-            self.sec_inputs_frame,
+            title_col,
             text=t("lbl_section_title"),
-            font=("Segoe UI", 8, "bold"),
-            bg="#1e293b",
-            fg="#94a3b8"
+            font=("Segoe UI", 8),
+            bg=COLOR_PANEL_ALT,
+            fg=COLOR_TEXT_MUTED
         )
-        self.sec_title_lbl.pack(anchor="w", pady=(1, 1))
+        self.sec_title_lbl.pack(anchor="w")
 
         self.sec_title_var = tk.StringVar()
         self.sec_title_entry = tk.Entry(
-            self.sec_inputs_frame,
+            title_col,
             textvariable=self.sec_title_var,
-            bg="#0f172a",
-            fg="#f8fafc",
-            insertbackground="#38bdf8",
+            bg=COLOR_INPUT_BG,
+            fg=COLOR_TEXT_MAIN,
+            insertbackground=COLOR_CYAN,
             font=("Segoe UI", 9),
-            relief=tk.FLAT
+            relief=tk.FLAT,
+            highlightbackground=COLOR_BORDER,
+            highlightthickness=1
         )
-        self.sec_title_entry.pack(fill=tk.X, ipady=2, pady=(0, 2))
+        self.sec_title_entry.pack(fill=tk.X, ipady=2, pady=(1, 0))
+
+        # Description column
+        desc_col = tk.Frame(sec_input_row, bg=COLOR_PANEL_ALT)
+        desc_col.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
 
         self.sec_desc_lbl = tk.Label(
-            self.sec_inputs_frame,
+            desc_col,
             text=t("lbl_section_desc"),
-            font=("Segoe UI", 8, "bold"),
-            bg="#1e293b",
-            fg="#94a3b8"
+            font=("Segoe UI", 8),
+            bg=COLOR_PANEL_ALT,
+            fg=COLOR_TEXT_MUTED
         )
-        self.sec_desc_lbl.pack(anchor="w", pady=(1, 1))
+        self.sec_desc_lbl.pack(anchor="w")
 
         self.sec_desc_var = tk.StringVar()
         self.sec_desc_entry = tk.Entry(
-            self.sec_inputs_frame,
+            desc_col,
             textvariable=self.sec_desc_var,
-            bg="#0f172a",
-            fg="#f8fafc",
-            insertbackground="#38bdf8",
+            bg=COLOR_INPUT_BG,
+            fg=COLOR_TEXT_MAIN,
+            insertbackground=COLOR_CYAN,
             font=("Segoe UI", 9),
-            relief=tk.FLAT
+            relief=tk.FLAT,
+            highlightbackground=COLOR_BORDER,
+            highlightthickness=1
         )
-        self.sec_desc_entry.pack(fill=tk.X, ipady=2, pady=(0, 2))
+        self.sec_desc_entry.pack(fill=tk.X, ipady=2, pady=(1, 0))
 
-        # === INTERACTIVE DRAWING & PRIVACY TOOLBAR ===
-        tool_frame = tk.Frame(right_frame, bg="#1e293b")
+        # ================= INTERACTIVE DRAWING STUDIO TOOLBAR =================
+        tool_frame = tk.Frame(
+            right_frame,
+            bg=COLOR_PANEL_ALT,
+            padx=8,
+            pady=4,
+            highlightbackground=COLOR_BORDER,
+            highlightthickness=1
+        )
         tool_frame.pack(fill=tk.X, pady=(2, 2))
 
-        # Left tools
+        # Tool buttons dictionary
         self.tool_btns: Dict[str, tk.Button] = {}
 
+        # 1. Focus / Highlight
         self.tool_btns["highlight"] = tk.Button(
             tool_frame,
             text=t("tool_highlight"),
             command=lambda: self._set_active_tool("highlight"),
-            bg="#0284c7", fg="#ffffff",
-            activebackground="#0369a1",
+            bg="#0369a1", fg="#ffffff",
+            activebackground="#0284c7",
             font=("Segoe UI", 8, "bold"),
-            relief=tk.FLAT, padx=6, pady=2, cursor="hand2"
+            relief=tk.FLAT, padx=7, pady=2, cursor="hand2"
         )
         self.tool_btns["highlight"].pack(side=tk.LEFT, padx=(0, 3))
 
+        # 2. Blur Privacy
         self.tool_btns["blur"] = tk.Button(
             tool_frame,
             text=t("tool_blur"),
             command=lambda: self._set_active_tool("blur"),
-            bg="#334155", fg="#cbd5e1",
-            activebackground="#475569",
+            bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MUTED,
+            activebackground=COLOR_PURPLE,
             font=("Segoe UI", 8),
-            relief=tk.FLAT, padx=6, pady=2, cursor="hand2"
+            relief=tk.FLAT, padx=7, pady=2, cursor="hand2"
         )
         self.tool_btns["blur"].pack(side=tk.LEFT, padx=(0, 3))
 
+        # 3. Redact Blackout
         self.tool_btns["redact"] = tk.Button(
             tool_frame,
             text=t("tool_redact"),
             command=lambda: self._set_active_tool("redact"),
-            bg="#334155", fg="#cbd5e1",
-            activebackground="#475569",
+            bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MUTED,
+            activebackground="#334155",
             font=("Segoe UI", 8),
-            relief=tk.FLAT, padx=6, pady=2, cursor="hand2"
+            relief=tk.FLAT, padx=7, pady=2, cursor="hand2"
         )
         self.tool_btns["redact"].pack(side=tk.LEFT, padx=(0, 3))
 
+        # 4. Red Attention Box
         self.tool_btns["red_box"] = tk.Button(
             tool_frame,
             text=t("tool_red_box"),
             command=lambda: self._set_active_tool("red_box"),
-            bg="#334155", fg="#cbd5e1",
-            activebackground="#475569",
+            bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MUTED,
+            activebackground=COLOR_ROSE,
             font=("Segoe UI", 8),
-            relief=tk.FLAT, padx=6, pady=2, cursor="hand2"
+            relief=tk.FLAT, padx=7, pady=2, cursor="hand2"
         )
         self.tool_btns["red_box"].pack(side=tk.LEFT, padx=(0, 3))
 
+        # 5. Crop Tool
         self.tool_btns["crop"] = tk.Button(
             tool_frame,
             text=t("tool_crop"),
             command=lambda: self._set_active_tool("crop"),
-            bg="#334155", fg="#cbd5e1",
-            activebackground="#475569",
+            bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MUTED,
+            activebackground=COLOR_AMBER,
             font=("Segoe UI", 8),
-            relief=tk.FLAT, padx=6, pady=2, cursor="hand2"
+            relief=tk.FLAT, padx=7, pady=2, cursor="hand2"
         )
         self.tool_btns["crop"].pack(side=tk.LEFT, padx=(0, 8))
 
-        # Right utility buttons: Undo & Reset
+        # Right utility actions: Reset to Raw & Undo
         self.reset_marker_btn = tk.Button(
             tool_frame,
             text=t("btn_reset_raw"),
             command=self._reset_to_raw,
-            bg="#334155", fg="#cbd5e1",
-            activebackground="#475569",
+            bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MUTED,
+            activebackground="#1e293b",
             font=("Segoe UI", 8),
-            relief=tk.FLAT, padx=6, pady=2, cursor="hand2"
+            relief=tk.FLAT, padx=7, pady=2, cursor="hand2"
         )
         self.reset_marker_btn.pack(side=tk.RIGHT)
+        bind_hover(self.reset_marker_btn, COLOR_INPUT_BG, "#1e293b", COLOR_TEXT_MUTED, COLOR_TEXT_MAIN)
 
         self.undo_btn = tk.Button(
             tool_frame,
             text=t("btn_undo"),
             command=self._undo_last_action,
-            bg="#334155", fg="#cbd5e1",
-            activebackground="#475569",
+            bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MUTED,
+            activebackground="#1e293b",
             font=("Segoe UI", 8),
-            relief=tk.FLAT, padx=6, pady=2, cursor="hand2"
+            relief=tk.FLAT, padx=7, pady=2, cursor="hand2"
         )
         self.undo_btn.pack(side=tk.RIGHT, padx=(0, 4))
+        bind_hover(self.undo_btn, COLOR_INPUT_BG, "#1e293b", COLOR_TEXT_MUTED, COLOR_TEXT_MAIN)
 
-        # Tool Instruction Hint Label
+        # Dynamic Tool Instruction Hint Bar
+        hint_bar = tk.Frame(right_frame, bg=COLOR_PANEL)
+        hint_bar.pack(fill=tk.X, pady=(2, 3))
+
         self.tool_hint_lbl = tk.Label(
-            right_frame,
-            text=t("drag_hint_highlight"),
+            hint_bar,
+            text=f"💡 {t('drag_hint_highlight')}",
             font=("Segoe UI", 8),
-            bg="#1e293b",
-            fg="#94a3b8"
+            bg=COLOR_PANEL,
+            fg=COLOR_TEXT_MUTED
         )
-        self.tool_hint_lbl.pack(anchor="w", pady=(1, 3))
+        self.tool_hint_lbl.pack(side=tk.LEFT)
+
+        self.canvas_dim_lbl = tk.Label(
+            hint_bar,
+            text="",
+            font=("Consolas", 8),
+            bg=COLOR_PANEL,
+            fg=COLOR_TEXT_DIM
+        )
+        self.canvas_dim_lbl.pack(side=tk.RIGHT)
 
         # Canvas for Screenshot Display & Interactive Drawing
         self.preview_canvas = tk.Canvas(
             right_frame,
-            bg="#000000",
+            bg="#030712",
             highlightthickness=1,
-            highlightbackground="#334155",
+            highlightbackground=COLOR_BORDER,
             cursor="cross"
         )
         self.preview_canvas.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
@@ -495,32 +672,57 @@ class StepEditorWindow:
         self.preview_canvas.bind("<B1-Motion>", self._on_canvas_drag)
         self.preview_canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
 
-        # Apply edit button
+        # Bottom row of right pane: Apply changes button
+        apply_row = tk.Frame(right_frame, bg=COLOR_PANEL)
+        apply_row.pack(fill=tk.X)
+
+        self.save_hint_lbl = tk.Label(
+            apply_row,
+            text="Ctrl+S: Cập nhật | Ctrl+Z: Hoàn tác",
+            font=("Segoe UI", 7),
+            bg=COLOR_PANEL,
+            fg=COLOR_TEXT_DIM
+        )
+        self.save_hint_lbl.pack(side=tk.LEFT)
+
         self.update_step_btn = tk.Button(
-            right_frame,
+            apply_row,
             text=t("btn_apply_step"),
             command=self._apply_current_step_edits,
             bg="#0284c7", fg="#ffffff",
             activebackground="#0369a1",
             font=("Segoe UI", 9, "bold"),
-            relief=tk.FLAT, padx=14, pady=4, cursor="hand2"
+            relief=tk.FLAT, padx=16, pady=4, cursor="hand2"
         )
-        self.update_step_btn.pack(anchor="e")
+        self.update_step_btn.pack(side=tk.RIGHT)
+        bind_hover(self.update_step_btn, "#0284c7", "#0ea5e9")
 
-        # === BOTTOM ACTION BAR ===
-        bottom_bar = tk.Frame(main_frame, bg="#0f172a")
+        # ================= BOTTOM ACTION BAR =================
+        bottom_bar = tk.Frame(main_frame, bg=COLOR_BG)
         bottom_bar.pack(fill=tk.X, pady=(10, 0))
 
+        # Left shortcut badge
+        self.kb_shortcut_lbl = tk.Label(
+            bottom_bar,
+            text="⌨️ Ctrl+S: Lưu bước | Ctrl+Z: Hoàn tác | Ctrl+E: Xuất file | Del: Xóa | Esc: Đóng",
+            font=("Segoe UI", 8),
+            bg=COLOR_BG,
+            fg=COLOR_TEXT_DIM
+        )
+        self.kb_shortcut_lbl.pack(side=tk.LEFT)
+
+        # Right actions
         self.cancel_btn = tk.Button(
             bottom_bar,
             text=t("btn_close_editor"),
             command=self.window.destroy,
-            bg="#334155", fg="#f8fafc",
-            activebackground="#475569",
+            bg=COLOR_PANEL, fg="#cbd5e1",
+            activebackground="#1e293b",
             font=("Segoe UI", 9),
             relief=tk.FLAT, padx=14, pady=5, cursor="hand2"
         )
         self.cancel_btn.pack(side=tk.RIGHT, padx=(8, 0))
+        bind_hover(self.cancel_btn, COLOR_PANEL, "#1e293b", "#cbd5e1", "#ffffff")
 
         self.export_btn = tk.Button(
             bottom_bar,
@@ -529,24 +731,34 @@ class StepEditorWindow:
             bg="#059669", fg="#ffffff",
             activebackground="#10b981",
             font=("Segoe UI", 10, "bold"),
-            relief=tk.FLAT, padx=18, pady=5, cursor="hand2"
+            relief=tk.FLAT, padx=20, pady=5, cursor="hand2"
         )
         self.export_btn.pack(side=tk.RIGHT)
+        bind_hover(self.export_btn, "#059669", "#10b981")
 
     def _set_active_tool(self, tool_name: str) -> None:
-        """Switch active drawing tool on the toolbar."""
+        """Switch active drawing tool on the toolbar with dynamic styling."""
         self.active_tool = tool_name
+
+        tool_active_colors = {
+            "highlight": ("#0369a1", "#0284c7"),
+            "blur": ("#6d28d9", "#7c3aed"),
+            "redact": ("#334155", "#475569"),
+            "red_box": ("#be123c", "#e11d48"),
+            "crop": ("#b45309", "#d97706"),
+        }
 
         # Update button highlights
         for name, btn in self.tool_btns.items():
             if name == tool_name:
-                btn.configure(bg="#0284c7", fg="#ffffff", font=("Segoe UI", 8, "bold"))
+                bg_col, _ = tool_active_colors.get(name, ("#0369a1", "#0284c7"))
+                btn.configure(bg=bg_col, fg="#ffffff", font=("Segoe UI", 8, "bold"))
             else:
-                btn.configure(bg="#334155", fg="#cbd5e1", font=("Segoe UI", 8))
+                btn.configure(bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MUTED, font=("Segoe UI", 8))
 
         # Update instruction hint label
         hint_key = f"drag_hint_{tool_name}"
-        self.tool_hint_lbl.configure(text=t(hint_key))
+        self.tool_hint_lbl.configure(text=f"💡 {t(hint_key)}")
 
         # Update cursor
         if tool_name == "crop":
@@ -589,7 +801,6 @@ class StepEditorWindow:
         self.down_btn.configure(text=t("btn_move_down"))
         self.desc_lbl.configure(text=t("desc_label"))
         self.comment_lbl.configure(text=t("comment_label"))
-        self.sec_box.configure(text=f" {t('sec_group_title')} ")
         self.sec_chk.configure(text=t("chk_section_header"))
         self.sec_title_lbl.configure(text=t("lbl_section_title"))
         self.sec_desc_lbl.configure(text=t("lbl_section_desc"))
@@ -600,16 +811,17 @@ class StepEditorWindow:
         self.tool_btns["crop"].configure(text=t("tool_crop"))
         self.undo_btn.configure(text=t("btn_undo"))
         self.reset_marker_btn.configure(text=t("btn_reset_raw"))
-        self.tool_hint_lbl.configure(text=t(f"drag_hint_{self.active_tool}"))
+        self.tool_hint_lbl.configure(text=f"💡 {t(f'drag_hint_{self.active_tool}')}")
         self.update_step_btn.configure(text=t("btn_apply_step"))
         self.cancel_btn.configure(text=t("btn_close_editor"))
         self.export_btn.configure(text=t("btn_export_report"))
 
         if 0 <= self.current_index < len(self.steps):
             step = self.steps[self.current_index]
-            self.step_header_lbl.configure(
-                text=t("step_detail_title", id=step.step_id, action=step.action_type.replace('_', ' ').title(), time=step.time_str)
-            )
+            self.step_badge_pill.configure(text=f" #{step.step_id:02d} ")
+            self.action_pill.configure(text=f" {step.action_icon} {step.action_type.replace('_', ' ').title()} ")
+            self.time_pill.configure(text=f" ⏱️ {step.time_str} ")
+            self.window_tag_lbl.configure(text=f"🪟 {step.window_title[:45]}")
 
     # --- Step List Management & Search Filter ---
     def _on_filter_changed(self) -> None:
@@ -629,7 +841,7 @@ class StepEditorWindow:
         self._populate_list()
 
     def _populate_list(self) -> None:
-        """Refresh Listbox items with filtered steps and section headers."""
+        """Refresh Listbox items with filtered steps and chapter headers."""
         self.step_listbox.delete(0, tk.END)
         sec_num = 0
         for i in self.filtered_indices:
@@ -638,16 +850,21 @@ class StepEditorWindow:
             if s.is_section_header:
                 sec_num += 1
                 sec_display = s.section_title or f"Phần {sec_num}"
-                if len(sec_display) > 20:
-                    sec_display = sec_display[:20] + "..."
+                if len(sec_display) > 18:
+                    sec_display = sec_display[:18] + "..."
                 prefix = f"📑 [P.{sec_num}: {sec_display}] "
 
             icon = s.action_icon
-            desc_short = (s.description[:32] + "...") if len(s.description) > 32 else s.description
+            desc_short = (s.description[:30] + "...") if len(s.description) > 30 else s.description
             comment_tag = " [💬]" if s.user_comment else ""
-            self.step_listbox.insert(tk.END, f"{prefix}#{s.step_id} {icon} {desc_short}{comment_tag}")
+            self.step_listbox.insert(tk.END, f"{prefix}#{s.step_id:02d} {icon} {desc_short}{comment_tag}")
 
         self.total_lbl.configure(text=t("total_steps", count=len(self.steps)))
+
+        if 0 <= self.current_index < len(self.steps):
+            self.list_footer_lbl.configure(
+                text=f"Đang xem: Bước #{self.steps[self.current_index].step_id} / {len(self.steps)}"
+            )
 
     def _on_list_select(self, event=None) -> None:
         selected = self.step_listbox.curselection()
@@ -664,10 +881,13 @@ class StepEditorWindow:
         self.current_index = index
         step = self.steps[index]
 
+        # Update stylized header card
+        self.step_badge_pill.configure(text=f" #{step.step_id:02d} ")
+        self.action_pill.configure(text=f" {step.action_icon} {step.action_type.replace('_', ' ').title()} ")
+        self.time_pill.configure(text=f" ⏱️ {step.time_str} ")
+        self.window_tag_lbl.configure(text=f"🪟 {step.window_title[:45]}")
+
         # Update input fields
-        self.step_header_lbl.configure(
-            text=t("step_detail_title", id=step.step_id, action=step.action_type.replace('_', ' ').title(), time=step.time_str)
-        )
         self.desc_var.set(step.description)
         self.comment_var.set(step.user_comment or "")
         self.is_section_var.set(bool(step.is_section_header))
@@ -684,6 +904,10 @@ class StepEditorWindow:
                 self.step_listbox.activate(list_idx)
         except Exception:
             pass
+
+        self.list_footer_lbl.configure(
+            text=f"Đang xem: Bước #{step.step_id} / {len(self.steps)}"
+        )
 
         # Render preview image
         self._render_step_preview(step)
@@ -702,18 +926,20 @@ class StepEditorWindow:
 
         if not img_bytes:
             self.preview_canvas.create_text(
-                200, 100, text=t("no_screenshot_available"),
-                fill="#94a3b8", font=("Segoe UI", 10)
+                220, 120, text=f"📷 {t('no_screenshot_available')}",
+                fill=COLOR_TEXT_DIM, font=("Segoe UI", 10)
             )
+            self.canvas_dim_lbl.configure(text="")
             return
 
         try:
             pil_img = Image.open(io.BytesIO(img_bytes))
+            self.raw_img_size = pil_img.size
 
-            # Scale to fit canvas
+            # Scale to fit canvas cleanly
             self.window.update_idletasks()
-            cw = max(200, self.preview_canvas.winfo_width())
-            ch = max(150, self.preview_canvas.winfo_height())
+            cw = max(240, self.preview_canvas.winfo_width())
+            ch = max(180, self.preview_canvas.winfo_height())
 
             orig_w, orig_h = pil_img.size
             ratio = min(cw / orig_w, ch / orig_h)
@@ -734,10 +960,13 @@ class StepEditorWindow:
             self.preview_canvas.create_image(
                 offset_x, offset_y, image=self.preview_photo, anchor="nw"
             )
+
+            # Update dimensions indicator
+            self.canvas_dim_lbl.configure(text=f"📐 {orig_w} × {orig_h} px")
         except Exception as e:
             self.preview_canvas.create_text(
-                200, 100, text=t("image_render_error", err=e),
-                fill="#ef4444", font=("Segoe UI", 9)
+                220, 120, text=t("image_render_error", err=e),
+                fill=COLOR_ROSE, font=("Segoe UI", 9)
             )
 
     # --- Interactive Highlighting, Privacy (Blur / Redact) & Crop ---
@@ -750,13 +979,13 @@ class StepEditorWindow:
 
         # Color outline based on active tool
         colors = {
-            "highlight": "#38bdf8",
-            "blur": "#818cf8",
-            "redact": "#64748b",
-            "red_box": "#ef4444",
-            "crop": "#f59e0b"
+            "highlight": COLOR_CYAN,
+            "blur": COLOR_PURPLE,
+            "redact": "#94a3b8",
+            "red_box": COLOR_ROSE,
+            "crop": COLOR_AMBER
         }
-        outline_col = colors.get(self.active_tool, "#38bdf8")
+        outline_col = colors.get(self.active_tool, COLOR_CYAN)
 
         self.preview_canvas.create_rectangle(
             self.drag_start_x, self.drag_start_y, event.x, event.y,
@@ -889,6 +1118,7 @@ class StepEditorWindow:
                 )
                 step.annotated_image_bytes = ScreenCapture.image_to_bytes(annotated)
                 step.thumbnail_bytes = ScreenCapture.image_to_bytes(ScreenCapture.create_thumbnail(annotated))
+                self.undo_stack[step.step_id] = []
                 self._render_step_preview(step)
 
     # --- Document Management: Open Saved Document & Insert Steps ---
@@ -1066,7 +1296,11 @@ class StepEditorWindow:
                 self.sec_title_var.set("")
                 self.sec_desc_var.set("")
                 self.preview_canvas.delete("all")
-                self.step_header_lbl.configure(text=t("no_steps_left"))
+                self.step_badge_pill.configure(text="#00")
+                self.action_pill.configure(text=t("no_steps_left"))
+                self.time_pill.configure(text="")
+                self.window_tag_lbl.configure(text="")
+                self.canvas_dim_lbl.configure(text="")
 
     def _move_step_up(self) -> None:
         """Move selected step up in sequence and refresh badge numbers."""
