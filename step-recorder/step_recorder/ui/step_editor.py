@@ -28,7 +28,7 @@ from ..capture import ScreenCapture
 from ..config import RecorderConfig
 from ..exporter import ReportExporter
 from ..window_info import exclude_window_from_capture
-from ..i18n import t, I18nManager
+from ..i18n import t, I18nManager, TRANSLATIONS
 
 
 # UI Design Palette - Studio Dark Theme
@@ -819,7 +819,9 @@ class StepEditorWindow:
         if 0 <= self.current_index < len(self.steps):
             step = self.steps[self.current_index]
             self.step_badge_pill.configure(text=f" #{step.step_id:02d} ")
-            self.action_pill.configure(text=f" {step.action_icon} {step.action_type.replace('_', ' ').title()} ")
+            action_key = f"action_name_{step.action_type}"
+            action_name = t(action_key) if action_key in TRANSLATIONS else step.action_type.replace('_', ' ').title()
+            self.action_pill.configure(text=f" {step.action_icon} {action_name} ")
             self.time_pill.configure(text=f" ⏱️ {step.time_str} ")
             self.window_tag_lbl.configure(text=f"🪟 {step.window_title[:45]}")
 
@@ -883,7 +885,9 @@ class StepEditorWindow:
 
         # Update stylized header card
         self.step_badge_pill.configure(text=f" #{step.step_id:02d} ")
-        self.action_pill.configure(text=f" {step.action_icon} {step.action_type.replace('_', ' ').title()} ")
+        action_key = f"action_name_{step.action_type}"
+        action_name = t(action_key) if action_key in TRANSLATIONS else step.action_type.replace('_', ' ').title()
+        self.action_pill.configure(text=f" {step.action_icon} {action_name} ")
         self.time_pill.configure(text=f" ⏱️ {step.time_str} ")
         self.window_tag_lbl.configure(text=f"🪟 {step.window_title[:45]}")
 

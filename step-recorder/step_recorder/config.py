@@ -17,7 +17,11 @@ class RecorderConfig:
     """User configuration settings."""
     output_dir: str = str(Path.home() / "StepRecordings")
     max_steps: int = 200  # Default 200 (unlike PSR which defaults to 25)
-    screenshot_delay_ms: int = 60  # ms delay after click before capturing screen
+    screenshot_delay_ms: int = 60  # ms delay after click before capturing screen (single-capture mode)
+    
+    # Dual capture on click (Chụp 2 lần: ngay sau khi click + sau độ trễ ms)
+    dual_capture_on_click: bool = True
+    second_capture_delay_ms: int = 500  # ms delay before capturing second result screenshot
     
     # Event capture triggers
     capture_clicks: bool = True

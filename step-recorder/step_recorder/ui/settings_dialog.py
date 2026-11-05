@@ -338,14 +338,55 @@ class SettingsDialog:
         )
         max_spin.grid(row=0, column=1, sticky="w", pady=4)
 
+        # Dual capture on click toggle
+        self.dual_capture_var = tk.BooleanVar(value=getattr(self.config, "dual_capture_on_click", True))
+        dual_chk = tk.Checkbutton(
+            sec3,
+            text=t("opt_dual_capture"),
+            variable=self.dual_capture_var,
+            bg="#1e293b",
+            fg="#38bdf8",
+            selectcolor="#0f172a",
+            activebackground="#1e293b",
+            activeforeground="#38bdf8",
+            font=("Segoe UI", 9, "bold")
+        )
+        dual_chk.pack(anchor="w", pady=(6, 4))
+
+        # Delay inputs container
+        delay_grid = tk.Frame(sec3, bg="#1e293b")
+        delay_grid.pack(fill=tk.X, pady=(2, 6))
+        delay_grid.columnconfigure(1, weight=1)
+
+        # Second capture delay ms (chụp lần 2 sau khi click)
         tk.Label(
-            lim_grid, text=t("lbl_delay_ms"), font=("Segoe UI", 9),
+            delay_grid, text=t("lbl_second_delay_ms"), font=("Segoe UI", 9),
+            bg="#1e293b", fg="#cbd5e1"
+        ).grid(row=0, column=0, sticky="w", pady=4, padx=(0, 10))
+
+        self.second_delay_var = tk.IntVar(value=getattr(self.config, "second_capture_delay_ms", 500))
+        second_delay_spin = tk.Spinbox(
+            delay_grid,
+            from_=50,
+            to=3000,
+            increment=50,
+            textvariable=self.second_delay_var,
+            width=8,
+            bg="#0f172a",
+            fg="#f8fafc",
+            relief=tk.FLAT
+        )
+        second_delay_spin.grid(row=0, column=1, sticky="w", pady=4)
+
+        # Single capture delay ms
+        tk.Label(
+            delay_grid, text=t("lbl_single_delay_ms"), font=("Segoe UI", 9),
             bg="#1e293b", fg="#cbd5e1"
         ).grid(row=1, column=0, sticky="w", pady=4, padx=(0, 10))
 
         self.delay_var = tk.IntVar(value=self.config.screenshot_delay_ms)
         delay_spin = tk.Spinbox(
-            lim_grid,
+            delay_grid,
             from_=0,
             to=500,
             increment=20,
@@ -502,6 +543,13 @@ class SettingsDialog:
                 pass
 
             try:
+                sec_delay = int(self.second_delay_var.get())
+                if sec_delay > 0:
+                    self.config.second_capture_delay_ms = sec_delay
+            except Exception:
+                pass
+
+            try:
                 radius = int(self.radius_var.get())
                 if radius > 0:
                     self.config.highlight_radius = radius
@@ -509,6 +557,7 @@ class SettingsDialog:
                 pass
 
             # 4. Checkbox preferences
+            self.config.dual_capture_on_click = bool(self.dual_capture_var.get())
             self.config.capture_keys = bool(self.key_var.get())
             self.config.capture_double_clicks = bool(self.double_click_var.get())
             self.config.show_step_badge_on_screenshot = bool(self.badge_var.get())

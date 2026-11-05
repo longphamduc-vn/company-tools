@@ -433,6 +433,18 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "vi": "Độ trễ chụp ảnh (Screenshot delay ms):",
         "en": "Screenshot Delay (ms):"
     },
+    "opt_dual_capture": {
+        "vi": "Chụp 2 lần khi nhấp chuột (Chụp ngay + Chụp kết quả sau độ trễ ms)",
+        "en": "Dual capture on click (Immediate click + Result capture after delay ms)"
+    },
+    "lbl_second_delay_ms": {
+        "vi": "Độ trễ chụp kết quả lần 2 (ms):",
+        "en": "Second capture delay (ms):"
+    },
+    "lbl_single_delay_ms": {
+        "vi": "Độ trễ khi chụp đơn (ms):",
+        "en": "Single capture delay (ms):"
+    },
     "sec_options": {
         "vi": "⚙️ Tùy Chọn Sự Kiện & Xuất File (Options)",
         "en": "⚙️ Event Capture & Export Options"
@@ -530,6 +542,38 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "action_comment": {
         "vi": "Ghi chú người dùng: {comment}",
         "en": "User note: {comment}"
+    },
+    "action_click_result": {
+        "vi": "Giao diện kết quả sau khi nhấp chuột (sau {delay}ms) trên [{window}]",
+        "en": "Result UI state after click (+{delay}ms) on [{window}]"
+    },
+    "action_click_result_switched": {
+        "vi": "Giao diện kết quả (sau {delay}ms): Chuyển sang [{window}]",
+        "en": "Result UI state (+{delay}ms): Switched to [{window}]"
+    },
+    "action_name_click_result": {
+        "vi": "Kết quả thao tác",
+        "en": "Click Result"
+    },
+    "action_name_left_click": {
+        "vi": "Nhấp chuột trái",
+        "en": "Left Click"
+    },
+    "action_name_right_click": {
+        "vi": "Nhấp chuột phải",
+        "en": "Right Click"
+    },
+    "action_name_double_click": {
+        "vi": "Nhấp đúp chuột",
+        "en": "Double Click"
+    },
+    "action_name_key_press": {
+        "vi": "Nhấn phím",
+        "en": "Key Press"
+    },
+    "action_name_comment": {
+        "vi": "Ghi chú",
+        "en": "Comment"
     }
 }
 

@@ -447,6 +447,53 @@ class TestStepRecorder(unittest.TestCase):
             self.assertEqual(existing_steps[2].description, "Step B")
             self.assertEqual(existing_steps[2].step_id, 3)
 
+    def test_dual_capture_on_click(self):
+        from pynput.mouse import Button
+        config = RecorderConfig(
+            capture_clicks=False,
+            capture_keys=False,
+            dual_capture_on_click=True,
+            second_capture_delay_ms=20,
+            language="vi"
+        )
+        engine = RecordingEngine(config)
+        engine.start_recording("Test Dual Capture")
+
+        dummy_img = Image.new("RGB", (300, 200), color=(50, 60, 70))
+        engine.capture.capture_full_screen = lambda: (dummy_img, 0, 0)
+
+        # 1. Trigger dual capture click event
+        engine._process_click_event(100, 100, Button.left, is_double_click=False, click_id=1)
+
+        # Verify 2 steps were recorded: Immediate click + Result after delay
+        self.assertEqual(len(engine.steps), 2)
+        step1 = engine.steps[0]
+        step2 = engine.steps[1]
+
+        self.assertEqual(step1.step_id, 1)
+        self.assertEqual(step1.action_type, "left_click")
+        self.assertEqual(step1.cursor_x, 100)
+        self.assertEqual(step1.cursor_y, 100)
+
+        self.assertEqual(step2.step_id, 2)
+        self.assertEqual(step2.action_type, "click_result")
+        self.assertIn("Giao diện kết quả", step2.description)
+        self.assertIn("20ms", step2.description)
+        self.assertEqual(step2.action_icon, "⚡")
+        self.assertEqual(step2.badge_class, "badge-success")
+
+        # 2. Test single-capture mode (dual_capture_on_click=False)
+        config.dual_capture_on_click = False
+        config.screenshot_delay_ms = 0
+        engine._process_click_event(150, 150, Button.right, is_double_click=False, click_id=2)
+
+        # Only 1 additional step should be added
+        self.assertEqual(len(engine.steps), 3)
+        self.assertEqual(engine.steps[2].step_id, 3)
+        self.assertEqual(engine.steps[2].action_type, "right_click")
+
+        engine.stop_recording()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -66,6 +66,7 @@ class Step:
             "double_click": "badge-accent",
             "key_press": "badge-warning",
             "comment": "badge-info",
+            "click_result": "badge-success",
         }
         return mapping.get(self.action_type, "badge-default")
 
@@ -78,6 +79,7 @@ class Step:
             "double_click": "✌️",
             "key_press": "⌨️",
             "comment": "💬",
+            "click_result": "⚡",
         }
         return mapping.get(self.action_type, "📌")
 

@@ -17,6 +17,7 @@ Từ Windows 11 bản cập nhật mới, Microsoft đã chính thức thông b�
 | **Chỉnh sửa sau khi ghi (Review & Editor)** | ❌ Không thể sửa, xóa hay sắp xếp bước | ✅ **Trình duyệt & chỉnh sửa toàn diện**: Xóa, di chuyển, vẽ lại vùng Focus/Highlight, sửa ghi chú |
 | **Công cụ bảo mật Che mờ / Bôi đen (Blur / Redact)** | ❌ Không hỗ trợ | 🛡️ **Che thông tin nhạy cảm**: Làm mờ Gaussian Blur (`💧`), Bôi đen Redact Blackout (`⬛`), Khung đỏ (`🔴`), Hoàn tác (`↺`) |
 | **Cắt xén ảnh chụp (Crop Screenshot)** | ❌ Không hỗ trợ | ✂️ **Cắt xén tức thì**: Kéo chuột để crop ảnh về vùng quan tâm của ứng dụng |
+| **Chụp 2 lần khi nhấp chuột (Dual Capture)** | ❌ Chỉ chụp 1 lần duy nhất | ⚡ **Chụp kép Action & Result**: Chụp ngay khi click (hiện con trỏ/nút bấm) + Chụp sau ms (hiện kết quả modal/chuyển trang) |
 | **Phím tắt toàn cục (Global Hotkeys)** | Hạn chế phím tắt | ⌨️ **Hands-free Hotkeys**: F7 (Ghi/Dừng), F8 (Tạm dừng), F9 (Ghi chú), F10 (Phân đoạn), F11 (Chỉnh sửa) |
 | **Mở & Chèn tài liệu cũ (Open & Insert)** | ❌ Không hỗ trợ | 📂 **Quản lý đa phiên**: Mở phiên cũ chỉnh sửa tiếp, Chèn gộp nhiều tài liệu lại thành 1 bộ SOP |
 | **Giới hạn số bước** | Mặc định chỉ 25 bước | **Tùy biến không giới hạn** (mặc định 200+) |

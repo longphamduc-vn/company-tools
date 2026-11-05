@@ -3,6 +3,7 @@ Core recording engine: coordinates input listeners (mouse/keyboard),
 screen capture, annotations, active window tracking, and step queues.
 """
 
+import sys
 import time
 import threading
 import platform
@@ -17,6 +18,19 @@ from .capture import ScreenCapture
 from .annotator import annotate_screenshot
 from .window_info import get_active_window_info
 from .i18n import t, I18nManager
+
+
+def safe_print(msg: str) -> None:
+    """Print to stdout safely handling any Windows console encoding limitations."""
+    try:
+        print(msg)
+    except Exception:
+        try:
+            enc = getattr(sys.stdout, "encoding", "utf-8") or "utf-8"
+            clean_msg = msg.encode(enc, errors="replace").decode(enc)
+            print(clean_msg)
+        except Exception:
+            pass
 
 
 class RecordingEngine:
@@ -48,6 +62,7 @@ class RecordingEngine:
         
         self._lock = threading.Lock()
         self._apps_used: Set[str] = set()
+        self._click_counter = 0
 
     def set_ignore_bounds(self, bounds: List[Tuple[int, int, int, int]]) -> None:
         """Set window regions where clicks should NOT trigger recordings."""
@@ -73,6 +88,7 @@ class RecordingEngine:
 
         self.steps.clear()
         self._apps_used.clear()
+        self._click_counter = 0
         
         session_id = datetime.now().strftime("rec_%Y%m%d_%H%M%S")
         self.metadata = SessionMetadata(
@@ -186,12 +202,12 @@ class RecordingEngine:
             with self._lock:
                 self.steps.append(step)
 
-            print(f"[StepRecorder] Step #{step.step_id} (Comment): {comment_text}")
+            safe_print(f"[StepRecorder] Step #{step.step_id} (Comment): {comment_text}")
 
             if self.on_step_added:
                 self.on_step_added(step)
         except Exception as e:
-            print(f"[StepRecorder] Error adding comment: {e}")
+            safe_print(f"[StepRecorder] Error adding comment: {e}")
 
     # Internal listeners and handlers
     def _start_listeners(self) -> None:
@@ -254,19 +270,31 @@ class RecordingEngine:
         self._last_click_pos = (x, y)
         self._last_click_button = button
 
+        self._click_counter += 1
+        click_id = self._click_counter
+
         threading.Thread(
             target=self._process_click_event,
-            args=(x, y, button, is_double_click),
+            args=(x, y, button, is_double_click, click_id),
             daemon=True
         ).start()
 
-    def _process_click_event(self, x: int, y: int, button: mouse.Button, is_double_click: bool) -> None:
-        """Process click in background thread: delay, capture, annotate, log."""
+    def _process_click_event(
+        self,
+        x: int,
+        y: int,
+        button: mouse.Button,
+        is_double_click: bool,
+        click_id: int = 0
+    ) -> None:
+        """Process click in background thread: immediate capture, annotate, log; then delayed 2nd capture if enabled."""
         try:
-            if self.config.screenshot_delay_ms > 0:
-                time.sleep(self.config.screenshot_delay_ms / 1000.0)
+            # 1. Single capture mode delay if dual capture is disabled
+            if not getattr(self.config, "dual_capture_on_click", True):
+                if self.config.screenshot_delay_ms > 0:
+                    time.sleep(self.config.screenshot_delay_ms / 1000.0)
 
-            # Capture full screen
+            # 2. First capture: Immediate screen at the moment of click
             raw_img, mon_left, mon_top = self.capture.capture_full_screen()
             
             # Rich window and control inspection
@@ -277,7 +305,12 @@ class RecordingEngine:
             if process_name and process_name != "Unknown":
                 self._apps_used.add(process_name)
 
-            step_id = len(self.steps) + 1
+            with self._lock:
+                if self.state != "recording":
+                    return
+                if len(self.steps) >= self.config.max_steps:
+                    return
+                step_id = len(self.steps) + 1
 
             rel_x = x - mon_left
             rel_y = y - mon_top
@@ -334,12 +367,86 @@ class RecordingEngine:
             with self._lock:
                 self.steps.append(step)
 
-            print(f"[StepRecorder] Step #{step_id}: {desc}")
+            safe_print(f"[StepRecorder] Step #{step_id} (Click 1/2 - Chụp ngay): {desc}")
 
             if self.on_step_added:
                 self.on_step_added(step)
+
+            # 3. Second capture: If dual_capture_on_click is enabled, wait ms and capture result
+            if getattr(self.config, "dual_capture_on_click", True):
+                delay_ms = getattr(self.config, "second_capture_delay_ms", 500)
+                if delay_ms > 0:
+                    time.sleep(delay_ms / 1000.0)
+
+                # Check if recording is still active after delay
+                if self.state != "recording":
+                    return
+
+                with self._lock:
+                    if self.state != "recording":
+                        return
+                    if len(self.steps) >= self.config.max_steps:
+                        return
+                    # If user clicked again during the sleep, skip this intermediate delayed shot
+                    if click_id > 0 and self._click_counter > click_id:
+                        return
+                    step_id2 = len(self.steps) + 1
+
+                # Capture 2: Result screen after delay
+                raw_img2, mon_left2, mon_top2 = self.capture.capture_full_screen()
+                win_details2 = get_active_window_info()
+                win2_title = win_details2.title
+                proc2_name = win_details2.process_name
+
+                if proc2_name and proc2_name != "Unknown":
+                    self._apps_used.add(proc2_name)
+
+                # Result description
+                if win2_title and win2_title != window_title:
+                    desc2 = t("action_click_result_switched", delay=delay_ms, window=win2_title)
+                else:
+                    desc2 = t("action_click_result", delay=delay_ms, window=window_title)
+
+                # Annotate step 2: no cursor click marker, but include step badge
+                annotated_img2 = annotate_screenshot(
+                    raw_img2,
+                    cursor_pos=None,
+                    step_id=step_id2,
+                    color_hex=self.config.highlight_color,
+                    radius=self.config.highlight_radius,
+                    style=self.config.highlight_style,
+                    show_badge=self.config.show_step_badge_on_screenshot
+                )
+                thumb_img2 = self.capture.create_thumbnail(annotated_img2)
+
+                step2 = Step(
+                    step_id=step_id2,
+                    timestamp=datetime.now(),
+                    action_type="click_result",
+                    description=desc2,
+                    window_title=win2_title,
+                    process_name=proc2_name,
+                    pid=win_details2.pid,
+                    ui_control=win_details2.ui_control,
+                    window_rect=win_details2.window_rect,
+                    relative_cursor=win_details2.relative_cursor,
+                    cursor_x=None,
+                    cursor_y=None,
+                    raw_image_bytes=self.capture.image_to_bytes(raw_img2),
+                    annotated_image_bytes=self.capture.image_to_bytes(annotated_img2),
+                    thumbnail_bytes=self.capture.image_to_bytes(thumb_img2)
+                )
+
+                with self._lock:
+                    self.steps.append(step2)
+
+                safe_print(f"[StepRecorder] Step #{step_id2} (Click 2/2 - Kết quả sau {delay_ms}ms): {desc2}")
+
+                if self.on_step_added:
+                    self.on_step_added(step2)
+
         except Exception as e:
-            print(f"[StepRecorder] Error processing click: {e}")
+            safe_print(f"[StepRecorder] Error processing click: {e}")
 
     def _on_key_press(self, key) -> None:
         """Triggered on key press event."""
@@ -427,9 +534,9 @@ class RecordingEngine:
             with self._lock:
                 self.steps.append(step)
 
-            print(f"[StepRecorder] Step #{step_id}: {desc}")
+            safe_print(f"[StepRecorder] Step #{step_id}: {desc}")
 
             if self.on_step_added:
                 self.on_step_added(step)
         except Exception as e:
-            print(f"[StepRecorder] Error processing key: {e}")
+            safe_print(f"[StepRecorder] Error processing key: {e}")
