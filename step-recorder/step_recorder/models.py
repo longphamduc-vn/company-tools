@@ -31,6 +31,14 @@ class Step:
     is_section_header: bool = False
     section_title: Optional[str] = None
     section_description: Optional[str] = None
+
+    # Conditional / Branching Workflow (Yes/No Decision Point)
+    is_decision_point: bool = False
+    condition_question: Optional[str] = None
+    yes_branch_text: Optional[str] = None
+    yes_next_step: Optional[int] = None
+    no_branch_text: Optional[str] = None
+    no_next_step: Optional[int] = None
     
     # Image file paths
     raw_image_path: Optional[str] = None
@@ -123,6 +131,12 @@ class Step:
             "is_section_header": self.is_section_header,
             "section_title": self.section_title,
             "section_description": self.section_description,
+            "is_decision_point": self.is_decision_point,
+            "condition_question": self.condition_question,
+            "yes_branch_text": self.yes_branch_text,
+            "yes_next_step": self.yes_next_step,
+            "no_branch_text": self.no_branch_text,
+            "no_next_step": self.no_next_step,
             "raw_image_path": self.raw_image_path,
             "annotated_image_path": self.annotated_image_path,
         }
@@ -160,6 +174,12 @@ class Step:
             is_section_header=data.get("is_section_header", False),
             section_title=data.get("section_title"),
             section_description=data.get("section_description"),
+            is_decision_point=data.get("is_decision_point", False),
+            condition_question=data.get("condition_question"),
+            yes_branch_text=data.get("yes_branch_text"),
+            yes_next_step=data.get("yes_next_step"),
+            no_branch_text=data.get("no_branch_text"),
+            no_next_step=data.get("no_next_step"),
             raw_image_path=data.get("raw_image_path"),
             annotated_image_path=data.get("annotated_image_path"),
         )

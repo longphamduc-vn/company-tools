@@ -199,12 +199,14 @@ class ReportExporter:
                     for s in sec["steps"]:
                         anchor_step = f"step-{s.step_id}"
                         s_desc = (s.description[:45] + "...") if len(s.description) > 45 else s.description
-                        lines.append(f"  - [{step_word} {s.step_id}: {s_desc}](#{anchor_step})")
+                        badge_str = " `[🔀 Y/N]`" if s.is_decision_point else ""
+                        lines.append(f"  - [{step_word} {s.step_id}: {s_desc}](#{anchor_step}){badge_str}")
             else:
                 for s in steps:
                     anchor_step = f"step-{s.step_id}"
                     s_desc = (s.description[:45] + "...") if len(s.description) > 45 else s.description
-                    lines.append(f"- [{step_word} {s.step_id}: {s_desc}](#{anchor_step})")
+                    badge_str = " `[🔀 Y/N]`" if s.is_decision_point else ""
+                    lines.append(f"- [{step_word} {s.step_id}: {s_desc}](#{anchor_step}){badge_str}")
             lines.append("")
 
         lines.append(f"## 📌 {title_steps}")
@@ -232,6 +234,26 @@ class ReportExporter:
 
             if step.user_comment:
                 lines.append(f"\n> 💬 **{lbl_note}**: {step.user_comment}\n")
+
+            if step.is_decision_point:
+                lines.append("")
+                dp_title = "ĐIỂM RẼ NHÁNH ĐIỀU KIỆN (YES / NO)" if is_vi else "CONDITIONAL DECISION POINT (YES / NO)"
+                lines.append(f"> 🔀 **{dp_title}**")
+                if step.condition_question:
+                    q_label = "Câu hỏi điều kiện" if is_vi else "Condition Question"
+                    lines.append(f"> **{q_label}**: *{step.condition_question}*")
+                lines.append(">")
+                yes_txt = step.yes_branch_text or ("Tiếp tục thực hiện bước tiếp theo" if is_vi else "Continue to next step")
+                if step.yes_next_step:
+                    lines.append(f"> - ✅ **YES / ĐÚNG**: {yes_txt} ➔ [**{step_word} {step.yes_next_step}**](#step-{step.yes_next_step})")
+                else:
+                    lines.append(f"> - ✅ **YES / ĐÚNG**: {yes_txt}")
+                no_txt = step.no_branch_text or ("Xử lý ngoại lệ hoặc dừng quy trình" if is_vi else "Handle exception or stop workflow")
+                if step.no_next_step:
+                    lines.append(f"> - ❌ **NO / SAI**: {no_txt} ➔ [**{step_word} {step.no_next_step}**](#step-{step.no_next_step})")
+                else:
+                    lines.append(f"> - ❌ **NO / SAI**: {no_txt}")
+                lines.append("")
 
             if step.annotated_image_path:
                 rel_img_path = f"images/{os.path.basename(step.annotated_image_path)}"

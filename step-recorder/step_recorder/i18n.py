@@ -161,6 +161,46 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "vi": "Ví dụ: Hướng dẫn người dùng đăng nhập tài khoản phân quyền quản trị...",
         "en": "e.g. Guide the administrator through the setup wizard..."
     },
+    "chk_decision_point": {
+        "vi": "🔀 Đặt bước này làm Điểm Rẽ Nhánh Điều Kiện (Yes / No Workflow)",
+        "en": "🔀 Mark as Conditional Decision Point (Yes / No Workflow)"
+    },
+    "lbl_condition_question": {
+        "vi": "Câu hỏi điều kiện kiểm tra (Condition Question):",
+        "en": "Condition Question:"
+    },
+    "placeholder_condition_question": {
+        "vi": "Ví dụ: Hệ thống có hiển thị thông báo lỗi / cảnh báo không?",
+        "en": "e.g. Does the system display an error or confirmation prompt?"
+    },
+    "lbl_yes_branch": {
+        "vi": "✅ Trường hợp ĐÚNG / CÓ (YES):",
+        "en": "✅ If TRUE / YES:"
+    },
+    "placeholder_yes_branch": {
+        "vi": "Ví dụ: Bấm 'Đồng ý' và tiếp tục sang bước tiếp theo...",
+        "en": "e.g. Click 'Confirm' and proceed to next step..."
+    },
+    "lbl_no_branch": {
+        "vi": "❌ Trường hợp SAI / KHÔNG (NO / Ngoại lệ):",
+        "en": "❌ If FALSE / NO (Exception):"
+    },
+    "placeholder_no_branch": {
+        "vi": "Ví dụ: Bấm 'Hủy bỏ', kiểm tra quyền truy cập hoặc làm theo Phụ lục B...",
+        "en": "e.g. Click 'Cancel', check credentials or refer to Appendix B..."
+    },
+    "lbl_jump_step": {
+        "vi": "Nhảy tới Bước:",
+        "en": "Jump to Step:"
+    },
+    "decision_badge": {
+        "vi": "🔀 Rẽ nhánh Y/N",
+        "en": "🔀 Decision Y/N"
+    },
+    "decision_card_title": {
+        "vi": "🔀 ĐIỂM RẼ NHÁNH QUY TRÌNH (WORKFLOW DECISION POINT)",
+        "en": "🔀 WORKFLOW DECISION POINT (YES / NO BRANCH)"
+    },
     "toc_title": {
         "vi": "Mục Lục Tài Liệu",
         "en": "Table of Contents"

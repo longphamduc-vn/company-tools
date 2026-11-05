@@ -540,6 +540,140 @@ class StepEditorWindow:
         )
         self.sec_desc_entry.pack(fill=tk.X, ipady=2, pady=(1, 0))
 
+        # Decision Point & Branching Workflow Card (Yes/No Decision)
+        self.decision_box = tk.Frame(
+            right_frame,
+            bg=COLOR_PANEL_ALT,
+            padx=10,
+            pady=6,
+            highlightbackground=COLOR_BORDER,
+            highlightthickness=1
+        )
+        self.decision_box.pack(fill=tk.X, pady=(0, 6))
+
+        self.is_decision_var = tk.BooleanVar(value=False)
+        self.decision_chk = tk.Checkbutton(
+            self.decision_box,
+            text=t("chk_decision_point"),
+            variable=self.is_decision_var,
+            command=self._on_decision_chk_changed,
+            bg=COLOR_PANEL_ALT,
+            fg="#38bdf8",
+            activebackground=COLOR_PANEL_ALT,
+            activeforeground="#38bdf8",
+            selectcolor="#030712",
+            font=("Segoe UI", 8, "bold")
+        )
+        self.decision_chk.pack(anchor="w")
+
+        self.decision_inputs_frame = tk.Frame(self.decision_box, bg=COLOR_PANEL_ALT)
+        # Unpacked by default until is_decision_var is True
+
+        # Row 1: Condition Question
+        q_row = tk.Frame(self.decision_inputs_frame, bg=COLOR_PANEL_ALT)
+        q_row.pack(fill=tk.X, pady=(2, 4))
+
+        self.cond_q_lbl = tk.Label(
+            q_row,
+            text=t("lbl_condition_question"),
+            font=("Segoe UI", 8),
+            bg=COLOR_PANEL_ALT,
+            fg=COLOR_TEXT_MUTED
+        )
+        self.cond_q_lbl.pack(anchor="w")
+
+        self.cond_q_var = tk.StringVar()
+        self.cond_q_entry = tk.Entry(
+            q_row,
+            textvariable=self.cond_q_var,
+            bg=COLOR_INPUT_BG,
+            fg=COLOR_TEXT_MAIN,
+            insertbackground=COLOR_CYAN,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
+            highlightbackground=COLOR_BORDER,
+            highlightthickness=1
+        )
+        self.cond_q_entry.pack(fill=tk.X, ipady=2, pady=(1, 0))
+
+        # Row 2: Two columns for YES branch and NO branch
+        branches_row = tk.Frame(self.decision_inputs_frame, bg=COLOR_PANEL_ALT)
+        branches_row.pack(fill=tk.X, pady=(2, 0))
+        branches_row.columnconfigure(0, weight=1)
+        branches_row.columnconfigure(1, weight=1)
+
+        # Left column: YES / TRUE
+        yes_col = tk.Frame(branches_row, bg=COLOR_PANEL_ALT)
+        yes_col.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+
+        self.yes_lbl = tk.Label(
+            yes_col,
+            text=t("lbl_yes_branch"),
+            font=("Segoe UI", 8, "bold"),
+            bg=COLOR_PANEL_ALT,
+            fg=COLOR_EMERALD
+        )
+        self.yes_lbl.pack(anchor="w")
+
+        self.yes_text_var = tk.StringVar()
+        self.yes_text_entry = tk.Entry(
+            yes_col,
+            textvariable=self.yes_text_var,
+            bg=COLOR_INPUT_BG,
+            fg=COLOR_TEXT_MAIN,
+            insertbackground=COLOR_CYAN,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
+            highlightbackground="#065f46",
+            highlightthickness=1
+        )
+        self.yes_text_entry.pack(fill=tk.X, ipady=2, pady=(1, 2))
+
+        yes_jump_row = tk.Frame(yes_col, bg=COLOR_PANEL_ALT)
+        yes_jump_row.pack(fill=tk.X)
+        self.yes_jump_lbl = tk.Label(yes_jump_row, text=t("lbl_jump_step"), font=("Segoe UI", 7), bg=COLOR_PANEL_ALT, fg=COLOR_TEXT_DIM)
+        self.yes_jump_lbl.pack(side=tk.LEFT)
+        self.yes_step_var = tk.IntVar(value=0)
+        self.yes_jump_spin = tk.Spinbox(yes_jump_row, from_=0, to=999, textvariable=self.yes_step_var, width=5, bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN, relief=tk.FLAT)
+        self.yes_jump_spin.pack(side=tk.LEFT, padx=(4, 0))
+        tk.Label(yes_jump_row, text="(0 = bước kế)", font=("Segoe UI", 7), bg=COLOR_PANEL_ALT, fg=COLOR_TEXT_DIM).pack(side=tk.LEFT, padx=(4, 0))
+
+        # Right column: NO / FALSE / EXCEPTION
+        no_col = tk.Frame(branches_row, bg=COLOR_PANEL_ALT)
+        no_col.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+
+        self.no_lbl = tk.Label(
+            no_col,
+            text=t("lbl_no_branch"),
+            font=("Segoe UI", 8, "bold"),
+            bg=COLOR_PANEL_ALT,
+            fg=COLOR_ROSE
+        )
+        self.no_lbl.pack(anchor="w")
+
+        self.no_text_var = tk.StringVar()
+        self.no_text_entry = tk.Entry(
+            no_col,
+            textvariable=self.no_text_var,
+            bg=COLOR_INPUT_BG,
+            fg=COLOR_TEXT_MAIN,
+            insertbackground=COLOR_CYAN,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
+            highlightbackground="#881337",
+            highlightthickness=1
+        )
+        self.no_text_entry.pack(fill=tk.X, ipady=2, pady=(1, 2))
+
+        no_jump_row = tk.Frame(no_col, bg=COLOR_PANEL_ALT)
+        no_jump_row.pack(fill=tk.X)
+        self.no_jump_lbl = tk.Label(no_jump_row, text=t("lbl_jump_step"), font=("Segoe UI", 7), bg=COLOR_PANEL_ALT, fg=COLOR_TEXT_DIM)
+        self.no_jump_lbl.pack(side=tk.LEFT)
+        self.no_step_var = tk.IntVar(value=0)
+        self.no_jump_spin = tk.Spinbox(no_jump_row, from_=0, to=999, textvariable=self.no_step_var, width=5, bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN, relief=tk.FLAT)
+        self.no_jump_spin.pack(side=tk.LEFT, padx=(4, 0))
+        tk.Label(no_jump_row, text="(0 = bước kế)", font=("Segoe UI", 7), bg=COLOR_PANEL_ALT, fg=COLOR_TEXT_DIM).pack(side=tk.LEFT, padx=(4, 0))
+
         # ================= INTERACTIVE DRAWING STUDIO TOOLBAR =================
         tool_frame = tk.Frame(
             right_frame,
@@ -777,6 +911,15 @@ class StepEditorWindow:
         else:
             self.sec_inputs_frame.pack_forget()
 
+    def _on_decision_chk_changed(self) -> None:
+        """Show or hide decision inputs based on checkbox."""
+        if self.is_decision_var.get():
+            self.decision_inputs_frame.pack(fill=tk.X, pady=(2, 0))
+            if not self.cond_q_var.get():
+                self.cond_q_entry.focus_set()
+        else:
+            self.decision_inputs_frame.pack_forget()
+
     def _toggle_language(self) -> None:
         """Toggle editor between Vietnamese and English."""
         curr = I18nManager.get_language()
@@ -806,6 +949,12 @@ class StepEditorWindow:
         self.sec_chk.configure(text=t("chk_section_header"))
         self.sec_title_lbl.configure(text=t("lbl_section_title"))
         self.sec_desc_lbl.configure(text=t("lbl_section_desc"))
+        self.decision_chk.configure(text=t("chk_decision_point"))
+        self.cond_q_lbl.configure(text=t("lbl_condition_question"))
+        self.yes_lbl.configure(text=t("lbl_yes_branch"))
+        self.yes_jump_lbl.configure(text=t("lbl_jump_step"))
+        self.no_lbl.configure(text=t("lbl_no_branch"))
+        self.no_jump_lbl.configure(text=t("lbl_jump_step"))
         self.tool_btns["highlight"].configure(text=t("tool_highlight"))
         self.tool_btns["blur"].configure(text=t("tool_blur"))
         self.tool_btns["redact"].configure(text=t("tool_redact"))
@@ -841,11 +990,14 @@ class StepEditorWindow:
                 or query in (s.user_comment or "").lower()
                 or query in (s.section_title or "").lower()
                 or query in (s.section_description or "").lower()
+                or query in (s.condition_question or "").lower()
+                or query in (s.yes_branch_text or "").lower()
+                or query in (s.no_branch_text or "").lower()
             ]
         self._populate_list()
 
     def _populate_list(self) -> None:
-        """Refresh Listbox items with filtered steps and chapter headers."""
+        """Refresh Listbox items with filtered steps, branch badges, and chapter headers."""
         self.step_listbox.delete(0, tk.END)
         sec_num = 0
         for i in self.filtered_indices:
@@ -859,9 +1011,10 @@ class StepEditorWindow:
                 prefix = f"📑 [P.{sec_num}: {sec_display}] "
 
             icon = s.action_icon
-            desc_short = (s.description[:30] + "...") if len(s.description) > 30 else s.description
+            desc_short = (s.description[:26] + "...") if len(s.description) > 26 else s.description
+            decision_tag = " [🔀 Y/N]" if s.is_decision_point else ""
             comment_tag = " [💬]" if s.user_comment else ""
-            self.step_listbox.insert(tk.END, f"{prefix}#{s.step_id:02d} {icon} {desc_short}{comment_tag}")
+            self.step_listbox.insert(tk.END, f"{prefix}#{s.step_id:02d} {icon} {desc_short}{decision_tag}{comment_tag}")
 
         self.total_lbl.configure(text=t("total_steps", count=len(self.steps)))
 
@@ -900,6 +1053,14 @@ class StepEditorWindow:
         self.sec_title_var.set(step.section_title or "")
         self.sec_desc_var.set(step.section_description or "")
         self._on_section_chk_changed()
+
+        self.is_decision_var.set(bool(step.is_decision_point))
+        self.cond_q_var.set(step.condition_question or "")
+        self.yes_text_var.set(step.yes_branch_text or "")
+        self.yes_step_var.set(step.yes_next_step or 0)
+        self.no_text_var.set(step.no_branch_text or "")
+        self.no_step_var.set(step.no_next_step or 0)
+        self._on_decision_chk_changed()
 
         # Highlight in listbox if visible
         try:
@@ -1242,7 +1403,7 @@ class StepEditorWindow:
 
     # --- Edit, Delete, Renumbering & Reordering ---
     def _apply_current_step_edits(self) -> None:
-        """Save text description, comment and section changes for selected step."""
+        """Save text description, comment, section and decision changes for selected step."""
         if 0 <= self.current_index < len(self.steps):
             step = self.steps[self.current_index]
             step.description = self.desc_var.get().strip() or step.description
@@ -1250,6 +1411,12 @@ class StepEditorWindow:
             step.is_section_header = self.is_section_var.get()
             step.section_title = self.sec_title_var.get().strip() if step.is_section_header else None
             step.section_description = self.sec_desc_var.get().strip() if step.is_section_header else None
+            step.is_decision_point = self.is_decision_var.get()
+            step.condition_question = self.cond_q_var.get().strip() if step.is_decision_point else None
+            step.yes_branch_text = self.yes_text_var.get().strip() if step.is_decision_point else None
+            step.yes_next_step = self.yes_step_var.get() if (step.is_decision_point and self.yes_step_var.get() > 0) else None
+            step.no_branch_text = self.no_text_var.get().strip() if step.is_decision_point else None
+            step.no_next_step = self.no_step_var.get() if (step.is_decision_point and self.no_step_var.get() > 0) else None
 
             # Refresh list item text
             self._on_filter_changed()
@@ -1301,6 +1468,13 @@ class StepEditorWindow:
                 self.is_section_var.set(False)
                 self.sec_title_var.set("")
                 self.sec_desc_var.set("")
+                self.is_decision_var.set(False)
+                self.cond_q_var.set("")
+                self.yes_text_var.set("")
+                self.yes_step_var.set(0)
+                self.no_text_var.set("")
+                self.no_step_var.set(0)
+                self._on_decision_chk_changed()
                 self.preview_canvas.delete("all")
                 self.step_badge_pill.configure(text="#00")
                 self.action_pill.configure(text=t("no_steps_left"))
@@ -1341,6 +1515,12 @@ class StepEditorWindow:
             cur.is_section_header = self.is_section_var.get()
             cur.section_title = self.sec_title_var.get().strip() if cur.is_section_header else None
             cur.section_description = self.sec_desc_var.get().strip() if cur.is_section_header else None
+            cur.is_decision_point = self.is_decision_var.get()
+            cur.condition_question = self.cond_q_var.get().strip() if cur.is_decision_point else None
+            cur.yes_branch_text = self.yes_text_var.get().strip() if cur.is_decision_point else None
+            cur.yes_next_step = self.yes_step_var.get() if (cur.is_decision_point and self.yes_step_var.get() > 0) else None
+            cur.no_branch_text = self.no_text_var.get().strip() if cur.is_decision_point else None
+            cur.no_next_step = self.no_step_var.get() if (cur.is_decision_point and self.no_step_var.get() > 0) else None
 
         session_folder = Path(self.config.output_dir) / self.metadata.session_id
         session_folder.mkdir(parents=True, exist_ok=True)

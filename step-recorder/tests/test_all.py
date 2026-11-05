@@ -539,6 +539,112 @@ class TestStepRecorder(unittest.TestCase):
         # 5. Window title switched -> True
         self.assertTrue(has_ui_changed(base, base.copy(), win1="App", win2="Save As Dialog"))
 
+    def test_step_decision_point_serialization(self):
+        """Test Step model with Yes/No conditional branching serialization and deserialization."""
+        step = Step(
+            step_id=5,
+            timestamp=datetime(2026, 11, 5, 14, 0, 0),
+            action_type="left_click",
+            description="Nhấp chọn nút Đăng Nhập",
+            is_decision_point=True,
+            condition_question="Hệ thống có hiển thị mã OTP qua SMS không?",
+            yes_branch_text="Nhập mã OTP 6 số nhận được trên điện thoại",
+            yes_next_step=6,
+            no_branch_text="Đăng nhập trực tiếp vào trang chủ thành công",
+            no_next_step=8
+        )
+
+        d = step.to_dict()
+        self.assertTrue(d["is_decision_point"])
+        self.assertEqual(d["condition_question"], "Hệ thống có hiển thị mã OTP qua SMS không?")
+        self.assertEqual(d["yes_branch_text"], "Nhập mã OTP 6 số nhận được trên điện thoại")
+        self.assertEqual(d["yes_next_step"], 6)
+        self.assertEqual(d["no_branch_text"], "Đăng nhập trực tiếp vào trang chủ thành công")
+        self.assertEqual(d["no_next_step"], 8)
+
+        restored = Step.from_dict(d)
+        self.assertTrue(restored.is_decision_point)
+        self.assertEqual(restored.condition_question, step.condition_question)
+        self.assertEqual(restored.yes_branch_text, step.yes_branch_text)
+        self.assertEqual(restored.yes_next_step, 6)
+        self.assertEqual(restored.no_branch_text, step.no_branch_text)
+        self.assertEqual(restored.no_next_step, 8)
+
+    def test_exporter_decision_point_branching(self):
+        """Test HTML and Markdown export of Decision Point cards with Y/N branches."""
+        config = RecorderConfig(language="vi")
+        exporter = ReportExporter(config)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            steps = [
+                Step(
+                    step_id=1,
+                    timestamp=datetime.now(),
+                    action_type="left_click",
+                    description="Nhấp vào nút Lưu thay đổi",
+                    is_decision_point=True,
+                    condition_question="Cửa sổ thông báo xác nhận có xuất hiện không?",
+                    yes_branch_text="Nhấp Đồng ý để tiếp tục lưu dữ liệu",
+                    yes_next_step=2,
+                    no_branch_text="Kiểm tra lại thông tin đầu vào chưa hợp lệ",
+                    no_next_step=5
+                ),
+                Step(
+                    step_id=2,
+                    timestamp=datetime.now(),
+                    action_type="left_click",
+                    description="Nhấp nút Đồng ý"
+                ),
+                Step(
+                    step_id=5,
+                    timestamp=datetime.now(),
+                    action_type="left_click",
+                    description="Kiểm tra thông tin"
+                )
+            ]
+
+            metadata = SessionMetadata(
+                session_id="test_decision_session",
+                title="Quy Trình Xử Lý Đơn Hàng Có Điều Kiện",
+                description="Hướng dẫn phân nhánh Yes/No",
+                os_name="Linux / Windows Test",
+                total_steps=3
+            )
+
+            results = exporter.export(steps, metadata, tmpdir)
+            html_path = results["html"]
+            md_path = results["markdown"]
+
+            self.assertTrue(os.path.exists(html_path))
+            self.assertTrue(os.path.exists(md_path))
+
+            with open(html_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+
+            # Verify HTML contains decision card elements
+            self.assertIn("decision-card", html_content)
+            self.assertIn("Cửa sổ thông báo xác nhận có xuất hiện không?", html_content)
+            self.assertIn("branch-yes", html_content)
+            self.assertIn("branch-no", html_content)
+            self.assertIn("Nhấp Đồng ý để tiếp tục lưu dữ liệu", html_content)
+            self.assertIn("href=\"#step-2\"", html_content)
+            self.assertIn("href=\"#step-5\"", html_content)
+            self.assertIn("Nhánh Y/N", html_content)
+            # Verify TOC has branch icon
+            self.assertIn("🔀", html_content)
+
+            with open(md_path, "r", encoding="utf-8") as f:
+                md_content = f.read()
+
+            # Verify Markdown contains decision block and anchor links
+            self.assertIn("ĐIỂM RẼ NHÁNH ĐIỀU KIỆN (YES / NO)", md_content)
+            self.assertIn("Cửa sổ thông báo xác nhận có xuất hiện không?", md_content)
+            self.assertIn("YES / ĐÚNG", md_content)
+            self.assertIn("NO / SAI", md_content)
+            self.assertIn("[**Bước 2**](#step-2)", md_content)
+            self.assertIn("[**Bước 5**](#step-5)", md_content)
+            self.assertIn("[🔀 Y/N]", md_content)
+
 
 if __name__ == "__main__":
     unittest.main()
