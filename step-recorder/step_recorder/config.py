@@ -22,6 +22,7 @@ class RecorderConfig:
     # Dual capture on click (Chụp 2 lần: ngay sau khi click + sau độ trễ ms)
     dual_capture_on_click: bool = True
     second_capture_delay_ms: int = 500  # ms delay before capturing second result screenshot
+    dual_capture_smart_detect: bool = True  # Auto-detect: only capture 2nd shot if UI genuinely changed
     
     # Event capture triggers
     capture_clicks: bool = True

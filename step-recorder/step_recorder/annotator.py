@@ -4,7 +4,7 @@ and step number badges onto screenshots.
 """
 
 from typing import Tuple, Optional
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageChops, ImageStat
 
 
 def hex_to_rgba(hex_color: str, alpha: int = 255) -> Tuple[int, int, int, int]:
@@ -261,4 +261,58 @@ def draw_box_annotation(
     draw.rectangle([left, top, right, bottom], fill=fill_rgba, outline=main_rgba, width=width)
     result = Image.alpha_composite(img_rgba, overlay)
     return result.convert("RGB")
+
+
+def has_ui_changed(
+    image1: Image.Image,
+    image2: Image.Image,
+    click_pos: Optional[Tuple[int, int]] = None,
+    win1: str = "",
+    win2: str = "",
+    threshold_global: float = 0.0006,
+    threshold_local: float = 0.0018
+) -> bool:
+    """
+    Intelligently detect whether meaningful UI changes occurred between two screenshots.
+
+    Checks:
+    1. Active window title change (e.g. modal opened, tab switched, app changed).
+    2. Global screen difference via downsampled pixel comparison (ignores tiny 1-pixel noise).
+    3. Local click-area difference within 120px radius around cursor (detects checkboxes,
+       toggle switches, radio buttons, dropdown clicks).
+    """
+    if win1 and win2 and win1 != win2:
+        return True
+
+    try:
+        # 1. Global downsampled difference
+        s1 = image1.resize((160, 90))
+        s2 = image2.resize((160, 90))
+        diff_global = ImageChops.difference(s1, s2)
+        stat_global = ImageStat.Stat(diff_global)
+        global_ratio = sum(stat_global.mean) / (3.0 * 255.0)
+
+        if global_ratio > threshold_global:
+            return True
+
+        # 2. Local click-region difference (e.g. checkbox, toggle switch)
+        if click_pos:
+            cx, cy = click_pos
+            w, h = image1.size
+            r = 120
+            box = (max(0, cx - r), max(0, cy - r), min(w, cx + r), min(h, cy + r))
+            crop1 = image1.crop(box)
+            crop2 = image2.crop(box)
+            diff_local = ImageChops.difference(crop1, crop2)
+            stat_local = ImageStat.Stat(diff_local)
+            local_ratio = sum(stat_local.mean) / (3.0 * 255.0)
+            if local_ratio > threshold_local:
+                return True
+
+    except Exception:
+        # Fallback to True if any error occurs to ensure no critical screen state is lost
+        return True
+
+    return False
+
 

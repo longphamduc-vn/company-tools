@@ -15,7 +15,7 @@ from pynput import mouse, keyboard
 from .models import Step, SessionMetadata
 from .config import RecorderConfig
 from .capture import ScreenCapture
-from .annotator import annotate_screenshot
+from .annotator import annotate_screenshot, has_ui_changed
 from .window_info import get_active_window_info
 from .i18n import t, I18nManager
 
@@ -390,13 +390,28 @@ class RecordingEngine:
                     # If user clicked again during the sleep, skip this intermediate delayed shot
                     if click_id > 0 and self._click_counter > click_id:
                         return
-                    step_id2 = len(self.steps) + 1
 
                 # Capture 2: Result screen after delay
                 raw_img2, mon_left2, mon_top2 = self.capture.capture_full_screen()
                 win_details2 = get_active_window_info()
                 win2_title = win_details2.title
                 proc2_name = win_details2.process_name
+
+                # Smart Auto-Detection: Check if UI actually changed
+                if getattr(self.config, "dual_capture_smart_detect", True):
+                    if not has_ui_changed(
+                        raw_img, raw_img2,
+                        click_pos=(rel_x, rel_y),
+                        win1=window_title,
+                        win2=win2_title
+                    ):
+                        safe_print(f"[StepRecorder] Giao diện không đổi -> Tự động giữ 1 ảnh cho Bước #{step_id}.")
+                        return
+
+                with self._lock:
+                    if self.state != "recording" or len(self.steps) >= self.config.max_steps:
+                        return
+                    step_id2 = len(self.steps) + 1
 
                 if proc2_name and proc2_name != "Unknown":
                     self._apps_used.add(proc2_name)

@@ -72,3 +72,4 @@ def get_favicon_base64() -> str:
         except Exception:
             pass
     return ""
+

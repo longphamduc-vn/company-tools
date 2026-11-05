@@ -441,6 +441,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "vi": "Chụp ngay sau khi click và chụp sau ms (Chụp 2 lần cho mỗi cú nhấp chuột)",
         "en": "Capture immediately after click and capture after ms (Capture twice per click)"
     },
+    "opt_smart_detect": {
+        "vi": "🧠 Tự động nhận biết thông minh (Chỉ chụp lần 2 khi giao diện có biến đổi)",
+        "en": "🧠 Smart Auto-Detection (Only capture 2nd shot if UI genuinely changes)"
+    },
+    "hint_smart_detect": {
+        "vi": "• Tự động so sánh điểm ảnh & cửa sổ: Nếu màn hình không đổi (click text, click vùng trống), chỉ giữ 1 ảnh duy nhất để tránh rác tài liệu.",
+        "en": "• Automatic visual diff: If screen did not change (e.g. clicking text, empty areas), keeps only 1 clean screenshot."
+    },
     "hint_dual_capture_1": {
         "vi": "• Lần 1: Chụp ngay lập tức vị trí nhấp chuột và đối tượng thao tác.",
         "en": "• Shot 1: Immediate capture of the click target and cursor position."

@@ -330,11 +330,31 @@ class SettingsDialog:
             activeforeground="#38bdf8",
             font=("Segoe UI", 9, "bold")
         )
-        dual_chk.pack(anchor="w", pady=(2, 6))
+        dual_chk.pack(anchor="w", pady=(2, 4))
+
+        # Smart Auto-Detection checkbox
+        self.smart_detect_var = tk.BooleanVar(value=getattr(self.config, "dual_capture_smart_detect", True))
+        smart_chk = tk.Checkbutton(
+            sec_dual,
+            text=t("opt_smart_detect"),
+            variable=self.smart_detect_var,
+            bg="#1e293b",
+            fg="#34d399",
+            selectcolor="#0f172a",
+            activebackground="#1e293b",
+            activeforeground="#34d399",
+            font=("Segoe UI", 8, "bold")
+        )
+        smart_chk.pack(anchor="w", padx=(18, 0), pady=(0, 6))
 
         # Explanatory bullet points
         hint_box = tk.Frame(sec_dual, bg="#0f172a", padx=10, pady=8, highlightbackground="#334155", highlightthickness=1)
         hint_box.pack(fill=tk.X, pady=(0, 10))
+
+        tk.Label(
+            hint_box, text=t("hint_smart_detect"),
+            font=("Segoe UI", 8), bg="#0f172a", fg="#38bdf8", anchor="w"
+        ).pack(fill=tk.X, pady=(0, 3))
 
         tk.Label(
             hint_box, text=t("hint_dual_capture_1"),
@@ -603,6 +623,7 @@ class SettingsDialog:
 
             # 4. Checkbox preferences
             self.config.dual_capture_on_click = bool(self.dual_capture_var.get())
+            self.config.dual_capture_smart_detect = bool(self.smart_detect_var.get())
             self.config.capture_keys = bool(self.key_var.get())
             self.config.capture_double_clicks = bool(self.double_click_var.get())
             self.config.show_step_badge_on_screenshot = bool(self.badge_var.get())

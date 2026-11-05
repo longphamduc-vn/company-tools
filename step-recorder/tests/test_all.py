@@ -449,11 +449,13 @@ class TestStepRecorder(unittest.TestCase):
 
     def test_dual_capture_on_click(self):
         from pynput.mouse import Button
+        from PIL import ImageDraw
         config = RecorderConfig(
             capture_clicks=False,
             capture_keys=False,
             dual_capture_on_click=True,
             second_capture_delay_ms=20,
+            dual_capture_smart_detect=False,
             language="vi"
         )
         engine = RecordingEngine(config)
@@ -462,7 +464,7 @@ class TestStepRecorder(unittest.TestCase):
         dummy_img = Image.new("RGB", (300, 200), color=(50, 60, 70))
         engine.capture.capture_full_screen = lambda: (dummy_img, 0, 0)
 
-        # 1. Trigger dual capture click event
+        # 1. Trigger unconditional dual capture click event
         engine._process_click_event(100, 100, Button.left, is_double_click=False, click_id=1)
 
         # Verify 2 steps were recorded: Immediate click + Result after delay
@@ -482,17 +484,60 @@ class TestStepRecorder(unittest.TestCase):
         self.assertEqual(step2.action_icon, "⚡")
         self.assertEqual(step2.badge_class, "badge-success")
 
-        # 2. Test single-capture mode (dual_capture_on_click=False)
+        # 2. Test Smart Auto-Detection mode
+        config.dual_capture_smart_detect = True
+        
+        # Scenario A: Screen does NOT change -> only 1 step added
+        engine._process_click_event(120, 120, Button.left, is_double_click=False, click_id=2)
+        self.assertEqual(len(engine.steps), 3)
+
+        # Scenario B: Screen changes (modal / dropdown appears) -> 2 steps added
+        changed_img = dummy_img.copy()
+        ImageDraw.Draw(changed_img).rectangle((50, 50, 200, 150), fill=(255, 255, 255))
+        
+        shots = [dummy_img, changed_img]
+        engine.capture.capture_full_screen = lambda: (shots.pop(0) if shots else changed_img, 0, 0)
+        engine._process_click_event(130, 130, Button.left, is_double_click=False, click_id=3)
+        self.assertEqual(len(engine.steps), 5)  # 3 + 2 = 5 steps!
+
+        # 3. Test single-capture mode (dual_capture_on_click=False)
         config.dual_capture_on_click = False
         config.screenshot_delay_ms = 0
-        engine._process_click_event(150, 150, Button.right, is_double_click=False, click_id=2)
+        engine._process_click_event(150, 150, Button.right, is_double_click=False, click_id=4)
 
         # Only 1 additional step should be added
-        self.assertEqual(len(engine.steps), 3)
-        self.assertEqual(engine.steps[2].step_id, 3)
-        self.assertEqual(engine.steps[2].action_type, "right_click")
+        self.assertEqual(len(engine.steps), 6)
+        self.assertEqual(engine.steps[5].step_id, 6)
+        self.assertEqual(engine.steps[5].action_type, "right_click")
 
         engine.stop_recording()
+
+    def test_smart_ui_change_detection_algorithm(self):
+        from step_recorder.annotator import has_ui_changed
+        from PIL import ImageDraw
+
+        base = Image.new("RGB", (640, 480), color=(40, 50, 60))
+
+        # 1. Identical screenshots -> False
+        self.assertFalse(has_ui_changed(base, base.copy(), click_pos=(100, 100)))
+
+        # 2. Blinking 1px text cursor -> False (filtered out)
+        blink = base.copy()
+        ImageDraw.Draw(blink).line([(100, 100), (100, 114)], fill=(255, 255, 255), width=1)
+        self.assertFalse(has_ui_changed(base, blink, click_pos=(100, 100)))
+
+        # 3. Checkbox toggled -> True
+        chk = base.copy()
+        ImageDraw.Draw(chk).rectangle([(90, 90), (110, 110)], fill=(14, 165, 233))
+        self.assertTrue(has_ui_changed(base, chk, click_pos=(100, 100)))
+
+        # 4. Dropdown menu opened -> True
+        menu = base.copy()
+        ImageDraw.Draw(menu).rectangle([(80, 80), (300, 250)], fill=(240, 240, 240))
+        self.assertTrue(has_ui_changed(base, menu, click_pos=(100, 100)))
+
+        # 5. Window title switched -> True
+        self.assertTrue(has_ui_changed(base, base.copy(), win1="App", win2="Save As Dialog"))
 
 
 if __name__ == "__main__":
