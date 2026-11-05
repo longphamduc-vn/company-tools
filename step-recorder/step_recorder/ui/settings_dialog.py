@@ -14,6 +14,7 @@ from typing import Callable, Optional
 from ..config import RecorderConfig
 from ..window_info import exclude_window_from_capture
 from ..i18n import t, I18nManager
+from .icon_utils import apply_window_icon
 
 
 class SettingsDialog:
@@ -32,6 +33,8 @@ class SettingsDialog:
         self.window.attributes("-topmost", True)
         self.window.transient(parent)
         self.window.configure(bg="#0f172a")
+
+        apply_window_icon(self.window)
 
         self._build_ui()
         self._apply_geometry()
@@ -312,7 +315,89 @@ class SettingsDialog:
         )
         radius_spin.grid(row=2, column=1, sticky="w", pady=4)
 
-        # --- SECTION 3: Recording Limits & Delays ---
+        # --- SECTION 3: Dedicated Dual Capture Card (Chụp 2 lần: Ngay khi click + Sau ms) ---
+        sec_dual = self._create_card(self.scroll_content, t("sec_dual_capture"))
+
+        self.dual_capture_var = tk.BooleanVar(value=getattr(self.config, "dual_capture_on_click", True))
+        dual_chk = tk.Checkbutton(
+            sec_dual,
+            text=t("opt_dual_capture"),
+            variable=self.dual_capture_var,
+            bg="#1e293b",
+            fg="#38bdf8",
+            selectcolor="#0f172a",
+            activebackground="#1e293b",
+            activeforeground="#38bdf8",
+            font=("Segoe UI", 9, "bold")
+        )
+        dual_chk.pack(anchor="w", pady=(2, 6))
+
+        # Explanatory bullet points
+        hint_box = tk.Frame(sec_dual, bg="#0f172a", padx=10, pady=8, highlightbackground="#334155", highlightthickness=1)
+        hint_box.pack(fill=tk.X, pady=(0, 10))
+
+        tk.Label(
+            hint_box, text=t("hint_dual_capture_1"),
+            font=("Segoe UI", 8), bg="#0f172a", fg="#94a3b8", anchor="w"
+        ).pack(fill=tk.X, pady=(0, 2))
+
+        tk.Label(
+            hint_box, text=t("hint_dual_capture_2"),
+            font=("Segoe UI", 8), bg="#0f172a", fg="#94a3b8", anchor="w"
+        ).pack(fill=tk.X)
+
+        # Delay input row + Quick preset buttons
+        delay_row = tk.Frame(sec_dual, bg="#1e293b")
+        delay_row.pack(fill=tk.X, pady=(2, 4))
+
+        tk.Label(
+            delay_row, text=t("lbl_second_delay_ms"), font=("Segoe UI", 9),
+            bg="#1e293b", fg="#cbd5e1"
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        self.second_delay_var = tk.IntVar(value=getattr(self.config, "second_capture_delay_ms", 500))
+        second_delay_spin = tk.Spinbox(
+            delay_row,
+            from_=50,
+            to=3000,
+            increment=50,
+            textvariable=self.second_delay_var,
+            width=8,
+            bg="#0f172a",
+            fg="#f8fafc",
+            relief=tk.FLAT
+        )
+        second_delay_spin.pack(side=tk.LEFT, padx=(0, 10))
+
+        # Preset shortcut buttons
+        def _set_delay(val: int):
+            self.second_delay_var.set(val)
+
+        btn_fast = tk.Button(
+            delay_row, text=t("btn_preset_fast"), font=("Segoe UI", 8, "bold"),
+            command=lambda: _set_delay(200),
+            bg="#0f172a", fg="#38bdf8", activebackground="#1e293b",
+            relief=tk.FLAT, padx=8, pady=2, cursor="hand2"
+        )
+        btn_fast.pack(side=tk.LEFT, padx=(0, 4))
+
+        btn_std = tk.Button(
+            delay_row, text=t("btn_preset_std"), font=("Segoe UI", 8, "bold"),
+            command=lambda: _set_delay(500),
+            bg="#0f172a", fg="#10b981", activebackground="#1e293b",
+            relief=tk.FLAT, padx=8, pady=2, cursor="hand2"
+        )
+        btn_std.pack(side=tk.LEFT, padx=(0, 4))
+
+        btn_slow = tk.Button(
+            delay_row, text=t("btn_preset_slow"), font=("Segoe UI", 8, "bold"),
+            command=lambda: _set_delay(1000),
+            bg="#0f172a", fg="#f59e0b", activebackground="#1e293b",
+            relief=tk.FLAT, padx=8, pady=2, cursor="hand2"
+        )
+        btn_slow.pack(side=tk.LEFT)
+
+        # --- SECTION 4: Recording Limits & General Delay ---
         sec3 = self._create_card(self.scroll_content, t("sec_limits_delays"))
 
         lim_grid = tk.Frame(sec3, bg="#1e293b")
@@ -338,55 +423,15 @@ class SettingsDialog:
         )
         max_spin.grid(row=0, column=1, sticky="w", pady=4)
 
-        # Dual capture on click toggle
-        self.dual_capture_var = tk.BooleanVar(value=getattr(self.config, "dual_capture_on_click", True))
-        dual_chk = tk.Checkbutton(
-            sec3,
-            text=t("opt_dual_capture"),
-            variable=self.dual_capture_var,
-            bg="#1e293b",
-            fg="#38bdf8",
-            selectcolor="#0f172a",
-            activebackground="#1e293b",
-            activeforeground="#38bdf8",
-            font=("Segoe UI", 9, "bold")
-        )
-        dual_chk.pack(anchor="w", pady=(6, 4))
-
-        # Delay inputs container
-        delay_grid = tk.Frame(sec3, bg="#1e293b")
-        delay_grid.pack(fill=tk.X, pady=(2, 6))
-        delay_grid.columnconfigure(1, weight=1)
-
-        # Second capture delay ms (chụp lần 2 sau khi click)
-        tk.Label(
-            delay_grid, text=t("lbl_second_delay_ms"), font=("Segoe UI", 9),
-            bg="#1e293b", fg="#cbd5e1"
-        ).grid(row=0, column=0, sticky="w", pady=4, padx=(0, 10))
-
-        self.second_delay_var = tk.IntVar(value=getattr(self.config, "second_capture_delay_ms", 500))
-        second_delay_spin = tk.Spinbox(
-            delay_grid,
-            from_=50,
-            to=3000,
-            increment=50,
-            textvariable=self.second_delay_var,
-            width=8,
-            bg="#0f172a",
-            fg="#f8fafc",
-            relief=tk.FLAT
-        )
-        second_delay_spin.grid(row=0, column=1, sticky="w", pady=4)
-
         # Single capture delay ms
         tk.Label(
-            delay_grid, text=t("lbl_single_delay_ms"), font=("Segoe UI", 9),
+            lim_grid, text=t("lbl_single_delay_ms"), font=("Segoe UI", 9),
             bg="#1e293b", fg="#cbd5e1"
         ).grid(row=1, column=0, sticky="w", pady=4, padx=(0, 10))
 
         self.delay_var = tk.IntVar(value=self.config.screenshot_delay_ms)
         delay_spin = tk.Spinbox(
-            delay_grid,
+            lim_grid,
             from_=0,
             to=500,
             increment=20,

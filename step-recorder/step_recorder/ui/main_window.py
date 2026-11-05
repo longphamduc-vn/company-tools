@@ -32,6 +32,7 @@ from ..hotkeys import GlobalHotkeyManager
 from .comment_dialog import CommentDialog
 from .settings_dialog import SettingsDialog
 from .step_editor import StepEditorWindow
+from .icon_utils import apply_window_icon
 
 
 def log_error(err_msg: str) -> None:
@@ -85,6 +86,7 @@ class MainWindow:
 
     def _init_window(self) -> None:
         self.root.title(t("app_title"))
+        apply_window_icon(self.root)
         self.root.attributes("-topmost", getattr(self.config, "always_on_top", True))
         self.root.configure(bg="#0f172a")
 

@@ -433,13 +433,37 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "vi": "Độ trễ chụp ảnh (Screenshot delay ms):",
         "en": "Screenshot Delay (ms):"
     },
+    "sec_dual_capture": {
+        "vi": "📸 Chế Độ Chụp Kép (Dual Capture: Chụp Ngay + Chụp Sau ms)",
+        "en": "📸 Dual Capture Mode (Immediate Click + Result Capture after ms)"
+    },
     "opt_dual_capture": {
-        "vi": "Chụp 2 lần khi nhấp chuột (Chụp ngay + Chụp kết quả sau độ trễ ms)",
-        "en": "Dual capture on click (Immediate click + Result capture after delay ms)"
+        "vi": "Chụp ngay sau khi click và chụp sau ms (Chụp 2 lần cho mỗi cú nhấp chuột)",
+        "en": "Capture immediately after click and capture after ms (Capture twice per click)"
+    },
+    "hint_dual_capture_1": {
+        "vi": "• Lần 1: Chụp ngay lập tức vị trí nhấp chuột và đối tượng thao tác.",
+        "en": "• Shot 1: Immediate capture of the click target and cursor position."
+    },
+    "hint_dual_capture_2": {
+        "vi": "• Lần 2: Chụp sau khoảng trễ ms để lưu kết quả giao diện thay đổi (menu, modal, chuyển trang).",
+        "en": "• Shot 2: Capture after delay ms to capture the resulting UI state change (menus, modals, page transitions)."
     },
     "lbl_second_delay_ms": {
-        "vi": "Độ trễ chụp kết quả lần 2 (ms):",
+        "vi": "Thời gian trễ chụp lần 2 (ms):",
         "en": "Second capture delay (ms):"
+    },
+    "btn_preset_fast": {
+        "vi": "⚡ 200ms (Nhanh)",
+        "en": "⚡ 200ms (Fast)"
+    },
+    "btn_preset_std": {
+        "vi": "🎯 500ms (Chuẩn)",
+        "en": "🎯 500ms (Standard)"
+    },
+    "btn_preset_slow": {
+        "vi": "⏳ 1000ms (Chậm)",
+        "en": "⏳ 1000ms (Slow)"
     },
     "lbl_single_delay_ms": {
         "vi": "Độ trễ khi chụp đơn (ms):",

@@ -29,6 +29,7 @@ from ..config import RecorderConfig
 from ..exporter import ReportExporter
 from ..window_info import exclude_window_from_capture
 from ..i18n import t, I18nManager, TRANSLATIONS
+from .icon_utils import apply_window_icon
 
 
 # UI Design Palette - Studio Dark Theme
@@ -110,6 +111,7 @@ class StepEditorWindow:
 
         self.window = tk.Toplevel(parent)
         self.window.title(t("editor_title"))
+        apply_window_icon(self.window)
         self.window.attributes("-topmost", True)
         self.window.configure(bg=COLOR_BG)
 

@@ -11,6 +11,7 @@ from PIL import Image
 from ..window_info import exclude_window_from_capture
 from ..i18n import t
 from .snipper import ScreenSnipper
+from .icon_utils import apply_window_icon
 
 
 class CommentDialog:
@@ -27,6 +28,7 @@ class CommentDialog:
 
         self.window = tk.Toplevel(parent)
         self.window.title(t("comment_win_title"))
+        apply_window_icon(self.window)
         self.window.attributes("-topmost", True)
         self.window.transient(parent)
         self.window.configure(bg="#1e293b")

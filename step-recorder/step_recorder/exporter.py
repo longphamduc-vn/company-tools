@@ -12,6 +12,7 @@ from jinja2 import Environment, FileSystemLoader
 
 from .models import Step, SessionMetadata
 from .config import RecorderConfig
+from .ui.icon_utils import get_favicon_base64
 
 
 class ReportExporter:
@@ -61,7 +62,8 @@ class ReportExporter:
             session=metadata,
             steps=steps,
             sections=sections,
-            config=self.config
+            config=self.config,
+            favicon_base64=get_favicon_base64()
         )
         html_file = out_path / "report.html"
         with open(html_file, "w", encoding="utf-8") as f:
