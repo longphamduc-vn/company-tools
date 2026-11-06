@@ -107,6 +107,9 @@ class StepEditorWindow:
         # Per-step undo stack: Dict[step_id, List[bytes]]
         self.undo_stack: Dict[int, List[bytes]] = {}
 
+        # Unified action history for multi-level undo (drawing edits & step deletions)
+        self.action_history: List[Dict] = []
+
         # Active drawing tool
         self.active_tool: str = "highlight"
 
@@ -137,11 +140,20 @@ class StepEditorWindow:
                 return
             self._delete_current_step()
 
+        def _handle_key_select_all(event):
+            # If user is in an entry/text widget, let native text select-all happen
+            if isinstance(event.widget, (tk.Entry, tk.Text, tk.Spinbox)):
+                return
+            self._select_all_steps()
+            return "break"
+
         self.window.bind("<Delete>", _handle_key_delete)
         self.window.bind("<Control-s>", lambda e: self._apply_current_step_edits())
         self.window.bind("<Control-z>", lambda e: self._undo_last_action())
         self.window.bind("<Control-e>", lambda e: self._export_final_report())
         self.window.bind("<Control-o>", lambda e: self._open_saved_document())
+        self.window.bind("<Control-a>", _handle_key_select_all)
+        self.window.bind("<Control-A>", _handle_key_select_all)
         self.window.bind("<Escape>", lambda e: self.window.destroy())
 
         self.window.after(50, lambda: exclude_window_from_capture(self.window))
@@ -297,6 +309,7 @@ class StepEditorWindow:
         scrollbar = tk.Scrollbar(list_container, orient=tk.VERTICAL)
         self.step_listbox = tk.Listbox(
             list_container,
+            selectmode=tk.EXTENDED,
             yscrollcommand=scrollbar.set,
             bg=COLOR_INPUT_BG,
             fg=COLOR_TEXT_MAIN,
@@ -314,7 +327,7 @@ class StepEditorWindow:
         self.step_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.step_listbox.bind("<<ListboxSelect>>", self._on_list_select)
 
-        # List Action Buttons (Delete, Move Up, Move Down)
+        # Step List Action Buttons: Row 1 (Delete, Undo Delete, Select All)
         list_btn_frame = tk.Frame(left_frame, bg=COLOR_PANEL)
         list_btn_frame.pack(fill=tk.X, pady=(8, 0))
 
@@ -325,31 +338,60 @@ class StepEditorWindow:
             bg="#991b1b", fg="#ffffff",
             activebackground=COLOR_ROSE,
             font=("Segoe UI", 8, "bold"),
-            relief=tk.FLAT, padx=8, pady=4, cursor="hand2"
+            relief=tk.FLAT, padx=7, pady=4, cursor="hand2"
         )
         self.del_btn.pack(side=tk.LEFT, padx=(0, 4))
         bind_hover(self.del_btn, "#991b1b", COLOR_ROSE)
 
-        self.up_btn = tk.Button(
+        self.undo_del_btn = tk.Button(
             list_btn_frame,
+            text=t("btn_undo_delete"),
+            command=self._undo_delete_only,
+            bg=COLOR_INPUT_BG, fg=COLOR_CYAN,
+            activebackground="#1e293b",
+            font=("Segoe UI", 8),
+            relief=tk.FLAT, padx=7, pady=4, cursor="hand2",
+            state=tk.DISABLED
+        )
+        self.undo_del_btn.pack(side=tk.LEFT, padx=(0, 4))
+        bind_hover(self.undo_del_btn, COLOR_INPUT_BG, "#1e293b", COLOR_CYAN, "#ffffff")
+
+        self.select_all_btn = tk.Button(
+            list_btn_frame,
+            text=t("btn_select_all"),
+            command=self._toggle_select_all,
+            bg=COLOR_PANEL_ALT, fg=COLOR_TEXT_MUTED,
+            activebackground="#1e293b",
+            font=("Segoe UI", 8),
+            relief=tk.FLAT, padx=6, pady=4, cursor="hand2"
+        )
+        self.select_all_btn.pack(side=tk.RIGHT)
+        bind_hover(self.select_all_btn, COLOR_PANEL_ALT, "#1e293b", COLOR_TEXT_MUTED, COLOR_TEXT_MAIN)
+
+        # Row 2: Reorder Buttons
+        reorder_frame = tk.Frame(left_frame, bg=COLOR_PANEL)
+        reorder_frame.pack(fill=tk.X, pady=(4, 0))
+
+        self.up_btn = tk.Button(
+            reorder_frame,
             text=t("btn_move_up"),
             command=self._move_step_up,
             bg=COLOR_PANEL_ALT, fg=COLOR_TEXT_MAIN,
             activebackground="#1e293b",
             font=("Segoe UI", 8),
-            relief=tk.FLAT, padx=8, pady=4, cursor="hand2"
+            relief=tk.FLAT, padx=8, pady=3, cursor="hand2"
         )
         self.up_btn.pack(side=tk.LEFT, padx=(0, 4))
         bind_hover(self.up_btn, COLOR_PANEL_ALT, "#1e293b")
 
         self.down_btn = tk.Button(
-            list_btn_frame,
+            reorder_frame,
             text=t("btn_move_down"),
             command=self._move_step_down,
             bg=COLOR_PANEL_ALT, fg=COLOR_TEXT_MAIN,
             activebackground="#1e293b",
             font=("Segoe UI", 8),
-            relief=tk.FLAT, padx=8, pady=4, cursor="hand2"
+            relief=tk.FLAT, padx=8, pady=3, cursor="hand2"
         )
         self.down_btn.pack(side=tk.LEFT)
         bind_hover(self.down_btn, COLOR_PANEL_ALT, "#1e293b")
@@ -953,6 +995,12 @@ class StepEditorWindow:
         self.total_lbl.configure(text=t("total_steps", count=len(self.steps)))
         self.list_header.configure(text=t("step_list_title"))
         self.del_btn.configure(text=t("btn_delete_step"))
+        if hasattr(self, "undo_del_btn"):
+            self.undo_del_btn.configure(text=t("btn_undo_delete"))
+        if hasattr(self, "select_all_btn"):
+            self.select_all_btn.configure(text=t("btn_select_all"))
+        self._update_selection_buttons()
+        self._update_undo_button_state()
         self.up_btn.configure(text=t("btn_move_up"))
         self.down_btn.configure(text=t("btn_move_down"))
         self.desc_lbl.configure(text=t("desc_label"))
@@ -1035,14 +1083,24 @@ class StepEditorWindow:
             )
 
     def _on_list_select(self, event=None) -> None:
+        """Handle selection change in the step listbox."""
         selected = self.step_listbox.curselection()
-        if selected:
-            list_idx = selected[0]
-            if list_idx < len(self.filtered_indices):
-                real_idx = self.filtered_indices[list_idx]
-                self._select_step(real_idx)
+        self._update_selection_buttons()
 
-    def _select_step(self, index: int) -> None:
+        if not selected:
+            return
+
+        # Find the active or last selected index to display in preview
+        target_list_idx = self.step_listbox.index(tk.ACTIVE)
+        if target_list_idx not in selected:
+            target_list_idx = selected[-1]
+
+        if target_list_idx < len(self.filtered_indices):
+            real_idx = self.filtered_indices[target_list_idx]
+            self._display_step_details(real_idx)
+
+    def _display_step_details(self, index: int) -> None:
+        """Update form inputs and preview canvas for a step without altering listbox selection."""
         if index < 0 or index >= len(self.steps):
             return
 
@@ -1073,22 +1131,90 @@ class StepEditorWindow:
         self.no_step_var.set(step.no_next_step or 0)
         self._on_decision_chk_changed()
 
-        # Highlight in listbox if visible
+        # Update footer text if single selection
+        selected = self.step_listbox.curselection()
+        if len(selected) <= 1:
+            self.list_footer_lbl.configure(
+                text=f"Đang xem: Bước #{step.step_id} / {len(self.steps)}"
+            )
+
+        # Render preview image
+        self._render_step_preview(step)
+
+    def _select_step(self, index: int) -> None:
+        """Select a single step in listbox and show its details."""
+        if index < 0 or index >= len(self.steps):
+            return
+
         try:
             if index in self.filtered_indices:
                 list_idx = self.filtered_indices.index(index)
                 self.step_listbox.selection_clear(0, tk.END)
                 self.step_listbox.selection_set(list_idx)
                 self.step_listbox.activate(list_idx)
+                self.step_listbox.see(list_idx)
         except Exception:
             pass
 
-        self.list_footer_lbl.configure(
-            text=f"Đang xem: Bước #{step.step_id} / {len(self.steps)}"
-        )
+        self._display_step_details(index)
+        self._update_selection_buttons()
 
-        # Render preview image
-        self._render_step_preview(step)
+    def _update_selection_buttons(self) -> None:
+        """Update delete and select-all buttons based on current selection."""
+        selected = self.step_listbox.curselection()
+        num_selected = len(selected)
+        total_visible = len(self.filtered_indices)
+
+        if not selected:
+            self.del_btn.configure(text=t("btn_delete_step"), state=tk.DISABLED)
+            self.up_btn.configure(state=tk.DISABLED)
+            self.down_btn.configure(state=tk.DISABLED)
+            if hasattr(self, "select_all_btn"):
+                self.select_all_btn.configure(text=t("btn_select_all"))
+            return
+
+        self.del_btn.configure(state=tk.NORMAL)
+        if hasattr(self, "select_all_btn"):
+            if num_selected >= total_visible and total_visible > 0:
+                self.select_all_btn.configure(text=t("btn_deselect_all"))
+            else:
+                self.select_all_btn.configure(text=t("btn_select_all"))
+
+        if num_selected > 1:
+            self.del_btn.configure(text=t("btn_delete_multi", count=num_selected))
+            self.list_footer_lbl.configure(
+                text=t("status_selected_count", selected=num_selected, total=len(self.steps))
+            )
+            self.up_btn.configure(state=tk.DISABLED)
+            self.down_btn.configure(state=tk.DISABLED)
+        else:
+            self.del_btn.configure(text=t("btn_delete_step"))
+            self.up_btn.configure(state=tk.NORMAL)
+            self.down_btn.configure(state=tk.NORMAL)
+            if selected[0] < len(self.filtered_indices):
+                step = self.steps[self.filtered_indices[selected[0]]]
+                self.list_footer_lbl.configure(
+                    text=f"Đang xem: Bước #{step.step_id} / {len(self.steps)}"
+                )
+
+    def _toggle_select_all(self) -> None:
+        """Toggle between selecting all visible steps and clearing selection."""
+        selected = self.step_listbox.curselection()
+        total_visible = len(self.filtered_indices)
+
+        if len(selected) >= total_visible and total_visible > 0:
+            self.step_listbox.selection_clear(0, tk.END)
+            self._update_selection_buttons()
+        else:
+            self.step_listbox.selection_set(0, tk.END)
+            self._on_list_select()
+
+    def _select_all_steps(self) -> None:
+        """Select all visible steps in the listbox."""
+        if not self.steps:
+            return
+        self.step_listbox.selection_set(0, tk.END)
+        self._on_list_select()
 
     def _render_step_preview(self, step: Step) -> None:
         """Render screenshot of step inside the preview canvas."""
@@ -1177,9 +1303,99 @@ class StepEditorWindow:
             if step.step_id not in self.undo_stack:
                 self.undo_stack[step.step_id] = []
             self.undo_stack[step.step_id].append(current_bytes)
-            # Limit undo stack depth per step to 15
             if len(self.undo_stack[step.step_id]) > 15:
                 self.undo_stack[step.step_id].pop(0)
+
+            self.action_history.append({
+                "type": "drawing",
+                "step_id": step.step_id,
+                "prev_bytes": current_bytes
+            })
+            if len(self.action_history) > 40:
+                self.action_history.pop(0)
+            self._update_undo_button_state()
+
+    def _undo_last_action(self) -> None:
+        """
+        Revert the most recent action in chronological order:
+        - If last action was a step deletion, restore the deleted step(s) in place.
+        - If last action was a drawing/crop/privacy action, revert the image bytes.
+        """
+        if not self.action_history:
+            return
+
+        action = self.action_history.pop()
+        self._update_undo_button_state()
+        action_type = action.get("type")
+
+        if action_type == "delete_steps":
+            items = action.get("items", [])
+            self._apply_restore_deleted_steps(items)
+
+        elif action_type == "drawing":
+            step_id = action.get("step_id")
+            prev_bytes = action.get("prev_bytes")
+            for s in self.steps:
+                if s.step_id == step_id:
+                    s.annotated_image_bytes = prev_bytes
+                    # Check if step has further drawing actions
+                    has_more = any(
+                        a.get("type") == "drawing" and a.get("step_id") == step_id
+                        for a in self.action_history
+                    )
+                    if not has_more:
+                        s._is_custom_edited = False
+                    if 0 <= self.current_index < len(self.steps) and self.steps[self.current_index].step_id == step_id:
+                        self._render_step_preview(s)
+                    break
+
+    def _apply_restore_deleted_steps(self, items: List[Tuple[int, Step]]) -> None:
+        """Re-insert deleted steps back into the list at their original positions."""
+        if not items:
+            return
+
+        restored_indices = []
+        # Re-insert items in ascending order of original index
+        for orig_idx, step_obj in items:
+            insert_pos = min(orig_idx, len(self.steps))
+            self.steps.insert(insert_pos, step_obj)
+            restored_indices.append(insert_pos)
+
+        min_idx = min(restored_indices)
+        self._renumber_steps(from_index=min_idx)
+        self._on_filter_changed()
+
+        # Select and highlight all restored steps in the listbox
+        self.step_listbox.selection_clear(0, tk.END)
+        for r_idx in restored_indices:
+            if r_idx in self.filtered_indices:
+                list_pos = self.filtered_indices.index(r_idx)
+                self.step_listbox.selection_set(list_pos)
+
+        self._display_step_details(min_idx)
+        self._update_selection_buttons()
+
+    def _undo_delete_only(self) -> None:
+        """Specifically undo the most recent step deletion."""
+        for i in range(len(self.action_history) - 1, -1, -1):
+            if self.action_history[i].get("type") == "delete_steps":
+                action = self.action_history.pop(i)
+                self._apply_restore_deleted_steps(action.get("items", []))
+                self._update_undo_button_state()
+                return
+
+    def _update_undo_button_state(self) -> None:
+        """Update enabled/disabled state for Undo and Undo-Delete buttons."""
+        has_undo = bool(self.action_history)
+        has_del_undo = any(a.get("type") == "delete_steps" for a in self.action_history)
+
+        state_all = tk.NORMAL if has_undo else tk.DISABLED
+        state_del = tk.NORMAL if has_del_undo else tk.DISABLED
+
+        if hasattr(self, "undo_btn"):
+            self.undo_btn.configure(state=state_all)
+        if hasattr(self, "undo_del_btn"):
+            self.undo_del_btn.configure(state=state_del)
 
     def _on_canvas_release(self, event) -> None:
         self.preview_canvas.delete("tool_drag_box")
@@ -1267,20 +1483,6 @@ class StepEditorWindow:
                 step.thumbnail_bytes = ScreenCapture.image_to_bytes(ScreenCapture.create_thumbnail(cropped))
                 self._render_step_preview(step)
 
-    def _undo_last_action(self) -> None:
-        """Revert the most recent drawing, privacy or crop action for current step."""
-        if 0 <= self.current_index < len(self.steps):
-            step = self.steps[self.current_index]
-            history = self.undo_stack.get(step.step_id, [])
-            if history:
-                prev_bytes = history.pop()
-                step.annotated_image_bytes = prev_bytes
-                if not history:
-                    step._is_custom_edited = False
-                prev_img = Image.open(io.BytesIO(prev_bytes))
-                step.thumbnail_bytes = ScreenCapture.image_to_bytes(ScreenCapture.create_thumbnail(prev_img))
-                self._render_step_preview(step)
-
     def _reset_to_raw(self) -> None:
         """Reset current step back to original raw unedited screenshot."""
         if 0 <= self.current_index < len(self.steps):
@@ -1339,6 +1541,8 @@ class StepEditorWindow:
 
             self.steps = loaded_steps
             self.undo_stack.clear()
+            self.action_history.clear()
+            self._update_undo_button_state()
             self._renumber_steps(from_index=0)
             self.search_var.set("")
             self._on_filter_changed()
@@ -1522,21 +1726,53 @@ class StepEditorWindow:
         self._renumber_steps(from_index=0)
 
     def _delete_current_step(self) -> None:
-        """Delete currently selected step instantly, renumber remaining steps, and refresh badges."""
-        if not self.steps or self.current_index < 0 or self.current_index >= len(self.steps):
+        """Delete currently selected step(s) with undo capability and instant renumbering."""
+        if not self.steps:
             return
 
-        del_id = self.steps[self.current_index].step_id
-        if messagebox.askyesno(t("confirm_delete_title"), t("confirm_delete_msg", id=del_id), parent=self.window):
-            del_idx = self.current_index
-            self.steps.pop(del_idx)
+        selected_list_indices = self.step_listbox.curselection()
+        if not selected_list_indices:
+            if 0 <= self.current_index < len(self.steps):
+                if self.current_index in self.filtered_indices:
+                    selected_list_indices = (self.filtered_indices.index(self.current_index),)
+                else:
+                    return
+            else:
+                return
 
-            # Instant in-memory renumbering starting from the deleted index
-            self._renumber_steps(from_index=del_idx)
+        # Map listbox indices to real step indices
+        real_indices = sorted(list(set(
+            self.filtered_indices[i] for i in selected_list_indices if i < len(self.filtered_indices)
+        )))
+        if not real_indices:
+            return
+
+        count = len(real_indices)
+        if count == 1:
+            del_id = self.steps[real_indices[0]].step_id
+            msg = t("confirm_delete_msg", id=del_id)
+        else:
+            msg = t("confirm_delete_multi_msg", count=count)
+
+        if messagebox.askyesno(t("confirm_delete_title"), msg, parent=self.window):
+            # Save deleted steps to action history for UNDO
+            deleted_items = [(idx, self.steps[idx]) for idx in real_indices]
+            self.action_history.append({
+                "type": "delete_steps",
+                "items": deleted_items
+            })
+            self._update_undo_button_state()
+
+            # Remove steps in reverse order so earlier indices remain valid
+            for idx in reversed(real_indices):
+                self.steps.pop(idx)
+
+            first_del_idx = real_indices[0]
+            self._renumber_steps(from_index=first_del_idx)
             self._on_filter_changed()
 
             if self.steps:
-                new_idx = min(del_idx, len(self.steps) - 1)
+                new_idx = min(first_del_idx, len(self.steps) - 1)
                 self._select_step(new_idx)
             else:
                 self.current_index = -1
@@ -1558,6 +1794,8 @@ class StepEditorWindow:
                 self.time_pill.configure(text="")
                 self.window_tag_lbl.configure(text="")
                 self.canvas_dim_lbl.configure(text="")
+
+            self._update_selection_buttons()
 
     def _move_step_up(self) -> None:
         """Move selected step up in sequence instantly."""

@@ -691,6 +691,82 @@ class TestStepRecorder(unittest.TestCase):
 
         root.destroy()
 
+    def test_batch_delete_and_undo_deletion(self):
+        """Test selecting multiple steps, batch deletion, and full undo restoration."""
+        import tkinter as tk
+        from step_recorder.ui.step_editor import StepEditorWindow
+
+        root = tk.Tk()
+        root.withdraw()
+
+        cfg = RecorderConfig()
+        img = Image.new("RGB", (100, 100), color=(50, 50, 50))
+        img_bytes = ScreenCapture.image_to_bytes(img)
+
+        steps = [
+            Step(step_id=1, timestamp=datetime.now(), action_type="left_click", description="Step 1", raw_image_bytes=img_bytes),
+            Step(step_id=2, timestamp=datetime.now(), action_type="left_click", description="Step 2", raw_image_bytes=img_bytes),
+            Step(step_id=3, timestamp=datetime.now(), action_type="left_click", description="Step 3", raw_image_bytes=img_bytes),
+            Step(step_id=4, timestamp=datetime.now(), action_type="left_click", description="Step 4", raw_image_bytes=img_bytes),
+            Step(step_id=5, timestamp=datetime.now(), action_type="left_click", description="Step 5", raw_image_bytes=img_bytes),
+            Step(step_id=6, timestamp=datetime.now(), action_type="left_click", description="Step 6", raw_image_bytes=img_bytes),
+        ]
+
+        metadata = SessionMetadata(session_id="test_batch_del", title="Batch Delete & Undo")
+        editor = StepEditorWindow(root, steps, metadata, cfg, ReportExporter(cfg))
+
+        # 1. Test Select All
+        editor._toggle_select_all()
+        selected = editor.step_listbox.curselection()
+        self.assertEqual(len(selected), 6)
+        self.assertIn("6", editor.del_btn.cget("text"))
+
+        # Test Deselect All
+        editor._toggle_select_all()
+        self.assertEqual(len(editor.step_listbox.curselection()), 0)
+
+        # 2. Select specific batch: Step 2, Step 4, Step 5 (indices 1, 3, 4)
+        for idx in (1, 3, 4):
+            editor.step_listbox.selection_set(idx)
+        editor._on_list_select()
+
+        self.assertEqual(len(editor.step_listbox.curselection()), 3)
+        self.assertIn("3", editor.del_btn.cget("text"))
+
+        # 3. Perform batch deletion
+        real_indices = [1, 3, 4]
+        deleted_items = [(i, editor.steps[i]) for i in real_indices]
+        editor.action_history.append({
+            "type": "delete_steps",
+            "items": deleted_items
+        })
+        for i in reversed(real_indices):
+            editor.steps.pop(i)
+
+        editor._renumber_steps(from_index=1)
+        editor._on_filter_changed()
+
+        # Verify only 3 steps remain: Step 1, Step 3, Step 6
+        self.assertEqual(len(editor.steps), 3)
+        self.assertEqual(editor.steps[0].description, "Step 1")
+        self.assertEqual(editor.steps[0].step_id, 1)
+        self.assertEqual(editor.steps[1].description, "Step 3")
+        self.assertEqual(editor.steps[1].step_id, 2)
+        self.assertEqual(editor.steps[2].description, "Step 6")
+        self.assertEqual(editor.steps[2].step_id, 3)
+
+        # 4. Perform Undo
+        editor._undo_last_action()
+
+        # All 6 steps must be restored in exact original sequence!
+        self.assertEqual(len(editor.steps), 6)
+        expected_descs = ["Step 1", "Step 2", "Step 3", "Step 4", "Step 5", "Step 6"]
+        for i, desc in enumerate(expected_descs):
+            self.assertEqual(editor.steps[i].description, desc)
+            self.assertEqual(editor.steps[i].step_id, i + 1)
+
+        root.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()

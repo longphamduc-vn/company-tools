@@ -113,6 +113,26 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "vi": "🗑️ Xóa bước",
         "en": "🗑️ Delete Step"
     },
+    "btn_delete_multi": {
+        "vi": "🗑️ Xóa ({count})",
+        "en": "🗑️ Delete ({count})"
+    },
+    "btn_undo_delete": {
+        "vi": "↩ Hoàn tác xóa",
+        "en": "↩ Undo Delete"
+    },
+    "btn_select_all": {
+        "vi": "Chọn tất cả",
+        "en": "Select All"
+    },
+    "btn_deselect_all": {
+        "vi": "Bỏ chọn",
+        "en": "Deselect"
+    },
+    "status_selected_count": {
+        "vi": "Đã chọn: {selected} / {total} bước",
+        "en": "Selected: {selected} / {total} steps"
+    },
     "btn_move_up": {
         "vi": "⬆️ Lên",
         "en": "⬆️ Move Up"
@@ -322,8 +342,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Confirm Step Deletion"
     },
     "confirm_delete_msg": {
-        "vi": "Bạn có chắc muốn xóa Bước #{id} không?\nCác bước tiếp theo sẽ tự động được đánh số lại.",
-        "en": "Are you sure you want to delete Step #{id}?\nRemaining steps will be automatically renumbered."
+        "vi": "Bạn có chắc muốn xóa Bước #{id} không?\nCác bước tiếp theo sẽ tự động được đánh số lại (nhấn Ctrl+Z để hoàn tác).",
+        "en": "Are you sure you want to delete Step #{id}?\nRemaining steps will be automatically renumbered (press Ctrl+Z to undo)."
+    },
+    "confirm_delete_multi_msg": {
+        "vi": "Bạn có chắc muốn xóa {count} bước đã chọn không?\nCác bước còn lại sẽ tự động được đánh số lại (nhấn Ctrl+Z để hoàn tác).",
+        "en": "Are you sure you want to delete {count} selected steps?\nRemaining steps will be automatically renumbered (press Ctrl+Z to undo)."
     },
     "no_steps_left": {
         "vi": "Không còn bước nào.",
