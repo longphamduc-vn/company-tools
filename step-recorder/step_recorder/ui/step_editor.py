@@ -9,6 +9,7 @@ import io
 import os
 import sys
 import json
+import threading
 import webbrowser
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -109,6 +110,10 @@ class StepEditorWindow:
         # Active drawing tool
         self.active_tool: str = "highlight"
 
+        # Background badge renumbering thread management
+        self._badge_refresh_generation: int = 0
+        self._active_badge_thread: Optional[threading.Thread] = None
+
         self.window = tk.Toplevel(parent)
         self.window.title(t("editor_title"))
         apply_window_icon(self.window)
@@ -126,7 +131,13 @@ class StepEditorWindow:
             self._select_step(0)
 
         # Keyboard shortcuts
-        self.window.bind("<Delete>", lambda e: self._delete_current_step())
+        def _handle_key_delete(event):
+            # Don't trigger step deletion if user is typing inside an entry/text input
+            if isinstance(event.widget, (tk.Entry, tk.Text, tk.Spinbox)):
+                return
+            self._delete_current_step()
+
+        self.window.bind("<Delete>", _handle_key_delete)
         self.window.bind("<Control-s>", lambda e: self._apply_current_step_edits())
         self.window.bind("<Control-z>", lambda e: self._undo_last_action())
         self.window.bind("<Control-e>", lambda e: self._export_final_report())
@@ -1215,6 +1226,7 @@ class StepEditorWindow:
 
         elif self.active_tool == "blur":
             self._push_undo(step)
+            step._is_custom_edited = True
             base_img = Image.open(io.BytesIO(base_bytes))
             blurred = apply_blur_region(base_img, rect, radius=18)
             step.annotated_image_bytes = ScreenCapture.image_to_bytes(blurred)
@@ -1223,6 +1235,7 @@ class StepEditorWindow:
 
         elif self.active_tool == "redact":
             self._push_undo(step)
+            step._is_custom_edited = True
             base_img = Image.open(io.BytesIO(base_bytes))
             redacted = apply_redact_region(base_img, rect)
             step.annotated_image_bytes = ScreenCapture.image_to_bytes(redacted)
@@ -1231,6 +1244,7 @@ class StepEditorWindow:
 
         elif self.active_tool == "red_box":
             self._push_undo(step)
+            step._is_custom_edited = True
             base_img = Image.open(io.BytesIO(base_bytes))
             boxed = draw_box_annotation(base_img, rect, color_hex="#ef4444", width=3)
             step.annotated_image_bytes = ScreenCapture.image_to_bytes(boxed)
@@ -1246,6 +1260,7 @@ class StepEditorWindow:
                 parent=self.window
             ):
                 self._push_undo(step)
+                step._is_custom_edited = True
                 base_img = Image.open(io.BytesIO(base_bytes))
                 cropped = crop_image(base_img, rect)
                 step.annotated_image_bytes = ScreenCapture.image_to_bytes(cropped)
@@ -1260,6 +1275,8 @@ class StepEditorWindow:
             if history:
                 prev_bytes = history.pop()
                 step.annotated_image_bytes = prev_bytes
+                if not history:
+                    step._is_custom_edited = False
                 prev_img = Image.open(io.BytesIO(prev_bytes))
                 step.thumbnail_bytes = ScreenCapture.image_to_bytes(ScreenCapture.create_thumbnail(prev_img))
                 self._render_step_preview(step)
@@ -1271,6 +1288,7 @@ class StepEditorWindow:
             if step.raw_image_bytes:
                 self._push_undo(step)
                 step.highlight_rect = None
+                step._is_custom_edited = False
                 base_img = Image.open(io.BytesIO(step.raw_image_bytes))
                 c_pos = (step.cursor_x, step.cursor_y) if step.cursor_x is not None else None
                 annotated = annotate_screenshot(
@@ -1321,7 +1339,7 @@ class StepEditorWindow:
 
             self.steps = loaded_steps
             self.undo_stack.clear()
-            self._renumber_and_refresh_badges()
+            self._renumber_steps(from_index=0)
             self.search_var.set("")
             self._on_filter_changed()
             if self.steps:
@@ -1357,7 +1375,7 @@ class StepEditorWindow:
             for i, s in enumerate(new_steps):
                 self.steps.insert(insert_idx + i, s)
 
-            self._renumber_and_refresh_badges()
+            self._renumber_steps(from_index=insert_idx)
             self._on_filter_changed()
             self._select_step(insert_idx)
 
@@ -1422,44 +1440,103 @@ class StepEditorWindow:
             self._on_filter_changed()
             messagebox.showinfo(t("editor_title"), t("step_updated_msg", id=step.step_id), parent=self.window)
 
-    def _renumber_and_refresh_badges(self) -> None:
-        """Renumber all steps sequentially (#1..N) and re-burn badge numbers onto images."""
+    def _renumber_steps(self, from_index: int = 0) -> None:
+        """
+        Instantly renumber all steps sequentially (#1..N) in memory with 0ms latency.
+        Badge re-burning on screenshot images is executed asynchronously in a background
+        thread so the UI remains completely responsive without freezing.
+        """
+        needs_badge_refresh = []
         for i, s in enumerate(self.steps):
-            s.step_id = i + 1
-            if s.raw_image_bytes:
+            old_id = s.step_id
+            new_id = i + 1
+            s.step_id = new_id
+
+            # Only steps at or after the modification point whose ID changed
+            # and that have not been manually edited/blurred/cropped need badge re-burning
+            if i >= from_index and old_id != new_id:
+                if self.config.show_step_badge_on_screenshot and s.raw_image_bytes and not getattr(s, "_is_custom_edited", False):
+                    needs_badge_refresh.append(s)
+
+        if needs_badge_refresh:
+            self._queue_background_badge_refresh(needs_badge_refresh)
+
+    def _queue_background_badge_refresh(self, steps: List[Step]) -> None:
+        """Process badge re-rendering asynchronously in background thread."""
+        self._badge_refresh_generation += 1
+        gen = self._badge_refresh_generation
+
+        # Snapshot task items to avoid race conditions
+        tasks = []
+        for s in steps:
+            if s.raw_image_bytes and not getattr(s, "_is_custom_edited", False):
+                tasks.append((s, s.step_id, s.cursor_x, s.cursor_y, s.highlight_rect, s.raw_image_bytes))
+
+        if not tasks:
+            return
+
+        def _worker():
+            for step_obj, target_step_id, cx, cy, h_rect, raw_bytes in tasks:
+                if gen != self._badge_refresh_generation:
+                    return
+
                 try:
-                    base_img = Image.open(io.BytesIO(s.raw_image_bytes))
-                    c_pos = (s.cursor_x, s.cursor_y) if s.cursor_x is not None else None
+                    base_img = Image.open(io.BytesIO(raw_bytes))
+                    c_pos = (cx, cy) if cx is not None else None
                     annotated = annotate_screenshot(
                         base_img,
                         cursor_pos=c_pos,
-                        step_id=s.step_id,
-                        highlight_rect=s.highlight_rect,
+                        step_id=target_step_id,
+                        highlight_rect=h_rect,
                         color_hex=self.config.highlight_color,
                         radius=self.config.highlight_radius,
                         style=self.config.highlight_style,
                         show_badge=self.config.show_step_badge_on_screenshot
                     )
-                    s.annotated_image_bytes = ScreenCapture.image_to_bytes(annotated)
-                    s.thumbnail_bytes = ScreenCapture.image_to_bytes(ScreenCapture.create_thumbnail(annotated))
+                    png_bytes = ScreenCapture.image_to_bytes(annotated)
+
+                    if gen != self._badge_refresh_generation:
+                        return
+
+                    step_obj.annotated_image_bytes = png_bytes
+
+                    # If this step is currently viewed in preview canvas, update it
+                    self.window.after(0, lambda sid=target_step_id: self._on_step_bg_refreshed(sid, gen))
                 except Exception:
                     pass
 
+        t = threading.Thread(target=_worker, daemon=True)
+        self._active_badge_thread = t
+        t.start()
+
+    def _on_step_bg_refreshed(self, step_id: int, gen: int) -> None:
+        """Safely refresh preview canvas on main thread if the viewed step was updated."""
+        if gen != self._badge_refresh_generation:
+            return
+        if 0 <= self.current_index < len(self.steps):
+            if self.steps[self.current_index].step_id == step_id:
+                self._render_step_preview(self.steps[self.current_index])
+
+    def _renumber_and_refresh_badges(self) -> None:
+        """Compatibility wrapper for legacy callers."""
+        self._renumber_steps(from_index=0)
+
     def _delete_current_step(self) -> None:
-        """Delete currently selected step, renumber remaining steps, and refresh badges."""
+        """Delete currently selected step instantly, renumber remaining steps, and refresh badges."""
         if not self.steps or self.current_index < 0 or self.current_index >= len(self.steps):
             return
 
         del_id = self.steps[self.current_index].step_id
         if messagebox.askyesno(t("confirm_delete_title"), t("confirm_delete_msg", id=del_id), parent=self.window):
-            self.steps.pop(self.current_index)
+            del_idx = self.current_index
+            self.steps.pop(del_idx)
 
-            # Smoothly renumber and burn new sequential badges
-            self._renumber_and_refresh_badges()
+            # Instant in-memory renumbering starting from the deleted index
+            self._renumber_steps(from_index=del_idx)
             self._on_filter_changed()
 
             if self.steps:
-                new_idx = min(self.current_index, len(self.steps) - 1)
+                new_idx = min(del_idx, len(self.steps) - 1)
                 self._select_step(new_idx)
             else:
                 self.current_index = -1
@@ -1483,20 +1560,20 @@ class StepEditorWindow:
                 self.canvas_dim_lbl.configure(text="")
 
     def _move_step_up(self) -> None:
-        """Move selected step up in sequence and refresh badge numbers."""
+        """Move selected step up in sequence instantly."""
         idx = self.current_index
         if idx > 0:
             self.steps[idx - 1], self.steps[idx] = self.steps[idx], self.steps[idx - 1]
-            self._renumber_and_refresh_badges()
+            self._renumber_steps(from_index=idx - 1)
             self._on_filter_changed()
             self._select_step(idx - 1)
 
     def _move_step_down(self) -> None:
-        """Move selected step down in sequence and refresh badge numbers."""
+        """Move selected step down in sequence instantly."""
         idx = self.current_index
         if 0 <= idx < len(self.steps) - 1:
             self.steps[idx + 1], self.steps[idx] = self.steps[idx], self.steps[idx + 1]
-            self._renumber_and_refresh_badges()
+            self._renumber_steps(from_index=idx)
             self._on_filter_changed()
             self._select_step(idx + 1)
 
@@ -1506,6 +1583,13 @@ class StepEditorWindow:
         if not self.steps:
             messagebox.showwarning(t("editor_title"), t("export_empty_warning"), parent=self.window)
             return
+
+        # Wait up to 1.5s for any background badge refresh thread if running
+        if self._active_badge_thread and self._active_badge_thread.is_alive():
+            try:
+                self._active_badge_thread.join(timeout=1.5)
+            except Exception:
+                pass
 
         # Ensure active inputs are applied
         if 0 <= self.current_index < len(self.steps):

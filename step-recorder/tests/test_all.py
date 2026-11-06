@@ -645,6 +645,52 @@ class TestStepRecorder(unittest.TestCase):
             self.assertIn("[**Bước 5**](#step-5)", md_content)
             self.assertIn("[🔀 Y/N]", md_content)
 
+    def test_fast_delete_and_async_badge_renumbering(self):
+        """Test that deleting steps is instant, renumbers in memory, and preserves custom privacy edits."""
+        import tkinter as tk
+        from step_recorder.ui.step_editor import StepEditorWindow
+
+        root = tk.Tk()
+        root.withdraw()
+
+        cfg = RecorderConfig(show_step_badge_on_screenshot=True)
+        img = Image.new("RGB", (200, 100), color=(80, 80, 80))
+        img_bytes = ScreenCapture.image_to_bytes(img)
+
+        steps = [
+            Step(step_id=1, timestamp=datetime.now(), action_type="left_click", description="Step 1", raw_image_bytes=img_bytes, annotated_image_bytes=img_bytes),
+            Step(step_id=2, timestamp=datetime.now(), action_type="left_click", description="Step 2 (to delete)", raw_image_bytes=img_bytes, annotated_image_bytes=img_bytes),
+            Step(step_id=3, timestamp=datetime.now(), action_type="left_click", description="Step 3 (custom edited)", raw_image_bytes=img_bytes, annotated_image_bytes=b"CUSTOM_EDITED_BLUR_BYTES"),
+            Step(step_id=4, timestamp=datetime.now(), action_type="left_click", description="Step 4", raw_image_bytes=img_bytes, annotated_image_bytes=img_bytes),
+        ]
+        # Mark step 3 as custom edited
+        steps[2]._is_custom_edited = True
+
+        metadata = SessionMetadata(session_id="test_fast_del", title="Fast Delete Test")
+        editor = StepEditorWindow(root, steps, metadata, cfg, ReportExporter(cfg))
+
+        # Delete step 2 directly
+        editor.steps.pop(1)
+        editor._renumber_steps(from_index=1)
+
+        # 1. Step IDs should be sequentially renumbered instantly (1, 2, 3)
+        self.assertEqual(len(editor.steps), 3)
+        self.assertEqual(editor.steps[0].step_id, 1)
+        self.assertEqual(editor.steps[1].step_id, 2)
+        self.assertEqual(editor.steps[2].step_id, 3)
+
+        # 2. Custom edited bytes must NOT be overwritten!
+        self.assertEqual(editor.steps[1].annotated_image_bytes, b"CUSTOM_EDITED_BLUR_BYTES")
+
+        # 3. Wait for background badge thread if active
+        if editor._active_badge_thread and editor._active_badge_thread.is_alive():
+            editor._active_badge_thread.join(timeout=2.0)
+
+        # Custom edits still preserved after thread finishes
+        self.assertEqual(editor.steps[1].annotated_image_bytes, b"CUSTOM_EDITED_BLUR_BYTES")
+
+        root.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()
