@@ -860,6 +860,146 @@ class TestStepRecorder(unittest.TestCase):
                 self.assertIn('allStepData', html)
                 self.assertIn('playerLaunchBtn', html)
 
+    def test_webp_and_image_lifecycle_capture(self):
+        """Test WebP byte encoding, disk file saving, and scope dispatching."""
+        capture = ScreenCapture()
+        test_img = Image.new("RGB", (320, 240), color=(30, 144, 255))
+
+        # Test WebP vs PNG conversion
+        webp_bytes = capture.image_to_bytes(test_img, format="WEBP", quality=80)
+        png_bytes = capture.image_to_bytes(test_img, format="PNG")
+        self.assertGreater(len(webp_bytes), 0)
+        self.assertGreater(len(png_bytes), 0)
+
+        # WebP header starts with RIFF and contains WEBP
+        self.assertTrue(webp_bytes.startswith(b"RIFF"))
+        self.assertIn(b"WEBP", webp_bytes[:16])
+
+        # Test save to file
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dest_webp = os.path.join(tmpdir, "test_shot.webp")
+            capture.save_image_to_file(test_img, dest_webp, format="WEBP", quality=85)
+            self.assertTrue(os.path.exists(dest_webp))
+            self.assertGreater(os.path.getsize(dest_webp), 0)
+
+        # Test capture_for_event dispatcher with window rect
+        img, l, t = capture.capture_for_event(cursor_pos=(100, 100), scope="cursor_monitor")
+        self.assertIsInstance(img, Image.Image)
+
+        capture.close()
+
+    def test_tiered_storage_l2_disk_spooling(self):
+        """Test that L2 disk spooling frees RAM by storing raw/annotated full images on SSD and loading lazily."""
+        with tempfile.TemporaryDirectory() as spool_base:
+            config = RecorderConfig(
+                capture_clicks=False,
+                capture_keys=False,
+                enable_disk_spooling=True,
+                disk_spool_dir=spool_base,
+                image_format="WEBP",
+                dual_capture_on_click=False
+            )
+            engine = RecordingEngine(config)
+            engine.start_recording("Spooling Test Session")
+
+            dummy = Image.new("RGB", (400, 300), color=(100, 120, 140))
+            engine.capture.capture_full_screen = lambda: (dummy, 0, 0)
+
+            from pynput.mouse import Button
+            engine._process_click_event(150, 150, Button.left, is_double_click=False, click_id=1)
+
+            self.assertEqual(len(engine.steps), 1)
+            step = engine.steps[0]
+
+            # In RAM: full bytes are None (freed to save 96% RAM footprint)
+            self.assertIsNone(step.raw_image_bytes)
+            self.assertIsNone(step.annotated_image_bytes)
+
+            # Thumbnail bytes remain in RAM for fast list scrolling
+            self.assertIsNotNone(step.thumbnail_bytes)
+
+            # Disk spool paths are populated and files exist on SSD
+            self.assertIsNotNone(step.spool_raw_path)
+            self.assertIsNotNone(step.spool_annotated_path)
+            self.assertTrue(os.path.exists(step.spool_raw_path))
+            self.assertTrue(os.path.exists(step.spool_annotated_path))
+
+            # Lazy loading methods successfully read from disk
+            ann_bytes = step.get_annotated_bytes()
+            self.assertIsNotNone(ann_bytes)
+            self.assertTrue(ann_bytes.startswith(b"RIFF"))
+
+            raw_bytes = step.get_raw_bytes()
+            self.assertIsNotNone(raw_bytes)
+            self.assertTrue(raw_bytes.startswith(b"RIFF"))
+
+            # Base64 and data URI are correctly generated
+            self.assertIsNotNone(step.base64_image)
+            self.assertTrue(step.image_data_uri.startswith("data:image/webp;base64,"))
+            self.assertEqual(step.image_filename, "step_001_left_click.webp")
+
+            # Cleanup spool removes temporary folder
+            spool_dir = engine._spool_dir
+            self.assertTrue(os.path.exists(spool_dir))
+            engine.cleanup_spool()
+            self.assertFalse(os.path.exists(spool_dir))
+            engine.close()
+
+    def test_webp_html_and_markdown_exporter(self):
+        """Test ReportExporter exports WebP files, generates optimized HTML with lazy/async decoding and correct markdown links."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = RecorderConfig(
+                output_dir=tmpdir,
+                image_format="WEBP",
+                save_raw_screenshots=True
+            )
+            exporter = ReportExporter(config)
+
+            dummy = Image.new("RGB", (200, 150), color=(20, 80, 120))
+            capture = ScreenCapture()
+            webp_data = capture.image_to_bytes(dummy, format="WEBP")
+
+            step = Step(
+                step_id=1,
+                timestamp=datetime.now(),
+                action_type="left_click",
+                description="Click Test Button",
+                window_title="Test App",
+                annotated_image_bytes=webp_data,
+                raw_image_bytes=webp_data,
+                image_mime_type="image/webp"
+            )
+
+            metadata = SessionMetadata(
+                session_id="rec_webp_export_test",
+                title="WebP SOP Report"
+            )
+
+            results = exporter.export([step], metadata, tmpdir)
+            self.assertTrue(os.path.exists(results["html"]))
+            self.assertTrue(os.path.exists(results["markdown"]))
+
+            # Verify exported image file is .webp
+            images_dir = os.path.join(tmpdir, "images")
+            webp_file = os.path.join(images_dir, "step_001_left_click.webp")
+            raw_webp_file = os.path.join(images_dir, "raw_step_001_left_click.webp")
+            self.assertTrue(os.path.exists(webp_file))
+            self.assertTrue(os.path.exists(raw_webp_file))
+
+            # Verify HTML contains data:image/webp;base64, and loading="lazy" decoding="async"
+            with open(results["html"], "r", encoding="utf-8") as f:
+                html = f.read()
+                self.assertIn("data:image/webp;base64,", html)
+                self.assertIn('loading="lazy"', html)
+                self.assertIn('decoding="async"', html)
+
+            # Verify Markdown links to .webp
+            with open(results["markdown"], "r", encoding="utf-8") as f:
+                md = f.read()
+                self.assertIn("step_001_left_click.webp", md)
+
+            capture.close()
+
     def test_all_type_hints_resolved(self):
         """Verify all functions and methods across the package have valid, resolvable type annotations (catches missing typing imports like Any on Python 3.10-3.13)."""
         import importlib

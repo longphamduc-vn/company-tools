@@ -463,6 +463,71 @@ class SettingsDialog:
         )
         delay_spin.grid(row=1, column=1, sticky="w", pady=4)
 
+        # --- SECTION: Image Lifecycle & Optimization ---
+        sec_img = self._create_card(self.scroll_content, t("sec_image_lifecycle"))
+        img_grid = tk.Frame(sec_img, bg="#1e293b")
+        img_grid.pack(fill=tk.X, pady=4)
+        img_grid.columnconfigure(1, weight=1)
+
+        # Capture Scope
+        tk.Label(
+            img_grid, text=t("lbl_capture_scope"), font=("Segoe UI", 9),
+            bg="#1e293b", fg="#cbd5e1"
+        ).grid(row=0, column=0, sticky="w", pady=4, padx=(0, 10))
+
+        scope_map = {
+            "cursor_monitor": t("scope_cursor_monitor"),
+            "active_window": t("scope_active_window"),
+            "all_monitors": t("scope_all_monitors")
+        }
+        self.scope_var = tk.StringVar(value=getattr(self.config, "capture_scope", "cursor_monitor"))
+        self.scope_display_var = tk.StringVar(value=scope_map.get(self.scope_var.get(), t("scope_cursor_monitor")))
+
+        def _on_scope_selected(event=None):
+            disp = self.scope_display_var.get()
+            for k, v in scope_map.items():
+                if v == disp:
+                    self.scope_var.set(k)
+                    break
+
+        scope_cb = ttk.Combobox(
+            img_grid,
+            textvariable=self.scope_display_var,
+            values=list(scope_map.values()),
+            state="readonly",
+            width=36
+        )
+        scope_cb.bind("<<ComboboxSelected>>", _on_scope_selected)
+        scope_cb.grid(row=0, column=1, sticky="w", pady=4)
+
+        # Image Format
+        tk.Label(
+            img_grid, text=t("lbl_image_format"), font=("Segoe UI", 9),
+            bg="#1e293b", fg="#cbd5e1"
+        ).grid(row=1, column=0, sticky="w", pady=4, padx=(0, 10))
+
+        self.format_var = tk.StringVar(value=getattr(self.config, "image_format", "WEBP").upper())
+        fmt_frame = tk.Frame(img_grid, bg="#1e293b")
+        fmt_frame.grid(row=1, column=1, sticky="w", pady=4)
+
+        rb_webp = tk.Radiobutton(
+            fmt_frame, text=t("format_webp"), value="WEBP",
+            variable=self.format_var, bg="#1e293b", fg="#38bdf8",
+            selectcolor="#0f172a", font=("Segoe UI", 9, "bold")
+        )
+        rb_webp.pack(anchor="w")
+
+        rb_png = tk.Radiobutton(
+            fmt_frame, text=t("format_png"), value="PNG",
+            variable=self.format_var, bg="#1e293b", fg="#cbd5e1",
+            selectcolor="#0f172a", font=("Segoe UI", 9)
+        )
+        rb_png.pack(anchor="w", pady=(2, 0))
+
+        # L2 Disk Spooling
+        self.spool_var = tk.BooleanVar(value=getattr(self.config, "enable_disk_spooling", True))
+        self._create_checkbox(sec_img, t("opt_disk_spooling"), self.spool_var)
+
         # --- SECTION 4: Capture & Export Options ---
         sec4 = self._create_card(self.scroll_content, t("sec_options"))
 
@@ -629,6 +694,9 @@ class SettingsDialog:
                 pass
 
             # 4. Checkbox preferences
+            self.config.capture_scope = self.scope_var.get()
+            self.config.image_format = self.format_var.get()
+            self.config.enable_disk_spooling = bool(self.spool_var.get())
             self.config.dual_capture_on_click = bool(self.dual_capture_var.get())
             self.config.dual_capture_smart_detect = bool(self.smart_detect_var.get())
             self.config.capture_keys = bool(self.key_var.get())

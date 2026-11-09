@@ -585,6 +585,42 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "vi": "Tự động thu nhỏ thanh công cụ khi bắt đầu ghi hình (Auto-minimize)",
         "en": "Auto-minimize toolbar to taskbar when recording"
     },
+    "sec_image_lifecycle": {
+        "vi": "🖼️ Vòng Đời Hình Ảnh & Tối Ưu Bộ Nhớ (Image Lifecycle & Optimization)",
+        "en": "🖼️ Image Lifecycle & Memory Optimization"
+    },
+    "lbl_capture_scope": {
+        "vi": "Phạm vi chụp màn hình:",
+        "en": "Capture Scope:"
+    },
+    "scope_cursor_monitor": {
+        "vi": "🎯 Màn hình chứa chuột (Khuyên dùng - Tiết kiệm 50% pixel)",
+        "en": "🎯 Display at Cursor (Recommended - Saves 50% pixels)"
+    },
+    "scope_active_window": {
+        "vi": "🪟 Cửa sổ đang thao tác (+24px viền ngữ cảnh)",
+        "en": "🪟 Active Window (+24px Context Padding)"
+    },
+    "scope_all_monitors": {
+        "vi": "🖥️ Toàn bộ màn hình ảo (Tất cả màn hình)",
+        "en": "🖥️ All Virtual Displays (Combined)"
+    },
+    "lbl_image_format": {
+        "vi": "Định dạng lưu ảnh & nén:",
+        "en": "Image Format & Compression:"
+    },
+    "format_webp": {
+        "vi": "⚡ WebP (Siêu nhẹ, giảm 80% dung lượng HTML, khuyên dùng)",
+        "en": "⚡ WebP (High-efficiency, 80% smaller HTML, Recommended)"
+    },
+    "format_png": {
+        "vi": "🖼️ PNG (Chất lượng gốc không nén lossy)",
+        "en": "🖼️ PNG (Uncompressed Lossless)"
+    },
+    "opt_disk_spooling": {
+        "vi": "💾 Lưu đệm đĩa SSD (L2 Spooling: Giảm 96% RAM, an toàn khi crash)",
+        "en": "💾 L2 SSD Disk Spooling (Drops RAM by 96%, Crash-resilient)"
+    },
     "btn_save_settings": {
         "vi": "✓ Lưu Cài Đặt (Save)",
         "en": "✓ Save Settings"

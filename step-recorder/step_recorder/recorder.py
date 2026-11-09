@@ -3,12 +3,16 @@ Core recording engine: coordinates input listeners (mouse/keyboard),
 screen capture, annotations, active window tracking, and step queues.
 """
 
+import os
 import sys
 import time
+import shutil
+import tempfile
 import threading
 import platform
 from datetime import datetime
 from typing import Optional, List, Callable, Tuple, Set, Any
+from PIL import Image
 
 from pynput import mouse, keyboard
 
@@ -71,6 +75,62 @@ class RecordingEngine:
         self._typing_win_details = None
         self._typing_cursor_pos: Optional[Tuple[int, int]] = None
 
+        # Tiered Storage & L2 Disk Spooling
+        self._spool_dir: Optional[str] = None
+
+    def _spool_step_images(
+        self,
+        step_id: int,
+        raw_img: Image.Image,
+        annotated_img: Image.Image,
+        thumb_img: Image.Image
+    ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[bytes], Optional[bytes], Optional[bytes], str]:
+        """
+        Handle Tiered Storage for step screenshots:
+        - If disk spooling enabled: save raw & annotated to SSD temp files; step keeps only thumbnail bytes in RAM.
+        - If disk spooling disabled: keep all bytes in RAM (legacy mode).
+        Returns (spool_raw_path, spool_ann_path, spool_thumb_path, raw_bytes, ann_bytes, thumb_bytes, mime_type).
+        """
+        fmt = getattr(self.config, "image_format", "WEBP").upper()
+        ext = "webp" if fmt == "WEBP" else "png"
+        mime_type = "image/webp" if fmt == "WEBP" else "image/png"
+        quality = getattr(self.config, "image_quality", 85)
+
+        thumb_bytes = self.capture.image_to_bytes(thumb_img, format=fmt, quality=quality)
+
+        if self._spool_dir and getattr(self.config, "enable_disk_spooling", True):
+            raw_path = os.path.join(self._spool_dir, f"raw_step_{step_id:04d}.{ext}")
+            ann_path = os.path.join(self._spool_dir, f"annotated_step_{step_id:04d}.{ext}")
+
+            self.capture.save_image_to_file(raw_img, raw_path, format=fmt, quality=quality)
+            self.capture.save_image_to_file(annotated_img, ann_path, format=fmt, quality=quality)
+
+            return (raw_path, ann_path, None, None, None, thumb_bytes, mime_type)
+        else:
+            raw_bytes = self.capture.image_to_bytes(raw_img, format=fmt, quality=quality)
+            ann_bytes = self.capture.image_to_bytes(annotated_img, format=fmt, quality=quality)
+            return (None, None, None, raw_bytes, ann_bytes, thumb_bytes, mime_type)
+
+    def cleanup_spool(self, force: bool = False) -> None:
+        """Clean up temporary disk spool directory."""
+        if self._spool_dir and os.path.exists(self._spool_dir):
+            try:
+                shutil.rmtree(self._spool_dir, ignore_errors=True)
+                self._spool_dir = None
+            except Exception as e:
+                safe_print(f"[StepRecorder] Warning cleaning spool dir: {e}")
+
+    def close(self) -> None:
+        """Release capture driver and clean up temporary spool resources."""
+        self._stop_listeners()
+        self.flush_text_buffer()
+        if hasattr(self, "capture") and self.capture:
+            try:
+                self.capture.close()
+            except Exception:
+                pass
+        self.cleanup_spool()
+
     def set_ignore_bounds(self, bounds: List[Tuple[int, int, int, int]]) -> None:
         """Set window regions where clicks should NOT trigger recordings."""
         with self._lock:
@@ -98,6 +158,13 @@ class RecordingEngine:
         self._click_counter = 0
         
         session_id = datetime.now().strftime("rec_%Y%m%d_%H%M%S")
+        if getattr(self.config, "enable_disk_spooling", True):
+            base_dir = self.config.disk_spool_dir or tempfile.gettempdir()
+            self._spool_dir = os.path.join(base_dir, f"steprec_spool_{session_id}_{os.getpid()}")
+            os.makedirs(self._spool_dir, exist_ok=True)
+        else:
+            self._spool_dir = None
+
         self.metadata = SessionMetadata(
             session_id=session_id,
             title=title,
@@ -156,8 +223,20 @@ class RecordingEngine:
             return
 
         try:
-            raw_img, mon_left, mon_top = self.capture.capture_full_screen()
-            win_details = get_active_window_info()
+            # Cursor pos if available
+            try:
+                m_ctrl = mouse.Controller()
+                cur_x, cur_y = int(m_ctrl.position[0]), int(m_ctrl.position[1])
+            except Exception:
+                cur_x, cur_y = None, None
+
+            win_details = get_active_window_info(cursor_pos=(cur_x, cur_y) if (cur_x is not None and cur_y is not None) else None)
+            raw_img, mon_left, mon_top = self.capture.capture_for_event(
+                cursor_pos=(cur_x, cur_y) if (cur_x is not None and cur_y is not None) else None,
+                window_rect=win_details.window_rect,
+                scope=getattr(self.config, "capture_scope", "cursor_monitor"),
+                padding=getattr(self.config, "active_window_padding", 24)
+            )
             if win_details.process_name and win_details.process_name != "Unknown":
                 self._apps_used.add(win_details.process_name)
 
@@ -178,12 +257,9 @@ class RecordingEngine:
             
             thumb_img = self.capture.create_thumbnail(annotated_img)
             
-            # Cursor pos if available
-            try:
-                m_ctrl = mouse.Controller()
-                cur_x, cur_y = int(m_ctrl.position[0]), int(m_ctrl.position[1])
-            except Exception:
-                cur_x, cur_y = None, None
+            spool_raw, spool_ann, spool_thumb, raw_b, ann_b, thumb_b, mime = self._spool_step_images(
+                step_id, raw_img, annotated_img, thumb_img
+            )
 
             step = Step(
                 step_id=step_id,
@@ -204,9 +280,13 @@ class RecordingEngine:
                 is_section_header=is_section_header,
                 section_title=section_title,
                 section_description=section_description,
-                raw_image_bytes=self.capture.image_to_bytes(raw_img),
-                annotated_image_bytes=self.capture.image_to_bytes(annotated_img),
-                thumbnail_bytes=self.capture.image_to_bytes(thumb_img)
+                spool_raw_path=spool_raw,
+                spool_annotated_path=spool_ann,
+                spool_thumb_path=spool_thumb,
+                raw_image_bytes=raw_b,
+                annotated_image_bytes=ann_b,
+                thumbnail_bytes=thumb_b,
+                image_mime_type=mime
             )
 
             with self._lock:
@@ -276,7 +356,12 @@ class RecordingEngine:
                     return
                 step_id = len(self.steps) + 1
 
-            raw_img, mon_left, mon_top = self.capture.capture_full_screen()
+            raw_img, mon_left, mon_top = self.capture.capture_for_event(
+                cursor_pos=cursor_pos,
+                window_rect=win_details.window_rect,
+                scope=getattr(self.config, "capture_scope", "cursor_monitor"),
+                padding=getattr(self.config, "active_window_padding", 24)
+            )
 
             control_label = win_details.ui_control
             key_suffix = f" ({trigger_key.upper()})" if trigger_key in ("enter", "tab") else ""
@@ -304,6 +389,10 @@ class RecordingEngine:
             )
             thumb_img = self.capture.create_thumbnail(annotated_img)
 
+            spool_raw, spool_ann, spool_thumb, raw_b, ann_b, thumb_b, mime = self._spool_step_images(
+                step_id, raw_img, annotated_img, thumb_img
+            )
+
             step = Step(
                 step_id=step_id,
                 timestamp=datetime.now(),
@@ -320,9 +409,13 @@ class RecordingEngine:
                 cursor_y=cursor_pos[1] if cursor_pos else None,
                 highlight_rect=adj_rect,
                 typed_text=display_text,
-                raw_image_bytes=self.capture.image_to_bytes(raw_img),
-                annotated_image_bytes=self.capture.image_to_bytes(annotated_img),
-                thumbnail_bytes=self.capture.image_to_bytes(thumb_img)
+                spool_raw_path=spool_raw,
+                spool_annotated_path=spool_ann,
+                spool_thumb_path=spool_thumb,
+                raw_image_bytes=raw_b,
+                annotated_image_bytes=ann_b,
+                thumbnail_bytes=thumb_b,
+                image_mime_type=mime
             )
 
             with self._lock:
@@ -423,13 +516,18 @@ class RecordingEngine:
                 if self.config.screenshot_delay_ms > 0:
                     time.sleep(self.config.screenshot_delay_ms / 1000.0)
 
-            # 2. First capture: Immediate screen at the moment of click
-            raw_img, mon_left, mon_top = self.capture.capture_full_screen()
-            
             # Rich window and control inspection
             win_details = get_active_window_info(cursor_pos=(x, y))
             window_title = win_details.title
             process_name = win_details.process_name
+
+            # 2. First capture: Immediate screen at the moment of click
+            raw_img, mon_left, mon_top = self.capture.capture_for_event(
+                cursor_pos=(x, y),
+                window_rect=win_details.window_rect,
+                scope=getattr(self.config, "capture_scope", "cursor_monitor"),
+                padding=getattr(self.config, "active_window_padding", 24)
+            )
 
             if process_name and process_name != "Unknown":
                 self._apps_used.add(process_name)
@@ -475,6 +573,10 @@ class RecordingEngine:
             )
             thumb_img = self.capture.create_thumbnail(annotated_img)
 
+            spool_raw, spool_ann, spool_thumb, raw_b, ann_b, thumb_b, mime = self._spool_step_images(
+                step_id, raw_img, annotated_img, thumb_img
+            )
+
             step = Step(
                 step_id=step_id,
                 timestamp=datetime.now(),
@@ -489,9 +591,13 @@ class RecordingEngine:
                 relative_cursor=win_details.relative_cursor,
                 cursor_x=x,
                 cursor_y=y,
-                raw_image_bytes=self.capture.image_to_bytes(raw_img),
-                annotated_image_bytes=self.capture.image_to_bytes(annotated_img),
-                thumbnail_bytes=self.capture.image_to_bytes(thumb_img)
+                spool_raw_path=spool_raw,
+                spool_annotated_path=spool_ann,
+                spool_thumb_path=spool_thumb,
+                raw_image_bytes=raw_b,
+                annotated_image_bytes=ann_b,
+                thumbnail_bytes=thumb_b,
+                image_mime_type=mime
             )
 
             with self._lock:
@@ -522,10 +628,16 @@ class RecordingEngine:
                         return
 
                 # Capture 2: Result screen after delay
-                raw_img2, mon_left2, mon_top2 = self.capture.capture_full_screen()
-                win_details2 = get_active_window_info()
+                win_details2 = get_active_window_info(cursor_pos=(x, y))
                 win2_title = win_details2.title
                 proc2_name = win_details2.process_name
+
+                raw_img2, mon_left2, mon_top2 = self.capture.capture_for_event(
+                    cursor_pos=(x, y),
+                    window_rect=win_details2.window_rect,
+                    scope=getattr(self.config, "capture_scope", "cursor_monitor"),
+                    padding=getattr(self.config, "active_window_padding", 24)
+                )
 
                 # Smart Auto-Detection: Check if UI actually changed
                 if getattr(self.config, "dual_capture_smart_detect", True):
@@ -564,6 +676,10 @@ class RecordingEngine:
                 )
                 thumb_img2 = self.capture.create_thumbnail(annotated_img2)
 
+                spool_raw2, spool_ann2, spool_thumb2, raw_b2, ann_b2, thumb_b2, mime2 = self._spool_step_images(
+                    step_id2, raw_img2, annotated_img2, thumb_img2
+                )
+
                 step2 = Step(
                     step_id=step_id2,
                     timestamp=datetime.now(),
@@ -577,9 +693,13 @@ class RecordingEngine:
                     relative_cursor=win_details2.relative_cursor,
                     cursor_x=None,
                     cursor_y=None,
-                    raw_image_bytes=self.capture.image_to_bytes(raw_img2),
-                    annotated_image_bytes=self.capture.image_to_bytes(annotated_img2),
-                    thumbnail_bytes=self.capture.image_to_bytes(thumb_img2)
+                    spool_raw_path=spool_raw2,
+                    spool_annotated_path=spool_ann2,
+                    spool_thumb_path=spool_thumb2,
+                    raw_image_bytes=raw_b2,
+                    annotated_image_bytes=ann_b2,
+                    thumbnail_bytes=thumb_b2,
+                    image_mime_type=mime2
                 )
 
                 with self._lock:
@@ -686,10 +806,15 @@ class RecordingEngine:
             if self.config.screenshot_delay_ms > 0:
                 time.sleep(self.config.screenshot_delay_ms / 1000.0)
 
-            raw_img, mon_left, mon_top = self.capture.capture_full_screen()
-            
             cursor_tuple = (cur_x, cur_y) if (cur_x is not None and cur_y is not None) else None
             win_details = get_active_window_info(cursor_pos=cursor_tuple)
+
+            raw_img, mon_left, mon_top = self.capture.capture_for_event(
+                cursor_pos=cursor_tuple,
+                window_rect=win_details.window_rect,
+                scope=getattr(self.config, "capture_scope", "cursor_monitor"),
+                padding=getattr(self.config, "active_window_padding", 24)
+            )
             
             if win_details.process_name and win_details.process_name != "Unknown":
                 self._apps_used.add(win_details.process_name)
@@ -707,6 +832,10 @@ class RecordingEngine:
             )
             thumb_img = self.capture.create_thumbnail(annotated_img)
 
+            spool_raw, spool_ann, spool_thumb, raw_b, ann_b, thumb_b, mime = self._spool_step_images(
+                step_id, raw_img, annotated_img, thumb_img
+            )
+
             step = Step(
                 step_id=step_id,
                 timestamp=datetime.now(),
@@ -721,9 +850,13 @@ class RecordingEngine:
                 relative_cursor=win_details.relative_cursor,
                 cursor_x=cur_x,
                 cursor_y=cur_y,
-                raw_image_bytes=self.capture.image_to_bytes(raw_img),
-                annotated_image_bytes=self.capture.image_to_bytes(annotated_img),
-                thumbnail_bytes=self.capture.image_to_bytes(thumb_img)
+                spool_raw_path=spool_raw,
+                spool_annotated_path=spool_ann,
+                spool_thumb_path=spool_thumb,
+                raw_image_bytes=raw_b,
+                annotated_image_bytes=ann_b,
+                thumbnail_bytes=thumb_b,
+                image_mime_type=mime
             )
 
             with self._lock:

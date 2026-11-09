@@ -1620,12 +1620,14 @@
             </div>
             {% endif %}
 
-            {% if step.base64_image or step.annotated_image_path %}
+            {% if step.base64_image or step.annotated_image_path or step.image_data_uri %}
             <div class="screenshot-wrapper" onclick="openLightbox({{ loop.index0 }})">
-              {% if step.base64_image %}
-              <img src="data:image/png;base64,{{ step.base64_image }}" alt="Step {{ step.step_id }} screenshot" loading="lazy">
+              {% if step.image_data_uri %}
+              <img src="{{ step.image_data_uri }}" alt="Step {{ step.step_id }} screenshot" loading="lazy" decoding="async">
+              {% elif step.base64_image %}
+              <img src="data:{{ step.image_mime_type or 'image/png' }};base64,{{ step.base64_image }}" alt="Step {{ step.step_id }} screenshot" loading="lazy" decoding="async">
               {% else %}
-              <img src="{{ step.annotated_image_path }}" alt="Step {{ step.step_id }} screenshot" loading="lazy">
+              <img src="{{ step.annotated_image_path }}" alt="Step {{ step.step_id }} screenshot" loading="lazy" decoding="async">
               {% endif %}
               <div class="zoom-hint" data-i18n="zoom_hint">🔍 Click to zoom</div>
             </div>
@@ -1958,8 +1960,10 @@
       {
         id: {{ step.step_id }},
         desc: {{ step.description|tojson }},
-        {% if step.base64_image %}
-        src: "data:image/png;base64,{{ step.base64_image }}"
+        {% if step.image_data_uri %}
+        src: "{{ step.image_data_uri }}"
+        {% elif step.base64_image %}
+        src: "data:{{ step.image_mime_type or 'image/png' }};base64,{{ step.base64_image }}"
         {% elif step.annotated_image_path %}
         src: "{{ step.annotated_image_path }}"
         {% else %}
@@ -2025,8 +2029,10 @@
         yes_next: {{ step.yes_next_step if step.yes_next_step is not none else 'null' }},
         no_text: {{ (step.no_branch_text or '')|tojson }},
         no_next: {{ step.no_next_step if step.no_next_step is not none else 'null' }},
-        {% if step.base64_image %}
-        src: "data:image/png;base64,{{ step.base64_image }}"
+        {% if step.image_data_uri %}
+        src: "{{ step.image_data_uri }}"
+        {% elif step.base64_image %}
+        src: "data:{{ step.image_mime_type or 'image/png' }};base64,{{ step.base64_image }}"
         {% elif step.annotated_image_path %}
         src: "{{ step.annotated_image_path }}"
         {% else %}

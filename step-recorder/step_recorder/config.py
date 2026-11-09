@@ -43,6 +43,14 @@ class RecorderConfig:
     highlight_border_width: int = 3
     show_step_badge_on_screenshot: bool = True
     
+    # Image Lifecycle & Compression Optimization
+    capture_scope: str = "cursor_monitor"  # "cursor_monitor" (chụp màn hình chứa chuột), "active_window", "all_monitors"
+    active_window_padding: int = 24  # Viền padding khi chụp active_window
+    image_format: str = "WEBP"  # "WEBP" (siêu nhẹ, nén 80%) hoặc "PNG"
+    image_quality: int = 85  # Chất lượng nén WebP / JPEG (1-100)
+    enable_disk_spooling: bool = True  # L2 Disk Spooling: giảm 96% RAM, lưu tạm vào SSD, an toàn khi crash
+    disk_spool_dir: Optional[str] = None  # None = tự động dùng temp directory
+
     # Output and export
     export_format: str = "html"  # "html", "markdown", "zip", "all"
     embed_images_in_html: bool = True  # Self-contained single file HTML

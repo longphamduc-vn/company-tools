@@ -7,8 +7,9 @@ settings:
 
 stores:
   active_archive:
-    name: "Archive 2024"
-    file_path: "C:\\Outlook_Data\\Archive_2024.pst"
+    name: "Archive 2025"
+    account_owner: "longp@company.com"
+    file_path: "C:\\Outlook_Data\\longp_Archive_2025.pst"
 
 groups:
   executive:
@@ -19,7 +20,7 @@ groups:
       - "coo@company.com"
 
   engineering:
-    name: "Engineering Team"
+    name: "Engineering SCADA Team"
     domains:
       - "@techpartner.com"
     emails:
@@ -48,10 +49,10 @@ rules:
     domains: []
     subject_keywords: []
     target_store: "active_archive"
-    target_folder: "Executive_Board"
+    target_folder: "Management\\Executive_Board\\Directors"
 
   - id: "rule_engineering"
-    name: "Engineering"
+    name: "SCADA PLC Maintenance"
     enabled: true
     groups:
       - "engineering"
@@ -59,10 +60,10 @@ rules:
     domains: []
     subject_keywords: []
     target_store: "active_archive"
-    target_folder: "Engineering"
+    target_folder: "Engineering_Team\\SCADA_Part\\PLC_Unit"
 
   - id: "rule_suppliers"
-    name: "Suppliers"
+    name: "Omron Equipment"
     enabled: true
     groups:
       - "suppliers"
@@ -70,7 +71,7 @@ rules:
     domains: []
     subject_keywords: []
     target_store: "active_archive"
-    target_folder: "Suppliers"
+    target_folder: "Purchasing_Team\\Vendor_Part\\Omron_Unit"
 
   - id: "rule_unclassified"
     name: "[Unclassified]"

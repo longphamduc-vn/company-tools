@@ -43,15 +43,29 @@ class ReportExporter:
 
         results = {}
 
-        # 1. Save individual PNG image files if requested or if images are in memory
+        # 1. Save individual image files (WebP or PNG based on config)
+        fmt = getattr(self.config, "image_format", "WEBP").upper()
+        ext = "webp" if fmt == "WEBP" else "png"
         for step in steps:
-            img_filename = f"step_{step.step_id:03d}_{step.action_type}.png"
+            img_filename = f"step_{step.step_id:03d}_{step.action_type}.{ext}"
             dest_img_path = images_dir / img_filename
 
-            if step.annotated_image_bytes and not step.annotated_image_path:
-                with open(dest_img_path, "wb") as f:
-                    f.write(step.annotated_image_bytes)
-                step.annotated_image_path = str(dest_img_path)
+            if not step.annotated_image_path or not os.path.exists(step.annotated_image_path):
+                ann_data = step.get_annotated_bytes()
+                if ann_data:
+                    with open(dest_img_path, "wb") as f:
+                        f.write(ann_data)
+                    step.annotated_image_path = str(dest_img_path)
+
+            if getattr(self.config, "save_raw_screenshots", True):
+                raw_filename = f"raw_step_{step.step_id:03d}_{step.action_type}.{ext}"
+                raw_dest_path = images_dir / raw_filename
+                if not step.raw_image_path or not os.path.exists(step.raw_image_path):
+                    raw_data = step.get_raw_bytes()
+                    if raw_data:
+                        with open(raw_dest_path, "wb") as f:
+                            f.write(raw_data)
+                        step.raw_image_path = str(raw_dest_path)
 
         # 2. Render & Save HTML Report
         is_vi = getattr(self.config, "language", "vi") == "vi"

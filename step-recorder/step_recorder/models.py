@@ -52,10 +52,76 @@ class Step:
     annotated_image_bytes: Optional[bytes] = None
     thumbnail_bytes: Optional[bytes] = None
 
+    # L2 Disk Spooling paths (Tiered storage)
+    spool_raw_path: Optional[str] = None
+    spool_annotated_path: Optional[str] = None
+    spool_thumb_path: Optional[str] = None
+    image_mime_type: str = "image/png"
+
+    def get_annotated_bytes(self) -> Optional[bytes]:
+        """Get annotated image bytes, reading lazily from disk spool if evicted from RAM."""
+        if self.annotated_image_bytes is not None:
+            return self.annotated_image_bytes
+        if self.spool_annotated_path and os.path.exists(self.spool_annotated_path):
+            try:
+                with open(self.spool_annotated_path, "rb") as f:
+                    return f.read()
+            except Exception:
+                pass
+        if self.annotated_image_path and os.path.exists(self.annotated_image_path):
+            try:
+                with open(self.annotated_image_path, "rb") as f:
+                    return f.read()
+            except Exception:
+                pass
+        return None
+
+    def get_raw_bytes(self) -> Optional[bytes]:
+        """Get raw unannotated image bytes, reading lazily from disk spool if evicted from RAM."""
+        if self.raw_image_bytes is not None:
+            return self.raw_image_bytes
+        if self.spool_raw_path and os.path.exists(self.spool_raw_path):
+            try:
+                with open(self.spool_raw_path, "rb") as f:
+                    return f.read()
+            except Exception:
+                pass
+        if self.raw_image_path and os.path.exists(self.raw_image_path):
+            try:
+                with open(self.raw_image_path, "rb") as f:
+                    return f.read()
+            except Exception:
+                pass
+        return None
+
+    def get_thumbnail_bytes(self) -> Optional[bytes]:
+        """Get thumbnail bytes."""
+        if self.thumbnail_bytes is not None:
+            return self.thumbnail_bytes
+        if self.spool_thumb_path and os.path.exists(self.spool_thumb_path):
+            try:
+                with open(self.spool_thumb_path, "rb") as f:
+                    return f.read()
+            except Exception:
+                pass
+        if self.thumbnail_path and os.path.exists(self.thumbnail_path):
+            try:
+                with open(self.thumbnail_path, "rb") as f:
+                    return f.read()
+            except Exception:
+                pass
+        return None
+
+    def evict_raw_from_ram(self) -> None:
+        """Free raw and annotated full-size bytes from RAM to keep footprint minimal."""
+        self.raw_image_bytes = None
+        self.annotated_image_bytes = None
+
     @property
     def image_filename(self) -> str:
         """Standardized image filename for this step."""
-        return f"step_{self.step_id:03d}_{self.action_type}.png"
+        ext = "webp" if ("webp" in self.image_mime_type or (self.spool_annotated_path and self.spool_annotated_path.endswith(".webp"))) else "png"
+        return f"step_{self.step_id:03d}_{self.action_type}.{ext}"
 
     @property
     def formatted_time(self) -> str:
@@ -98,22 +164,36 @@ class Step:
     @property
     def base64_image(self) -> Optional[str]:
         """Return base64 string for embedding annotated image directly into HTML."""
-        if self.annotated_image_bytes:
-            return base64.b64encode(self.annotated_image_bytes).decode("ascii")
-        if self.annotated_image_path and os.path.exists(self.annotated_image_path):
-            with open(self.annotated_image_path, "rb") as f:
-                return base64.b64encode(f.read()).decode("ascii")
+        data = self.get_annotated_bytes()
+        if data:
+            return base64.b64encode(data).decode("ascii")
         return None
 
     @property
     def base64_thumbnail(self) -> Optional[str]:
         """Return base64 string for thumbnail."""
-        if self.thumbnail_bytes:
-            return base64.b64encode(self.thumbnail_bytes).decode("ascii")
-        if self.thumbnail_path and os.path.exists(self.thumbnail_path):
-            with open(self.thumbnail_path, "rb") as f:
-                return base64.b64encode(f.read()).decode("ascii")
+        data = self.get_thumbnail_bytes()
+        if data:
+            return base64.b64encode(data).decode("ascii")
         return self.base64_image
+
+    @property
+    def image_data_uri(self) -> Optional[str]:
+        """Return full data URI e.g. data:image/webp;base64,... or data:image/png;base64,..."""
+        b64 = self.base64_image
+        if not b64:
+            return None
+        mime = self.image_mime_type or "image/png"
+        return f"data:{mime};base64,{b64}"
+
+    @property
+    def thumbnail_data_uri(self) -> Optional[str]:
+        """Return thumbnail data URI."""
+        b64 = self.base64_thumbnail
+        if not b64:
+            return None
+        mime = self.image_mime_type or "image/png"
+        return f"data:{mime};base64,{b64}"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert step to dictionary for serialization."""
@@ -145,6 +225,9 @@ class Step:
             "no_next_step": self.no_next_step,
             "raw_image_path": self.raw_image_path,
             "annotated_image_path": self.annotated_image_path,
+            "spool_raw_path": self.spool_raw_path,
+            "spool_annotated_path": self.spool_annotated_path,
+            "image_mime_type": self.image_mime_type,
         }
 
     @classmethod
@@ -190,6 +273,9 @@ class Step:
             no_next_step=data.get("no_next_step"),
             raw_image_path=data.get("raw_image_path"),
             annotated_image_path=data.get("annotated_image_path"),
+            spool_raw_path=data.get("spool_raw_path"),
+            spool_annotated_path=data.get("spool_annotated_path"),
+            image_mime_type=data.get("image_mime_type", "image/png"),
         )
 
 

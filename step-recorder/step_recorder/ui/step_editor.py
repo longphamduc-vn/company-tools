@@ -117,6 +117,9 @@ class StepEditorWindow:
         self._badge_refresh_generation: int = 0
         self._active_badge_thread: Optional[threading.Thread] = None
 
+        # Scaled PhotoImage LRU Cache for buttery smooth 60fps preview
+        self._preview_cache: Dict[Tuple[int, int, int], Any] = {}
+
         self.window = tk.Toplevel(parent)
         self.window.title(t("editor_title"))
         apply_window_icon(self.window)
@@ -1217,16 +1220,29 @@ class StepEditorWindow:
         self._on_list_select()
 
     def _render_step_preview(self, step: Step) -> None:
-        """Render screenshot of step inside the preview canvas."""
+        """Render screenshot of step inside the preview canvas with LRU scaling cache."""
         self.preview_canvas.delete("all")
 
-        img_bytes = step.annotated_image_bytes
-        if not img_bytes and step.annotated_image_path and os.path.exists(step.annotated_image_path):
-            with open(step.annotated_image_path, "rb") as f:
-                img_bytes = f.read()
+        # Scale to fit canvas cleanly
+        self.window.update_idletasks()
+        cw = max(240, self.preview_canvas.winfo_width())
+        ch = max(180, self.preview_canvas.winfo_height())
 
-        if not img_bytes and step.raw_image_bytes:
-            img_bytes = step.raw_image_bytes
+        cache_key = (step.step_id, cw, ch)
+        if hasattr(self, "_preview_cache") and cache_key in self._preview_cache:
+            photo, (disp_w, disp_h), (orig_w, orig_h), sx, sy = self._preview_cache[cache_key]
+            self.preview_photo = photo
+            self.raw_img_size = (orig_w, orig_h)
+            self.preview_scale_x = sx
+            self.preview_scale_y = sy
+            offset_x = (cw - disp_w) // 2
+            offset_y = (ch - disp_h) // 2
+            self.canvas_img_offset = (offset_x, offset_y)
+            self.preview_canvas.create_image(offset_x, offset_y, image=self.preview_photo, anchor="nw")
+            self.canvas_dim_lbl.configure(text=f"📐 {orig_w} × {orig_h} px")
+            return
+
+        img_bytes = step.get_annotated_bytes() or step.get_raw_bytes()
 
         if not img_bytes:
             self.preview_canvas.create_text(
@@ -1238,14 +1254,9 @@ class StepEditorWindow:
 
         try:
             pil_img = Image.open(io.BytesIO(img_bytes))
-            self.raw_img_size = pil_img.size
-
-            # Scale to fit canvas cleanly
-            self.window.update_idletasks()
-            cw = max(240, self.preview_canvas.winfo_width())
-            ch = max(180, self.preview_canvas.winfo_height())
-
             orig_w, orig_h = pil_img.size
+            self.raw_img_size = (orig_w, orig_h)
+
             ratio = min(cw / orig_w, ch / orig_h)
             disp_w = max(10, int(orig_w * ratio))
             disp_h = max(10, int(orig_h * ratio))
@@ -1253,8 +1264,15 @@ class StepEditorWindow:
             self.preview_scale_x = orig_w / disp_w
             self.preview_scale_y = orig_h / disp_h
 
-            scaled_img = pil_img.resize((disp_w, disp_h), Image.Resampling.LANCZOS)
+            scaled_img = pil_img.resize((disp_w, disp_h), Image.Resampling.BILINEAR)
             self.preview_photo = ImageTk.PhotoImage(scaled_img)
+
+            # Store in preview cache
+            if not hasattr(self, "_preview_cache"):
+                self._preview_cache = {}
+            if len(self._preview_cache) > 25:
+                self._preview_cache.pop(next(iter(self._preview_cache)))
+            self._preview_cache[cache_key] = (self.preview_photo, (disp_w, disp_h), (orig_w, orig_h), self.preview_scale_x, self.preview_scale_y)
 
             # Center on canvas
             offset_x = (cw - disp_w) // 2
@@ -1298,7 +1316,7 @@ class StepEditorWindow:
 
     def _push_undo(self, step: Step) -> None:
         """Save a snapshot of the current image state for undo."""
-        current_bytes = step.annotated_image_bytes or step.raw_image_bytes
+        current_bytes = step.get_annotated_bytes() or step.get_raw_bytes()
         if current_bytes:
             if step.step_id not in self.undo_stack:
                 self.undo_stack[step.step_id] = []
@@ -1338,6 +1356,8 @@ class StepEditorWindow:
             for s in self.steps:
                 if s.step_id == step_id:
                     s.annotated_image_bytes = prev_bytes
+                    if hasattr(self, "_preview_cache"):
+                        self._preview_cache = {k: v for k, v in self._preview_cache.items() if k[0] != step_id}
                     # Check if step has further drawing actions
                     has_more = any(
                         a.get("type") == "drawing" and a.get("step_id") == step_id
@@ -1417,15 +1437,30 @@ class StepEditorWindow:
         step = self.steps[self.current_index]
         rect = (x1, y1, x2, y2)
 
-        base_bytes = step.annotated_image_bytes or step.raw_image_bytes
+        base_bytes = step.get_annotated_bytes() or step.get_raw_bytes()
         if not base_bytes:
             return
+
+        raw_bytes = step.get_raw_bytes() or base_bytes
+
+        def _finish_tool_apply(result_img: Image.Image):
+            step.annotated_image_bytes = ScreenCapture.image_to_bytes(result_img)
+            step.thumbnail_bytes = ScreenCapture.image_to_bytes(ScreenCapture.create_thumbnail(result_img))
+            if hasattr(self, "_preview_cache"):
+                self._preview_cache = {k: v for k, v in self._preview_cache.items() if k[0] != step.step_id}
+            if step.spool_annotated_path and os.path.exists(step.spool_annotated_path):
+                try:
+                    with open(step.spool_annotated_path, "wb") as f:
+                        f.write(step.annotated_image_bytes)
+                except Exception:
+                    pass
+            self._render_step_preview(step)
 
         # Execute according to active tool
         if self.active_tool == "highlight":
             self._push_undo(step)
             step.highlight_rect = rect
-            base_img = Image.open(io.BytesIO(step.raw_image_bytes or base_bytes))
+            base_img = Image.open(io.BytesIO(raw_bytes))
             annotated = annotate_screenshot(
                 base_img,
                 cursor_pos=(step.cursor_x, step.cursor_y) if step.cursor_x is not None else None,
@@ -1436,36 +1471,28 @@ class StepEditorWindow:
                 style=self.config.highlight_style,
                 show_badge=self.config.show_step_badge_on_screenshot
             )
-            step.annotated_image_bytes = ScreenCapture.image_to_bytes(annotated)
-            step.thumbnail_bytes = ScreenCapture.image_to_bytes(ScreenCapture.create_thumbnail(annotated))
-            self._render_step_preview(step)
+            _finish_tool_apply(annotated)
 
         elif self.active_tool == "blur":
             self._push_undo(step)
             step._is_custom_edited = True
             base_img = Image.open(io.BytesIO(base_bytes))
             blurred = apply_blur_region(base_img, rect, radius=18)
-            step.annotated_image_bytes = ScreenCapture.image_to_bytes(blurred)
-            step.thumbnail_bytes = ScreenCapture.image_to_bytes(ScreenCapture.create_thumbnail(blurred))
-            self._render_step_preview(step)
+            _finish_tool_apply(blurred)
 
         elif self.active_tool == "redact":
             self._push_undo(step)
             step._is_custom_edited = True
             base_img = Image.open(io.BytesIO(base_bytes))
             redacted = apply_redact_region(base_img, rect)
-            step.annotated_image_bytes = ScreenCapture.image_to_bytes(redacted)
-            step.thumbnail_bytes = ScreenCapture.image_to_bytes(ScreenCapture.create_thumbnail(redacted))
-            self._render_step_preview(step)
+            _finish_tool_apply(redacted)
 
         elif self.active_tool == "red_box":
             self._push_undo(step)
             step._is_custom_edited = True
             base_img = Image.open(io.BytesIO(base_bytes))
             boxed = draw_box_annotation(base_img, rect, color_hex="#ef4444", width=3)
-            step.annotated_image_bytes = ScreenCapture.image_to_bytes(boxed)
-            step.thumbnail_bytes = ScreenCapture.image_to_bytes(ScreenCapture.create_thumbnail(boxed))
-            self._render_step_preview(step)
+            _finish_tool_apply(boxed)
 
         elif self.active_tool == "crop":
             crop_w = x2 - x1
@@ -1479,19 +1506,18 @@ class StepEditorWindow:
                 step._is_custom_edited = True
                 base_img = Image.open(io.BytesIO(base_bytes))
                 cropped = crop_image(base_img, rect)
-                step.annotated_image_bytes = ScreenCapture.image_to_bytes(cropped)
-                step.thumbnail_bytes = ScreenCapture.image_to_bytes(ScreenCapture.create_thumbnail(cropped))
-                self._render_step_preview(step)
+                _finish_tool_apply(cropped)
 
     def _reset_to_raw(self) -> None:
         """Reset current step back to original raw unedited screenshot."""
         if 0 <= self.current_index < len(self.steps):
             step = self.steps[self.current_index]
-            if step.raw_image_bytes:
+            raw_b = step.get_raw_bytes()
+            if raw_b:
                 self._push_undo(step)
                 step.highlight_rect = None
                 step._is_custom_edited = False
-                base_img = Image.open(io.BytesIO(step.raw_image_bytes))
+                base_img = Image.open(io.BytesIO(raw_b))
                 c_pos = (step.cursor_x, step.cursor_y) if step.cursor_x is not None else None
                 annotated = annotate_screenshot(
                     base_img,
@@ -1505,6 +1531,8 @@ class StepEditorWindow:
                 )
                 step.annotated_image_bytes = ScreenCapture.image_to_bytes(annotated)
                 step.thumbnail_bytes = ScreenCapture.image_to_bytes(ScreenCapture.create_thumbnail(annotated))
+                if hasattr(self, "_preview_cache"):
+                    self._preview_cache = {k: v for k, v in self._preview_cache.items() if k[0] != step.step_id}
                 self.undo_stack[step.step_id] = []
                 self._render_step_preview(step)
 

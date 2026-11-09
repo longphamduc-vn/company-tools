@@ -14,7 +14,7 @@ from gui.conflict_dialog import ConflictDialog
 
 
 def suggest_rule_and_folder(sender_name: str, sender_email: str) -> Tuple[str, str]:
-    """Smartly suggest rule name and target folder based on sender metadata."""
+    r"""Smartly suggest rule name and hierarchical Team\Part\Unit folder."""
     generic_domains = {"gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "company.com", "mail.com"}
     domain = sender_email.split("@")[1].lower() if "@" in sender_email else ""
 
@@ -22,20 +22,26 @@ def suggest_rule_and_folder(sender_name: str, sender_email: str) -> Tuple[str, s
     if domain and domain not in generic_domains:
         core_domain = domain.split(".")[0]
         clean_domain = core_domain.replace("-", " ").replace("_", " ").title()
-        folder_name = clean_domain.replace(" ", "_")
-        return clean_domain, folder_name
+        folder_unit = clean_domain.replace(" ", "_")
+        folder_path = f"Vendor_Team\\Suppliers_Part\\{folder_unit}_Unit"
+        return clean_domain, folder_path
 
     # Sender display name
     if sender_name:
         clean_name = re.sub(r'[\(\[\{].*?[\)\]\}]', '', sender_name).strip()
         if clean_name:
             clean_name = clean_name.title()
-            folder_name = clean_name.replace(" ", "_")
-            return clean_name, folder_name
+            folder_unit = clean_name.replace(" ", "_")
+            if "scada" in sender_name.lower() or "plc" in sender_name.lower():
+                folder_path = f"Engineering_Team\\SCADA_Part\\{folder_unit}"
+            else:
+                folder_path = f"Internal_Team\\Members_Part\\{folder_unit}"
+            return clean_name, folder_path
 
     # Fallback to local part of email
     local = sender_email.split("@")[0].replace(".", " ").replace("_", " ").title()
-    return local, local.replace(" ", "_")
+    folder_path = f"General_Team\\Inbox_Part\\{local.replace(' ', '_')}"
+    return local, folder_path
 
 
 @dataclass
@@ -455,31 +461,61 @@ class TriageView(ttk.Frame):
 
             self.tree_rules.insert("__STAGED__", tk.END, iid=item_id, text=label, values=(info,))
 
-        # Category 2: ACTIVE RULES
+        # Category 2: ACTIVE RULES (Hierarchical Team \ Part \ Unit Folders)
         self.tree_rules.insert(
             "", tk.END, iid="__ACTIVE__",
-            text="▼ ACTIVE RULES IN OUTLOOK",
-            values=("Target Folder",), open=True
+            text="▼ HIERARCHICAL FOLDERS & RULES",
+            values=("Folder Path",), open=True
         )
+
+        folder_nodes_map: Dict[str, str] = {}
 
         for rule in self.yaml_mgr.rules:
             prefix = "[ON]" if rule.enabled else "[OFF]"
-            rule_node = f"rule_{rule.id}"
-            folder_info = rule.target_folder or "(Root)"
+            raw_folder = rule.target_folder or "_Unclassified"
+            # Split path by \ or /
+            parts = [p.strip() for p in re.split(r'[\\/]', raw_folder) if p.strip()]
 
+            # Build intermediate hierarchical nodes: Team \ Part \ Unit
+            parent_node = "__ACTIVE__"
+            accum_path = ""
+            for depth, part in enumerate(parts):
+                accum_path = f"{accum_path}\\{part}" if accum_path else part
+                fld_id = f"fld_{accum_path.lower().replace(' ', '_')}"
+                if fld_id not in folder_nodes_map:
+                    if depth == 0:
+                        level_label = f"📁 [Team] {part}"
+                    elif depth == 1:
+                        level_label = f"  📁 [Part] {part}"
+                    elif depth == 2:
+                        level_label = f"    📁 [Unit] {part}"
+                    else:
+                        level_label = f"      📁 {part}"
+
+                    self.tree_rules.insert(
+                        parent_node, tk.END, iid=fld_id,
+                        text=level_label,
+                        values=(accum_path,),
+                        open=True
+                    )
+                    folder_nodes_map[fld_id] = accum_path
+                parent_node = fld_id
+
+            # Attach Rule node under the deepest folder node
+            rule_node = f"rule_{rule.id}"
             self.tree_rules.insert(
-                "__ACTIVE__", tk.END, iid=rule_node,
-                text=f"{prefix} {rule.name}",
-                values=(folder_info,), open=False
+                parent_node, tk.END, iid=rule_node,
+                text=f"  ⚡ {prefix} {rule.name}",
+                values=(rule.target_folder,), open=False
             )
 
             all_emails = self.yaml_mgr.get_all_emails_for_rule(rule)
             all_domains = self.yaml_mgr.get_all_domains_for_rule(rule)
 
             for d in all_domains:
-                self.tree_rules.insert(rule_node, tk.END, text=f"  domain: {d}", values=("Domain Rule",))
+                self.tree_rules.insert(rule_node, tk.END, text=f"    domain: {d}", values=("Domain Rule",))
             for e in all_emails:
-                self.tree_rules.insert(rule_node, tk.END, text=f"  {e}", values=("Member Email",))
+                self.tree_rules.insert(rule_node, tk.END, text=f"    {e}", values=("Member Email",))
 
     def _populate_inbox_table(self):
         """High-performance virtual rendering for Inbox items (<2ms)."""
@@ -658,14 +694,20 @@ class TriageView(ttk.Frame):
             self.dragged_message = None
             return
 
-        # Drop on Tree Node
+        # Drop on Tree Node (Rule or Hierarchical Folder: Team \ Part \ Unit)
         rx = event.x_root - self.tree_rules.winfo_rootx()
         ry = event.y_root - self.tree_rules.winfo_rooty()
         if 0 <= rx <= self.tree_rules.winfo_width() and 0 <= ry <= self.tree_rules.winfo_height():
             target_id = self.tree_rules.identify_row(ry)
-            if target_id and target_id.startswith("rule_"):
-                raw_rule_id = target_id.replace("rule_", "", 1)
-                self._stage_add_to_existing_rule(msg, raw_rule_id)
+            if target_id:
+                if target_id.startswith("rule_"):
+                    raw_rule_id = target_id.replace("rule_", "", 1)
+                    self._stage_add_to_existing_rule(msg, raw_rule_id)
+                elif target_id.startswith("fld_"):
+                    # Dropped directly into a Team, Part, or Unit folder!
+                    fld_vals = self.tree_rules.item(target_id, "values")
+                    target_folder_path = fld_vals[0] if fld_vals else ""
+                    self._stage_create_new_rule(msg, custom_folder=target_folder_path)
 
         self.drag_source_id = None
         self.dragged_message = None
@@ -673,8 +715,10 @@ class TriageView(ttk.Frame):
     # -----------------------------------------------------------------
     # STAGING ENGINE
     # -----------------------------------------------------------------
-    def _stage_create_new_rule(self, msg: EmailMessage):
+    def _stage_create_new_rule(self, msg: EmailMessage, custom_folder: Optional[str] = None):
         suggested_name, suggested_folder = suggest_rule_and_folder(msg.sender_name, msg.sender_email)
+        target_folder = custom_folder if custom_folder else suggested_folder
+
         sender_email = msg.sender_email
         sender_domain = f"@{sender_email.split('@')[1]}" if "@" in sender_email else ""
         match_mode = "domain" if any(w in sender_domain for w in ["omron", "automation", "partner", "corp", "vendor"]) else "email"
@@ -688,7 +732,7 @@ class TriageView(ttk.Frame):
             action_type="create_rule",
             rule_name=suggested_name,
             rule_id=f"rule_{re.sub(r'[^a-zA-Z0-9_]', '_', suggested_name.lower())}",
-            target_folder=suggested_folder,
+            target_folder=target_folder,
             sender_email=sender_email,
             sender_domain=sender_domain,
             match_mode=match_mode,
