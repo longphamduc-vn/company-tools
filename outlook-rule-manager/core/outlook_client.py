@@ -8,7 +8,6 @@ from datetime import datetime
 from core.models import EmailMessage
 from core.address_resolver import resolve_outlook_sender, normalize_email
 
-# Determine if running on Windows
 IS_WINDOWS = sys.platform == "win32"
 
 try:
@@ -27,7 +26,9 @@ class BaseOutlookClient:
         raise NotImplementedError
     def get_mode_name(self) -> str:
         raise NotImplementedError
-    def get_stores(self) -> List[Dict[str, str]]:
+    def get_current_user_account(self) -> str:
+        raise NotImplementedError
+    def get_stores(self) -> List[Dict[str, Any]]:
         raise NotImplementedError
     def get_inbox_messages(self, limit: int = 50) -> List[EmailMessage]:
         raise NotImplementedError
@@ -48,6 +49,7 @@ class WindowsOutlookClient(BaseOutlookClient):
         self.app = None
         self.namespace = None
         self._connected = False
+        self._cached_account = ""
         self._init_com()
 
     def _init_com(self):
@@ -65,8 +67,28 @@ class WindowsOutlookClient(BaseOutlookClient):
     def get_mode_name(self) -> str:
         return "Outlook Classic (COM MAPI)"
 
-    def get_stores(self) -> List[Dict[str, str]]:
-        """List all mounted stores/data files in Outlook."""
+    def get_current_user_account(self) -> str:
+        """Fetch active user email or profile name from MAPI."""
+        if not self._connected:
+            return os.environ.get("USERNAME", "DefaultUser")
+        if self._cached_account:
+            return self._cached_account
+        try:
+            user = self.namespace.CurrentUser
+            addr = getattr(user, "Address", "")
+            name = getattr(user, "Name", "")
+            if "@" in addr:
+                self._cached_account = addr.lower()
+            elif name:
+                self._cached_account = name
+            else:
+                self._cached_account = os.environ.get("USERNAME", "DefaultUser")
+        except Exception:
+            self._cached_account = os.environ.get("USERNAME", "DefaultUser")
+        return self._cached_account
+
+    def get_stores(self) -> List[Dict[str, Any]]:
+        """Scan all mounted stores/data files in Outlook with detailed metadata."""
         if not self._connected:
             return []
         stores_list = []
@@ -76,10 +98,28 @@ class WindowsOutlookClient(BaseOutlookClient):
                     name = store.DisplayName
                     path = getattr(store, "FilePath", "") or ""
                     store_id = store.StoreID
+                    is_datafile = store.IsDataFileStore
+
+                    # Calculate size if physical file exists
+                    size_gb = 0.0
+                    if path and os.path.exists(path):
+                        size_gb = round(os.path.getsize(path) / (1024 ** 3), 2)
+
+                    # List root folders
+                    subfolders = []
+                    try:
+                        for f in store.GetRootFolder().Folders:
+                            subfolders.append(f.Name)
+                    except Exception:
+                        pass
+
                     stores_list.append({
                         "name": name,
                         "file_path": path,
-                        "store_id": store_id
+                        "store_id": store_id,
+                        "is_data_file": is_datafile,
+                        "size_gb": size_gb,
+                        "folders": subfolders
                     })
                 except Exception:
                     continue
@@ -88,7 +128,6 @@ class WindowsOutlookClient(BaseOutlookClient):
         return stores_list
 
     def _get_store_by_path_or_name(self, identifier: str):
-        """Find store by file path, name, or default store."""
         if not self._connected or not identifier:
             return self.namespace.DefaultStore
 
@@ -101,21 +140,19 @@ class WindowsOutlookClient(BaseOutlookClient):
         return self.namespace.DefaultStore
 
     def get_inbox_messages(self, limit: int = 50) -> List[EmailMessage]:
-        """Fetch latest messages from Inbox."""
         if not self._connected:
             return []
         messages = []
         try:
             inbox = self.namespace.GetDefaultFolder(6)  # 6 = olFolderInbox
             items = inbox.Items
-            items.Sort("[ReceivedTime]", True)  # Sort descending
+            items.Sort("[ReceivedTime]", True)
 
             count = 0
             for item in items:
                 if count >= limit:
                     break
                 try:
-                    # Filter only MailItem (Class 43 = olMail)
                     if getattr(item, "Class", 0) != 43:
                         continue
 
@@ -136,7 +173,7 @@ class WindowsOutlookClient(BaseOutlookClient):
                         sender_name=sender_name,
                         sender_email=sender_email,
                         received_time=rec_time,
-                        body=body[:5000],  # preview limit
+                        body=body[:5000],
                         has_attachments=has_attach,
                         is_read=is_read
                     ))
@@ -148,7 +185,7 @@ class WindowsOutlookClient(BaseOutlookClient):
         return messages
 
     def get_native_rules(self) -> List[Dict[str, Any]]:
-        """Fetch all existing rules from Outlook default store."""
+        """Fetch all existing rules with their conditions & recipients from Outlook."""
         if not self._connected:
             return []
         result = []
@@ -158,6 +195,9 @@ class WindowsOutlookClient(BaseOutlookClient):
                 name = getattr(rule, "Name", "")
                 enabled = getattr(rule, "Enabled", True)
                 target_folder = ""
+                emails = []
+
+                # Target Folder
                 try:
                     move_action = rule.Actions.MoveToFolder
                     if move_action.Enabled and move_action.Folder:
@@ -165,17 +205,32 @@ class WindowsOutlookClient(BaseOutlookClient):
                 except Exception:
                     pass
 
+                # Recipients in From condition
+                try:
+                    from_cond = rule.Conditions.From
+                    if from_cond.Enabled:
+                        for recip in from_cond.Recipients:
+                            addr = getattr(recip, "Address", "")
+                            if addr and "@" in addr:
+                                emails.append(addr.lower().strip())
+                            else:
+                                name_recip = getattr(recip, "Name", "")
+                                if name_recip:
+                                    emails.append(name_recip.lower().strip())
+                except Exception:
+                    pass
+
                 result.append({
                     "name": name,
                     "enabled": enabled,
-                    "target_folder": target_folder
+                    "target_folder": target_folder,
+                    "emails": emails
                 })
         except Exception:
             pass
         return result
 
     def get_or_create_folder(self, root_store, folder_path: str):
-        """Recursively get or create nested folders under a Store."""
         clean_path = folder_path.replace("\\", "/").strip("/")
         parts = [p.strip() for p in clean_path.split("/") if p.strip()]
         if not parts:
@@ -183,7 +238,6 @@ class WindowsOutlookClient(BaseOutlookClient):
 
         current = root_store.GetRootFolder()
         for part in parts:
-            # Clean forbidden characters in Outlook folder names
             safe_name = re.sub(r'[\/:*?"<>|]', '_', part)
             found = None
             try:
@@ -201,7 +255,6 @@ class WindowsOutlookClient(BaseOutlookClient):
         return current
 
     def save_native_rules(self, rules_data: List[Dict[str, Any]], target_store_path: str) -> Tuple[bool, str]:
-        """Create or update native rules in Outlook."""
         if not self._connected:
             return False, "Outlook COM not connected"
 
@@ -210,7 +263,6 @@ class WindowsOutlookClient(BaseOutlookClient):
             target_store = self._get_store_by_path_or_name(target_store_path)
             rules_col = store.GetRules()
 
-            # Build set of existing rule names
             existing_rules = {}
             for r in rules_col:
                 existing_rules[r.Name] = r
@@ -222,12 +274,10 @@ class WindowsOutlookClient(BaseOutlookClient):
                 r_name = r_info["name"]
                 enabled = r_info.get("enabled", True)
                 emails = r_info.get("emails", [])
-                domains = r_info.get("domains", [])
                 target_folder_path = r_info.get("target_folder", "")
 
                 rule = existing_rules.get(r_name)
                 if not rule:
-                    # 0 = olRuleReceive
                     rule = rules_col.Create(r_name, 0)
                     created_count += 1
                 else:
@@ -235,11 +285,9 @@ class WindowsOutlookClient(BaseOutlookClient):
 
                 rule.Enabled = enabled
 
-                # Configure conditions
                 if emails:
                     from_cond = rule.Conditions.From
                     from_cond.Enabled = True
-                    # Clear old recipients
                     while from_cond.Recipients.Count > 0:
                         from_cond.Recipients.Remove(1)
                     for e in emails:
@@ -249,21 +297,18 @@ class WindowsOutlookClient(BaseOutlookClient):
                     except Exception:
                         pass
 
-                # Configure Move Action
                 if target_folder_path:
                     target_folder_obj = self.get_or_create_folder(target_store, target_folder_path)
                     move_act = rule.Actions.MoveToFolder
                     move_act.Enabled = True
                     move_act.Folder = target_folder_obj
 
-            # Save rules to Outlook
             rules_col.Save(ShowProgress=False)
             return True, f"Successfully synced rules to Outlook (Created: {created_count}, Updated: {updated_count})"
         except Exception as ex:
             return False, f"Failed to sync rules to Outlook: {str(ex)}"
 
     def rollover_rules(self, new_store_path: str) -> Tuple[bool, str]:
-        """Update MoveToFolder target for all native rules to point into new PST."""
         if not self._connected:
             return False, "Outlook COM not connected"
         try:
@@ -279,7 +324,6 @@ class WindowsOutlookClient(BaseOutlookClient):
                     move_action = rule.Actions.MoveToFolder
                     if move_action.Enabled and move_action.Folder:
                         old_name = move_action.Folder.Name
-                        # Re-create / find folder in new store
                         new_folder = self.get_or_create_folder(target_store, old_name)
                         move_action.Folder = new_folder
                         updated_count += 1
@@ -292,7 +336,6 @@ class WindowsOutlookClient(BaseOutlookClient):
             return False, f"Rollover error: {str(ex)}"
 
     def move_message(self, entry_id: str, target_folder_path: str, store_path: str = "") -> bool:
-        """Immediately move a message to target folder."""
         if not self._connected:
             return False
         try:
@@ -306,19 +349,55 @@ class WindowsOutlookClient(BaseOutlookClient):
 
 
 class MockOutlookClient(BaseOutlookClient):
-    """Mock Outlook Client for Linux/macOS and testing environments."""
+    """Mock Outlook Client for Linux/macOS testing and development."""
 
     def __init__(self):
+        self._account = "longp@company.com"
         self._stores = [
-            {"name": "Archive 2024", "file_path": "/mock/data/Archive_2024.pst", "store_id": "STORE_2024"},
-            {"name": "Archive 2025", "file_path": "/mock/data/Archive_2025.pst", "store_id": "STORE_2025"},
-            {"name": "Archive 2026", "file_path": "/mock/data/Archive_2026.pst", "store_id": "STORE_2026"},
-            {"name": "Mailbox - Internal User", "file_path": "", "store_id": "PRIMARY_STORE"},
+            {
+                "name": "longp Archive 2024",
+                "file_path": "/mock/data/longp_Archive_2024.pst",
+                "store_id": "STORE_2024",
+                "is_data_file": True,
+                "size_gb": 18.5,
+                "folders": ["Executive_Board", "Engineering", "Suppliers", "_Unclassified"]
+            },
+            {
+                "name": "longp Archive 2025",
+                "file_path": "/mock/data/longp_Archive_2025.pst",
+                "store_id": "STORE_2025",
+                "is_data_file": True,
+                "size_gb": 4.2,
+                "folders": ["Engineering", "Suppliers"]
+            },
+            {
+                "name": "Primary Mailbox - longp",
+                "file_path": "",
+                "store_id": "PRIMARY_STORE",
+                "is_data_file": False,
+                "size_gb": 2.1,
+                "folders": ["Inbox", "Sent Items", "Deleted Items"]
+            },
         ]
         self._rules = [
-            {"name": "Executive Board", "enabled": True, "target_folder": "Archive 2024\\Executive_Board"},
-            {"name": "Engineering", "enabled": True, "target_folder": "Archive 2024\\Engineering"},
-            {"name": "Suppliers", "enabled": True, "target_folder": "Archive 2024\\Suppliers"},
+            {
+                "name": "Executive Board",
+                "enabled": True,
+                "target_folder": "Archive 2024\\Executive_Board",
+                "emails": ["ceo@company.com", "coo@company.com"]
+            },
+            {
+                "name": "Engineering",
+                "enabled": True,
+                "target_folder": "Archive 2024\\Engineering",
+                "emails": ["eng1@company.com", "eng2@company.com", "lead.scada@company.com"]
+            },
+            {
+                "name": "Old Vendor Rule (Legacy)",
+                "enabled": True,
+                "target_folder": "Inbox\\OldVendors",
+                "emails": ["sales@vendor.com"]
+            }
         ]
         self._inbox = [
             EmailMessage(
@@ -327,7 +406,13 @@ class MockOutlookClient(BaseOutlookClient):
                 sender_name="Nguyen Van Bach (Maintenance)",
                 sender_email="lead.scada@company.com",
                 received_time=datetime.now(),
-                body="Dear Team,\n\nThe CP1E PLC lost connection during the night shift. Please review trace log.\n\nBest regards,\nBach",
+                body=(
+                    "Dear Team,\n\n"
+                    "The CP1E PLC lost connection during the night shift. "
+                    "Error code: COMM_TIMEOUT_0x4F. Please review trace log.\n\n"
+                    "Attachments: scada_tracelog_20261109.csv\n\n"
+                    "Best regards,\nNguyen Van Bach"
+                ),
                 has_attachments=True,
                 is_read=False
             ),
@@ -337,7 +422,13 @@ class MockOutlookClient(BaseOutlookClient):
                 sender_name="Pham Thu Ha (Omron Sales)",
                 sender_email="ha.pham@omron.com",
                 received_time=datetime.now(),
-                body="Dear Purchasing Manager,\n\nPlease find attached the quotation for 50 pcs E3Z-D61.\nDelivery time: 2 weeks.\n\nRegards,\nHa",
+                body=(
+                    "Dear Purchasing Manager,\n\n"
+                    "Thank you for contacting Omron Electronics. "
+                    "Attached is the official quotation for 50 pcs sensor E3Z-D61 with 2 weeks lead time.\n\n"
+                    "Payment term: 30 days net.\n\n"
+                    "Best regards,\nPham Thu Ha\nOmron Vietnam"
+                ),
                 has_attachments=True,
                 is_read=False
             ),
@@ -347,7 +438,12 @@ class MockOutlookClient(BaseOutlookClient):
                 sender_name="Tran Duc Huy (COO)",
                 sender_email="coo@company.com",
                 received_time=datetime.now(),
-                body="All department heads,\n\nThe Q4 performance review is scheduled for this Friday at 9:00 AM.\n\nRegards,\nHuy",
+                body=(
+                    "All department heads,\n\n"
+                    "The Q4 performance review is scheduled for this Friday at 9:00 AM in Meeting Room A.\n"
+                    "Please prepare your KPI slides.\n\n"
+                    "Regards,\nTran Duc Huy - COO"
+                ),
                 has_attachments=False,
                 is_read=True
             ),
@@ -357,17 +453,27 @@ class MockOutlookClient(BaseOutlookClient):
                 sender_name="Kenji Sato (Sato Automation)",
                 sender_email="sato@sato-automation.jp",
                 received_time=datetime.now(),
-                body="Hello,\n\nWe would like to introduce our latest industrial IoT gateway compatible with Nexacro EMS.\n\nSincerely,\nKenji Sato",
+                body=(
+                    "Hello Antigravity Team,\n\n"
+                    "We would like to introduce our latest industrial IoT gateway compatible with Nexacro EMS and Omron PLCs.\n"
+                    "Would you be open for a 15-minute introductory call next Tuesday?\n\n"
+                    "Sincerely,\nKenji Sato\nSato Automation Tokyo"
+                ),
                 has_attachments=False,
                 is_read=False
             ),
             EmailMessage(
                 entry_id="MSG_005",
                 subject="Delivery notice for replacement spare parts",
-                sender_name="Unknown Contractor",
+                sender_name="Contractor Support",
                 sender_email="former.contractor@vendor.com",
                 received_time=datetime.now(),
-                body="Shipment #9921 has arrived at Gate 2.\nPlease assign personnel to inspect.\n\nThanks.",
+                body=(
+                    "Shipment #9921 has arrived at Gate 2.\n"
+                    "Items: 4x Pneumatic cylinders, 10x Solenoid valves.\n"
+                    "Please assign personnel to inspect.\n\n"
+                    "Thanks."
+                ),
                 has_attachments=False,
                 is_read=False
             ),
@@ -379,7 +485,10 @@ class MockOutlookClient(BaseOutlookClient):
     def get_mode_name(self) -> str:
         return "Simulated Mock Mode (Dev/Linux)"
 
-    def get_stores(self) -> List[Dict[str, str]]:
+    def get_current_user_account(self) -> str:
+        return self._account
+
+    def get_stores(self) -> List[Dict[str, Any]]:
         return self._stores
 
     def get_inbox_messages(self, limit: int = 50) -> List[EmailMessage]:
@@ -394,7 +503,8 @@ class MockOutlookClient(BaseOutlookClient):
             self._rules.append({
                 "name": r["name"],
                 "enabled": r.get("enabled", True),
-                "target_folder": f"{target_store_path}\\{r.get('target_folder', '')}"
+                "target_folder": f"{target_store_path}\\{r.get('target_folder', '')}",
+                "emails": r.get("emails", [])
             })
         return True, f"Mock: Successfully synced {len(rules_data)} rules to Outlook"
 
@@ -419,4 +529,3 @@ def get_outlook_client() -> BaseOutlookClient:
         except Exception:
             pass
     return MockOutlookClient()
-

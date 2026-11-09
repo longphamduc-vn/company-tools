@@ -8,7 +8,7 @@ import time
 import threading
 import platform
 from datetime import datetime
-from typing import Optional, List, Callable, Tuple, Set
+from typing import Optional, List, Callable, Tuple, Set, Any
 
 from pynput import mouse, keyboard
 
@@ -139,15 +139,6 @@ class RecordingEngine:
                 self.metadata.end_time = datetime.now()
                 self.metadata.total_steps = len(self.steps)
                 self.metadata.apps_used = sorted(list(self._apps_used))
-
-                # Auto AI Copilot Polish if enabled
-                if getattr(self.config, "ai_enabled", True):
-                    try:
-                        from .ai_copilot import AICopilot
-                        copilot = AICopilot(self.config)
-                        self.steps, self.metadata = copilot.polish_steps(self.steps, self.metadata)
-                    except Exception as e:
-                        safe_print(f"[StepRecorder] AI Copilot auto-polish warning: {e}")
             
             if self.on_state_changed:
                 self.on_state_changed(self.state)

@@ -27,7 +27,6 @@ from step_recorder.window_info import get_active_window_info, WindowDetails
 from step_recorder.exporter import ReportExporter
 from step_recorder.recorder import RecordingEngine
 from step_recorder.hotkeys import GlobalHotkeyManager
-from step_recorder.ai_copilot import AICopilot
 
 
 class TestStepRecorder(unittest.TestCase):
@@ -803,88 +802,30 @@ class TestStepRecorder(unittest.TestCase):
         self.assertIn("Hello (ENTER)", step.description)
         self.assertEqual(step.control_rect, (100, 200, 300, 40))
 
-    def test_ai_copilot_smart_heuristics_polish(self):
-        """Test AI Copilot rule-based active-voice descriptions, auto-chaptering, and summary generation."""
-        config = RecorderConfig(
-            language="vi",
-            ai_enabled=True,
-            ai_provider="smart_heuristic",
-            ai_auto_chaptering=True,
-            ai_generate_summary=True
+    def test_uia_window_info_details(self):
+        """Test WindowDetails data structure and unpackability with UIA fields."""
+        details = WindowDetails(
+            title="Google Chrome - Order Form",
+            process_name="chrome.exe",
+            pid=1234,
+            ui_control="'Submit' [Button]",
+            control_type="Button",
+            control_name="Submit",
+            automation_id="btn-submit",
+            control_rect=(100, 200, 80, 35),
+            is_password=False
         )
-        copilot = AICopilot(config)
+        self.assertEqual(details.ui_control, "'Submit' [Button]")
+        self.assertEqual(details.control_type, "Button")
+        self.assertEqual(details.control_rect, (100, 200, 80, 35))
 
-        steps = [
-            Step(
-                step_id=1,
-                timestamp=datetime.now(),
-                action_type="left_click",
-                description="Raw click 1",
-                window_title="Hệ Thống Bán Hàng",
-                process_name="portal.exe",
-                ui_control="'Đăng Nhập' [Button]",
-                cursor_x=300,
-                cursor_y=400
-            ),
-            Step(
-                step_id=2,
-                timestamp=datetime.now(),
-                action_type="type_text",
-                description="Raw type",
-                window_title="Hệ Thống Bán Hàng",
-                process_name="portal.exe",
-                ui_control="'Tên Đăng Nhập' [Edit]",
-                typed_text="admin"
-            ),
-            Step(
-                step_id=3,
-                timestamp=datetime.now(),
-                action_type="left_click",
-                description="Raw click 2",
-                window_title="Hệ Thống Bán Hàng",
-                process_name="portal.exe",
-                ui_control="'Báo Cáo Doanh Thu' [TabItem]",
-                cursor_x=500,
-                cursor_y=120
-            ),
-            Step(
-                step_id=4,
-                timestamp=datetime.now(),
-                action_type="left_click",
-                description="Raw click 3",
-                window_title="Hệ Thống Bán Hàng",
-                process_name="portal.exe",
-                ui_control="'Xuất Excel' [Button]",
-                cursor_x=800,
-                cursor_y=200
-            )
-        ]
-
-        metadata = SessionMetadata(
-            session_id="rec_sop_test",
-            title="Quy Trình Xuất Báo Cáo Doanh Thu",
-            apps_used=["portal.exe"]
-        )
-
-        polished_steps, polished_meta = copilot.polish_steps(steps, metadata)
-
-        # 1. Enriched active-voice descriptions
-        self.assertIn("Nhấn nút **Đăng Nhập**", polished_steps[0].description)
-        self.assertIn('Nhập nội dung "admin" vào trường **Tên Đăng Nhập**', polished_steps[1].description)
-        self.assertIn("Chọn mục/thẻ **Báo Cáo Doanh Thu**", polished_steps[2].description)
-        self.assertIn("Nhấn nút **Xuất Excel**", polished_steps[3].description)
-
-        # 2. Auto-chaptering
-        self.assertTrue(polished_steps[0].is_section_header)
-        self.assertIn("Phần 1", polished_steps[0].section_title)
-
-        # 3. Executive Summary & Prerequisites
-        self.assertIsNotNone(polished_meta.executive_summary)
-        self.assertIn("4 bước", polished_meta.executive_summary)
-        self.assertGreater(len(polished_meta.prerequisites), 0)
+        # Backward compatibility tuple unpacking
+        title, proc = details
+        self.assertEqual(title, "Google Chrome - Order Form")
+        self.assertEqual(proc, "chrome.exe")
 
     def test_interactive_guide_player_export(self):
-        """Test that HTML export includes Interactive Guide Player and SOP Overview cards."""
+        """Test that HTML export includes full offline Interactive Guide Player."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = RecorderConfig(output_dir=tmpdir, language="vi")
             exporter = ReportExporter(config)
@@ -902,9 +843,7 @@ class TestStepRecorder(unittest.TestCase):
 
             metadata = SessionMetadata(
                 session_id="rec_player_test",
-                title="Interactive Guide SOP Test",
-                executive_summary="Tóm tắt quy trình tương tác mẫu.",
-                prerequisites=["Mở trình duyệt web"]
+                title="Interactive Guide SOP Test"
             )
 
             results = exporter.export([step], metadata, tmpdir)
@@ -919,11 +858,33 @@ class TestStepRecorder(unittest.TestCase):
                 self.assertIn('id="playerFilmstrip"', html)
                 self.assertIn('openInteractivePlayer', html)
                 self.assertIn('allStepData', html)
+                self.assertIn('playerLaunchBtn', html)
 
-                # Verify SOP Overview Card
-                self.assertIn('id="sopOverview"', html)
-                self.assertIn("Tóm tắt quy trình tương tác mẫu.", html)
-                self.assertIn("Mở trình duyệt web", html)
+    def test_all_type_hints_resolved(self):
+        """Verify all functions and methods across the package have valid, resolvable type annotations (catches missing typing imports like Any on Python 3.10-3.13)."""
+        import importlib
+        import pkgutil
+        import typing
+        import inspect
+        import step_recorder
+
+        errors = []
+        for modinfo in pkgutil.walk_packages(step_recorder.__path__, 'step_recorder.'):
+            mod = importlib.import_module(modinfo.name)
+            for name, obj in inspect.getmembers(mod):
+                if inspect.isfunction(obj):
+                    try:
+                        typing.get_type_hints(obj)
+                    except Exception as e:
+                        errors.append(f"{modinfo.name}.{name}: {e}")
+                elif inspect.isclass(obj) and obj.__module__ == mod.__name__:
+                    for m_name, m_obj in inspect.getmembers(obj, inspect.isfunction):
+                        try:
+                            typing.get_type_hints(m_obj)
+                        except Exception as e:
+                            errors.append(f"{modinfo.name}.{obj.__name__}.{m_name}: {e}")
+
+        self.assertEqual(errors, [], f"Found unresolved type annotations: {errors}")
 
 
 if __name__ == "__main__":

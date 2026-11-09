@@ -683,28 +683,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "vi": "Người dùng Nhập \"{text}\" vào ô [{control}] trên [{window}]",
         "en": "User typed \"{text}\" into [{control}] on [{window}]"
     },
-
-    # === AI Copilot & Interactive Guide ===
-    "btn_ai_copilot": {
-        "vi": "✨ AI SOP Copilot",
-        "en": "✨ AI SOP Copilot"
-    },
-    "ai_copilot_running": {
-        "vi": "Đang dùng AI hoàn thiện mô tả SOP và phân đoạn...",
-        "en": "Polishing SOP descriptions and chapters with AI..."
-    },
-    "ai_copilot_done": {
-        "vi": "✨ AI Copilot đã hoàn thiện toàn bộ mô tả, chương mục và tóm tắt quy trình!",
-        "en": "✨ AI Copilot successfully polished all descriptions, chapters, and summary!"
-    },
-    "sec_ai_copilot": {
-        "vi": "🤖 AI SOP Copilot (Trợ Lý SOP Thông Minh)",
-        "en": "🤖 AI SOP Copilot (Intelligent SOP Assistant)"
-    },
-    "opt_enable_ai": {
-        "vi": "Tự động kích hoạt AI Copilot khi dừng ghi hình",
-        "en": "Automatically trigger AI Copilot on recording stop"
-    },
     "opt_keystroke_aggregator": {
         "vi": "Tự động gom chuỗi gõ phím vào ô nhập liệu (Keystroke Aggregator)",
         "en": "Automatically aggregate typed text into input fields"
@@ -716,14 +694,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "btn_interactive_guide": {
         "vi": "🎮 Chế độ Trình chiếu tương tác",
         "en": "🎮 Interactive Guide"
-    },
-    "sop_summary_title": {
-        "vi": "Tóm Tắt Quy Trình & Điều Kiện Tiên Quyết (SOP Overview)",
-        "en": "Process Summary & Prerequisites (SOP Overview)"
-    },
-    "prereq_title": {
-        "vi": "📌 Điều kiện tiên quyết (Prerequisites):",
-        "en": "📌 Prerequisites:"
     }
 }
 

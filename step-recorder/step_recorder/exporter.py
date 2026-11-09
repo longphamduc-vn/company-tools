@@ -91,8 +91,6 @@ class ReportExporter:
                 "screen_resolution": metadata.screen_resolution,
                 "total_steps": len(steps),
                 "apps_used": metadata.apps_used,
-                "executive_summary": metadata.executive_summary,
-                "prerequisites": metadata.prerequisites,
             },
             "steps": [s.to_dict() for s in steps]
         }
@@ -188,19 +186,6 @@ class ReportExporter:
 
         if metadata.description:
             lines.append(f"{metadata.description}")
-            lines.append("")
-
-        if metadata.executive_summary:
-            sec_summary_title = "✨ Tóm Tắt Quy Trình (Executive Summary)" if is_vi else "✨ Executive Summary"
-            lines.append(f"## {sec_summary_title}")
-            lines.append(f"{metadata.executive_summary}")
-            lines.append("")
-
-        if metadata.prerequisites:
-            sec_prereq_title = "📌 Điều Kiện Tiên Quyết (Prerequisites)" if is_vi else "📌 Prerequisites"
-            lines.append(f"### {sec_prereq_title}")
-            for p in metadata.prerequisites:
-                lines.append(f"- {p}")
             lines.append("")
 
         # Generate Table of Contents

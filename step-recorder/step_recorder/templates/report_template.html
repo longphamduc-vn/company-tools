@@ -1009,56 +1009,6 @@
       }
     }
 
-    /* Executive Summary & Prerequisites */
-    .executive-summary-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-left: 5px solid var(--accent-color);
-      border-radius: var(--radius);
-      padding: 22px 24px;
-      margin-bottom: 22px;
-      box-shadow: var(--shadow-sm);
-    }
-    .summary-header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 10px;
-    }
-    .summary-header h2 {
-      font-size: 1.15rem;
-      font-weight: 700;
-      color: var(--text-primary);
-    }
-    .summary-text {
-      font-size: 0.96rem;
-      line-height: 1.6;
-      color: var(--text-primary);
-      margin-bottom: 14px;
-    }
-    .prereq-box {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-sm);
-      padding: 12px 16px;
-    }
-    .prereq-title {
-      font-size: 0.82rem;
-      font-weight: 700;
-      color: var(--accent-color);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 6px;
-    }
-    .prereq-list {
-      margin-left: 20px;
-      font-size: 0.88rem;
-      color: var(--text-secondary);
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
     /* === Interactive Guide Player Styles === */
     .player-modal {
       display: none;
@@ -1574,29 +1524,6 @@
           </div>
         </div>
       </header>
-
-      <!-- Executive Summary & Prerequisites Card -->
-      {% if session.executive_summary or session.prerequisites %}
-      <section class="executive-summary-card" id="sopOverview">
-        <div class="summary-header">
-          <span>✨</span>
-          <h2 data-i18n="sop_summary_title">Tóm Tắt Quy Trình & Điều Kiện Tiên Quyết (SOP Overview)</h2>
-        </div>
-        {% if session.executive_summary %}
-        <p class="summary-text">{{ session.executive_summary }}</p>
-        {% endif %}
-        {% if session.prerequisites %}
-        <div class="prereq-box">
-          <div class="prereq-title" data-i18n="prereq_title">📌 Điều kiện tiên quyết (Prerequisites):</div>
-          <ul class="prereq-list">
-            {% for p in session.prerequisites %}
-            <li>{{ p }}</li>
-            {% endfor %}
-          </ul>
-        </div>
-        {% endif %}
-      </section>
-      {% endif %}
 
       <!-- Filter & Search Bar -->
       <div class="filter-bar">
