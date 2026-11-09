@@ -469,8 +469,40 @@ class SettingsDialog:
         self.key_var = tk.BooleanVar(value=self.config.capture_keys)
         self._create_checkbox(sec4, t("opt_capture_keys"), self.key_var)
 
+        # Smart Keystroke Aggregator & UIA
+        self.aggregator_var = tk.BooleanVar(value=getattr(self.config, "enable_keystroke_aggregator", True))
+        self._create_checkbox(sec4, t("opt_keystroke_aggregator"), self.aggregator_var)
+
+        self.uia_var = tk.BooleanVar(value=getattr(self.config, "enable_ui_automation", True))
+        self._create_checkbox(sec4, t("opt_enable_uia"), self.uia_var)
+
         self.double_click_var = tk.BooleanVar(value=self.config.capture_double_clicks)
         self._create_checkbox(sec4, t("opt_double_clicks"), self.double_click_var)
+
+        # AI Copilot Card
+        sec_ai = self._create_card(self.scroll_content, t("sec_ai_copilot"))
+        self.ai_enable_var = tk.BooleanVar(value=getattr(self.config, "ai_enabled", True))
+        self._create_checkbox(sec_ai, t("opt_enable_ai"), self.ai_enable_var)
+
+        ai_row = tk.Frame(sec_ai, bg="#1e293b")
+        ai_row.pack(fill=tk.X, pady=4)
+        tk.Label(ai_row, text="AI Provider:", font=("Segoe UI", 9), bg="#1e293b", fg="#cbd5e1").pack(side=tk.LEFT, padx=(0, 8))
+        self.ai_provider_var = tk.StringVar(value=getattr(self.config, "ai_provider", "smart_heuristic"))
+        ai_combo = ttk.Combobox(
+            ai_row,
+            textvariable=self.ai_provider_var,
+            values=["smart_heuristic", "gemini", "openai"],
+            state="readonly",
+            width=16
+        )
+        ai_combo.pack(side=tk.LEFT, padx=(0, 8))
+
+        api_row = tk.Frame(sec_ai, bg="#1e293b")
+        api_row.pack(fill=tk.X, pady=4)
+        tk.Label(api_row, text="API Key (Optional):", font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8").pack(side=tk.LEFT, padx=(0, 6))
+        self.ai_key_var = tk.StringVar(value=getattr(self.config, "ai_api_key", ""))
+        api_entry = tk.Entry(api_row, textvariable=self.ai_key_var, show="•", bg="#0f172a", fg="#f8fafc", relief=tk.FLAT)
+        api_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         self.badge_var = tk.BooleanVar(value=self.config.show_step_badge_on_screenshot)
         self._create_checkbox(sec4, t("opt_step_badge"), self.badge_var)
@@ -625,6 +657,11 @@ class SettingsDialog:
             self.config.dual_capture_on_click = bool(self.dual_capture_var.get())
             self.config.dual_capture_smart_detect = bool(self.smart_detect_var.get())
             self.config.capture_keys = bool(self.key_var.get())
+            self.config.enable_keystroke_aggregator = bool(self.aggregator_var.get())
+            self.config.enable_ui_automation = bool(self.uia_var.get())
+            self.config.ai_enabled = bool(self.ai_enable_var.get())
+            self.config.ai_provider = str(self.ai_provider_var.get())
+            self.config.ai_api_key = str(self.ai_key_var.get()).strip()
             self.config.capture_double_clicks = bool(self.double_click_var.get())
             self.config.show_step_badge_on_screenshot = bool(self.badge_var.get())
             self.config.dark_mode_report = bool(self.dark_mode_var.get())

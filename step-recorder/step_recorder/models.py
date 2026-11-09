@@ -26,6 +26,9 @@ class Step:
     cursor_y: Optional[int] = None
     highlight_rect: Optional[Tuple[int, int, int, int]] = None
     user_comment: Optional[str] = None
+    typed_text: Optional[str] = None  # Aggregated typed text for "type_text" action
+    control_rect: Optional[Tuple[int, int, int, int]] = None  # (left, top, width, height) of targeted UI element
+    ai_description: Optional[str] = None  # AI-polished active-voice SOP description
     
     # SOP Section / Chapter markers
     is_section_header: bool = False
@@ -73,6 +76,7 @@ class Step:
             "right_click": "badge-secondary",
             "double_click": "badge-accent",
             "key_press": "badge-warning",
+            "type_text": "badge-accent",
             "comment": "badge-info",
             "click_result": "badge-success",
         }
@@ -86,6 +90,7 @@ class Step:
             "right_click": "👉",
             "double_click": "✌️",
             "key_press": "⌨️",
+            "type_text": "⌨️",
             "comment": "💬",
             "click_result": "⚡",
         }
@@ -128,6 +133,9 @@ class Step:
             "cursor_y": self.cursor_y,
             "highlight_rect": self.highlight_rect,
             "user_comment": self.user_comment,
+            "typed_text": self.typed_text,
+            "control_rect": self.control_rect,
+            "ai_description": self.ai_description,
             "is_section_header": self.is_section_header,
             "section_title": self.section_title,
             "section_description": self.section_description,
@@ -171,6 +179,9 @@ class Step:
             cursor_y=data.get("cursor_y"),
             highlight_rect=tuple(data["highlight_rect"]) if data.get("highlight_rect") else None,
             user_comment=data.get("user_comment"),
+            typed_text=data.get("typed_text"),
+            control_rect=tuple(data["control_rect"]) if data.get("control_rect") else None,
+            ai_description=data.get("ai_description"),
             is_section_header=data.get("is_section_header", False),
             section_title=data.get("section_title"),
             section_description=data.get("section_description"),
@@ -198,6 +209,8 @@ class SessionMetadata:
     monitors_info: str = ""
     total_steps: int = 0
     apps_used: List[str] = field(default_factory=list)
+    executive_summary: Optional[str] = None
+    prerequisites: List[str] = field(default_factory=list)
 
     @property
     def duration_str(self) -> str:

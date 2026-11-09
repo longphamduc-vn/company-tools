@@ -29,6 +29,21 @@ class RecorderConfig:
     capture_double_clicks: bool = True
     capture_keys: bool = True
     special_keys_only: bool = True  # If True, records only Enter, Tab, Esc, shortcuts, etc.
+    enable_keystroke_aggregator: bool = True  # Automatically aggregate consecutive typing into input fields
+    keystroke_flush_timeout_ms: int = 1200  # Debounce delay (ms) to flush typing buffer into 1 step
+    enable_ui_automation: bool = True  # Deep control inspection via Windows UI Automation (UIA)
+    
+    # AI Copilot & SOP Intelligence
+    ai_enabled: bool = True  # AI Copilot enabled for SOP polishing and summaries
+    ai_provider: str = "smart_heuristic"  # "smart_heuristic" (offline/zero-cost), "gemini", "openai"
+    ai_api_key: str = ""
+    ai_api_base: str = "https://generativelanguage.googleapis.com/v1beta"
+    ai_model: str = "gemini-2.5-flash"
+    ai_auto_chaptering: bool = True
+    ai_generate_summary: bool = True
+    
+    # Interactive Guide Player
+    enable_interactive_player: bool = True
     
     # Highlight & visual styling
     highlight_style: str = "ring"  # "ring", "glow", "crosshair", "solid"

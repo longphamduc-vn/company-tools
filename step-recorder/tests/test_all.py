@@ -23,10 +23,11 @@ from step_recorder.annotator import (
     draw_box_annotation
 )
 from step_recorder.capture import ScreenCapture
-from step_recorder.window_info import get_active_window_info
+from step_recorder.window_info import get_active_window_info, WindowDetails
 from step_recorder.exporter import ReportExporter
 from step_recorder.recorder import RecordingEngine
 from step_recorder.hotkeys import GlobalHotkeyManager
+from step_recorder.ai_copilot import AICopilot
 
 
 class TestStepRecorder(unittest.TestCase):
@@ -766,6 +767,163 @@ class TestStepRecorder(unittest.TestCase):
             self.assertEqual(editor.steps[i].step_id, i + 1)
 
         root.destroy()
+
+    def test_smart_keystroke_aggregator(self):
+        """Test that typing buffer aggregates consecutive keystrokes into a single type_text step."""
+        config = RecorderConfig(
+            capture_clicks=False,
+            capture_keys=False,
+            enable_keystroke_aggregator=True
+        )
+        engine = RecordingEngine(config)
+        engine.state = "recording"
+
+        # Simulate typing "Hello" and flushing with trigger_key="enter"
+        engine._text_buffer = ["H", "e", "l", "l", "o"]
+        mock_win = WindowDetails(
+            title="Search Portal",
+            process_name="chrome.exe",
+            ui_control="'Query Box' [Edit]",
+            control_rect=(100, 200, 300, 40)
+        )
+        engine._typing_win_details = mock_win
+        engine._typing_cursor_pos = (150, 220)
+
+        # Flush buffer
+        engine.flush_text_buffer(trigger_key="enter")
+
+        # Wait briefly for worker thread
+        import time
+        time.sleep(0.3)
+
+        self.assertEqual(len(engine.steps), 1)
+        step = engine.steps[0]
+        self.assertEqual(step.action_type, "type_text")
+        self.assertEqual(step.typed_text, "Hello")
+        self.assertIn("Hello (ENTER)", step.description)
+        self.assertEqual(step.control_rect, (100, 200, 300, 40))
+
+    def test_ai_copilot_smart_heuristics_polish(self):
+        """Test AI Copilot rule-based active-voice descriptions, auto-chaptering, and summary generation."""
+        config = RecorderConfig(
+            language="vi",
+            ai_enabled=True,
+            ai_provider="smart_heuristic",
+            ai_auto_chaptering=True,
+            ai_generate_summary=True
+        )
+        copilot = AICopilot(config)
+
+        steps = [
+            Step(
+                step_id=1,
+                timestamp=datetime.now(),
+                action_type="left_click",
+                description="Raw click 1",
+                window_title="Hệ Thống Bán Hàng",
+                process_name="portal.exe",
+                ui_control="'Đăng Nhập' [Button]",
+                cursor_x=300,
+                cursor_y=400
+            ),
+            Step(
+                step_id=2,
+                timestamp=datetime.now(),
+                action_type="type_text",
+                description="Raw type",
+                window_title="Hệ Thống Bán Hàng",
+                process_name="portal.exe",
+                ui_control="'Tên Đăng Nhập' [Edit]",
+                typed_text="admin"
+            ),
+            Step(
+                step_id=3,
+                timestamp=datetime.now(),
+                action_type="left_click",
+                description="Raw click 2",
+                window_title="Hệ Thống Bán Hàng",
+                process_name="portal.exe",
+                ui_control="'Báo Cáo Doanh Thu' [TabItem]",
+                cursor_x=500,
+                cursor_y=120
+            ),
+            Step(
+                step_id=4,
+                timestamp=datetime.now(),
+                action_type="left_click",
+                description="Raw click 3",
+                window_title="Hệ Thống Bán Hàng",
+                process_name="portal.exe",
+                ui_control="'Xuất Excel' [Button]",
+                cursor_x=800,
+                cursor_y=200
+            )
+        ]
+
+        metadata = SessionMetadata(
+            session_id="rec_sop_test",
+            title="Quy Trình Xuất Báo Cáo Doanh Thu",
+            apps_used=["portal.exe"]
+        )
+
+        polished_steps, polished_meta = copilot.polish_steps(steps, metadata)
+
+        # 1. Enriched active-voice descriptions
+        self.assertIn("Nhấn nút **Đăng Nhập**", polished_steps[0].description)
+        self.assertIn('Nhập nội dung "admin" vào trường **Tên Đăng Nhập**', polished_steps[1].description)
+        self.assertIn("Chọn mục/thẻ **Báo Cáo Doanh Thu**", polished_steps[2].description)
+        self.assertIn("Nhấn nút **Xuất Excel**", polished_steps[3].description)
+
+        # 2. Auto-chaptering
+        self.assertTrue(polished_steps[0].is_section_header)
+        self.assertIn("Phần 1", polished_steps[0].section_title)
+
+        # 3. Executive Summary & Prerequisites
+        self.assertIsNotNone(polished_meta.executive_summary)
+        self.assertIn("4 bước", polished_meta.executive_summary)
+        self.assertGreater(len(polished_meta.prerequisites), 0)
+
+    def test_interactive_guide_player_export(self):
+        """Test that HTML export includes Interactive Guide Player and SOP Overview cards."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = RecorderConfig(output_dir=tmpdir, language="vi")
+            exporter = ReportExporter(config)
+
+            step = Step(
+                step_id=1,
+                timestamp=datetime.now(),
+                action_type="left_click",
+                description="Nhấn nút Xác nhận",
+                window_title="Browser",
+                cursor_x=450,
+                cursor_y=320,
+                annotated_image_bytes=b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+            )
+
+            metadata = SessionMetadata(
+                session_id="rec_player_test",
+                title="Interactive Guide SOP Test",
+                executive_summary="Tóm tắt quy trình tương tác mẫu.",
+                prerequisites=["Mở trình duyệt web"]
+            )
+
+            results = exporter.export([step], metadata, tmpdir)
+            self.assertTrue(os.path.exists(results["html"]))
+
+            with open(results["html"], "r", encoding="utf-8") as f:
+                html = f.read()
+                # Verify Interactive Guide Player DOM elements
+                self.assertIn('id="interactivePlayerModal"', html)
+                self.assertIn('id="playerHotspot"', html)
+                self.assertIn('id="playerInstructionBar"', html)
+                self.assertIn('id="playerFilmstrip"', html)
+                self.assertIn('openInteractivePlayer', html)
+                self.assertIn('allStepData', html)
+
+                # Verify SOP Overview Card
+                self.assertIn('id="sopOverview"', html)
+                self.assertIn("Tóm tắt quy trình tương tác mẫu.", html)
+                self.assertIn("Mở trình duyệt web", html)
 
 
 if __name__ == "__main__":

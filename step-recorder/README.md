@@ -29,6 +29,10 @@ Từ Windows 11 bản cập nhật mới, Microsoft đã chính thức thông b�
 | **Xuất Markdown** | ❌ Không hỗ trợ | ✅ **Tự động tạo `report.md`** song ngữ có Mục Lục TOC & Anchor links nhảy trực tiếp |
 | **Đóng gói xuất file** | Chỉ file ZIP chứa MHTML | **HTML, Markdown, JSON metadata, file ZIP** chứa ảnh gốc PNG |
 | **Chống che khuất màn hình** | Dễ bị dính giao diện vào ảnh chụp | 🫥 **Windows API WDA_EXCLUDEFROMCAPTURE**: Tự động tàng hình thanh công cụ khỏi ảnh chụp |
+| **Gom cụm thao tác gõ (Smart Keystroke)** | ❌ Bỏ qua text nhập liệu hoặc phân mảnh | ⌨️ **Smart Keystroke Aggregator**: Tự động gom chuỗi gõ phím vào đúng ô nhập liệu thành 1 bước hoàn chỉnh |
+| **Nhận diện UI hiện đại (UIA)** | Chỉ dùng Win32 API cũ, không đọc được Chrome/Electron | 🔍 **Microsoft UI Automation (UIA)**: Đọc sâu tên nút bấm, loại control (Button, Edit, Tab, Menu) trên Chromium, Edge, Office |
+| **Trợ lý AI SOP Copilot** | ❌ Không hỗ trợ | 🤖 **AI Copilot**: Tự động tinh chỉnh văn phong SOP tích cực, tự chia chương mục và tạo Executive Summary & Điều kiện tiên quyết (Offline & Cloud) |
+| **Trình chiếu tương tác (Walkthrough Player)** | ❌ Không hỗ trợ | 🎮 **Interactive Guide Player**: Trình chiếu từng bước như Scribe/Tango với Radar Pulse Hotspot và chế độ Nhấp chuột chuyển bước (Click-to-advance) |
 | **Tùy biến chỉ điểm (Click Marker)** | Chỉ có vòng tròn xanh/đỏ cố định | **4 phong cách** (Ring, Crosshair, Glow, Solid) + Chọn màu HEX bất kỳ + Đánh số Badge |
 | **Bảo vệ ứng dụng** | Hay bị ghi đè click chính nó | **Tự động nhận diện toạ độ Toolbar để bỏ qua click trên app** |
 | **Chế độ dòng lệnh (CLI)** | Hạn chế | ✅ Hỗ trợ đầy đủ cờ CLI `--cli` cho headless / automation |
@@ -48,7 +52,8 @@ step-recorder/
 │   └── test_all.py                 # Bộ kiểm thử tự động (Unit & Integration tests)
 └── step_recorder/
     ├── __init__.py
-    ├── i18n.py                     # Quản lý đa ngôn ngữ Song ngữ (VI & EN)
+    ├── ai_copilot.py                   # AI Copilot: Tự động tinh chỉnh văn phong SOP, Auto-chaptering & Summary (Offline / Cloud)
+    ├── i18n.py                         # Quản lý đa ngôn ngữ Song ngữ (VI & EN)
     ├── config.py                   # Quản lý cài đặt (load/save json nguyên tử)
     ├── models.py                   # Data models (Step, SessionMetadata)
     ├── window_info.py              # Nhận diện cửa sổ, tiến trình, PID, UI Control & API Exclude Capture

@@ -227,6 +227,23 @@ class StepEditorWindow:
         self.insert_steps_btn.pack(side=tk.LEFT, padx=(0, 8))
         bind_hover(self.insert_steps_btn, COLOR_PANEL_ALT, "#1e293b", COLOR_EMERALD, "#34d399")
 
+        # AI Copilot Polish button
+        self.ai_polish_btn = tk.Button(
+            header_right,
+            text=t("btn_ai_copilot"),
+            command=self._polish_with_ai_copilot,
+            bg="#4338ca",
+            fg="#ffffff",
+            activebackground="#3730a3",
+            relief=tk.FLAT,
+            font=("Segoe UI", 8, "bold"),
+            padx=10,
+            pady=3,
+            cursor="hand2"
+        )
+        self.ai_polish_btn.pack(side=tk.LEFT, padx=(0, 8))
+        bind_hover(self.ai_polish_btn, "#4338ca", "#3730a3", "#ffffff", "#e0e7ff")
+
         # Language toggle pill
         self.lang_btn = tk.Button(
             header_right,
@@ -1814,6 +1831,25 @@ class StepEditorWindow:
             self._renumber_steps(from_index=idx)
             self._on_filter_changed()
             self._select_step(idx + 1)
+
+    def _polish_with_ai_copilot(self) -> None:
+        """Use AI Copilot to polish all step descriptions, chapters, and summary."""
+        if not self.steps:
+            messagebox.showwarning("AI Copilot", t("no_steps_to_review"), parent=self.window)
+            return
+
+        try:
+            from ..ai_copilot import AICopilot
+            copilot = AICopilot(self.config)
+            self.steps, self.metadata = copilot.polish_steps(self.steps, self.metadata)
+            
+            # Refresh list and current step details
+            self._populate_list()
+            if 0 <= self.current_index < len(self.steps):
+                self._display_step_details(self.current_index)
+            messagebox.showinfo("AI Copilot", t("ai_copilot_done"), parent=self.window)
+        except Exception as e:
+            messagebox.showerror("AI Copilot", f"Lỗi AI Copilot: {e}", parent=self.window)
 
     # --- Final Export ---
     def _export_final_report(self) -> None:

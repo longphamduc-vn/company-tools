@@ -15,6 +15,7 @@ Kho lưu trữ tập trung (Monorepo) các công cụ, tiện ích phần mềm 
 | **Image Batch Translator** | [`image-batch-translator/`](./image-batch-translator) | Nhận diện chữ (Google Lens OCR), dịch thuật hàng loạt (Google Translate), xóa chữ cũ với màu nền median, vẽ chữ dịch và tự động đổi tên file. | Python, Tkinter, Pillow, Chrome-Lens-Py, Deep-Translator |
 | **Drawing Vault** | [`drawing-vault/`](./drawing-vault) | Tìm kiếm, tải hàng loạt và duyệt xem bản vẽ kỹ thuật (Batch Image Viewer) từ Vault nội bộ (FDM/Windchill) qua SSO. | Python, Tkinter, Pillow, Requests |
 | **Python Step Recorder** | [`step-recorder/`](./step-recorder) | Công cụ thay thế Windows Steps Recorder (PSR) mã nguồn mở: ghi lại từng bước thao tác chuột, bàn phím, chụp màn hình gắn chỉ điểm, xuất báo cáo HTML/Markdown/ZIP. | Python, Tkinter, Pillow, MSS, Pynput, Jinja2 |
+| **Outlook Rule Companion** | [`outlook-rule-manager/`](./outlook-rule-manager) | Quản lý, cấu hình tập trung và tự động hóa Rules cho Microsoft Outlook qua YAML: hỗ trợ tách file PST theo năm, kéo thả gán rule, không lo đầy quota. | Python, Tkinter, PyYAML, pywin32, openpyxl |
 
 ---
 
@@ -99,6 +100,18 @@ Mỗi dự án con được tổ chức độc lập trong thư mục riêng kè
   ```bash
   python run.py --cli --title "Kiem thu quy trinh" --output ./recordings
   ```
+
+### 7. Outlook Rule Companion (Quản lý Rule Outlook & Tách File Theo Năm)
+- Di chuyển vào thư mục:
+  ```bash
+  cd outlook-rule-manager
+  ```
+- Cài đặt thư viện:
+  ```bash
+  pip install -r requirements.txt
+  ```
+- Khởi chạy ứng dụng trên Windows: Kích đúp vào file `run_app.bat` hoặc chạy `python main.py`.
+- Khởi chạy ứng dụng trên Linux/WSL (chế độ mô phỏng): `./run_app.sh`.
 
 ---
 

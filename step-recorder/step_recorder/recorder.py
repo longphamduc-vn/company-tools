@@ -64,6 +64,13 @@ class RecordingEngine:
         self._apps_used: Set[str] = set()
         self._click_counter = 0
 
+        # Smart Keystroke Aggregator
+        self._text_buffer: List[str] = []
+        self._text_buffer_lock = threading.Lock()
+        self._text_flush_timer: Optional[threading.Timer] = None
+        self._typing_win_details = None
+        self._typing_cursor_pos: Optional[Tuple[int, int]] = None
+
     def set_ignore_bounds(self, bounds: List[Tuple[int, int, int, int]]) -> None:
         """Set window regions where clicks should NOT trigger recordings."""
         with self._lock:
@@ -111,6 +118,7 @@ class RecordingEngine:
         """Pause active recording."""
         if self.state == "recording":
             self.state = "paused"
+            self.flush_text_buffer()
             if self.on_state_changed:
                 self.on_state_changed(self.state)
 
@@ -125,11 +133,21 @@ class RecordingEngine:
         """Stop and finalize active recording."""
         if self.state in ("recording", "paused"):
             self.state = "stopped"
+            self.flush_text_buffer()
             self._stop_listeners()
             if self.metadata:
                 self.metadata.end_time = datetime.now()
                 self.metadata.total_steps = len(self.steps)
                 self.metadata.apps_used = sorted(list(self._apps_used))
+
+                # Auto AI Copilot Polish if enabled
+                if getattr(self.config, "ai_enabled", True):
+                    try:
+                        from .ai_copilot import AICopilot
+                        copilot = AICopilot(self.config)
+                        self.steps, self.metadata = copilot.polish_steps(self.steps, self.metadata)
+                    except Exception as e:
+                        safe_print(f"[StepRecorder] AI Copilot auto-polish warning: {e}")
             
             if self.on_state_changed:
                 self.on_state_changed(self.state)
@@ -185,6 +203,7 @@ class RecordingEngine:
                 process_name=win_details.process_name,
                 pid=win_details.pid,
                 ui_control=win_details.ui_control,
+                control_rect=getattr(win_details, "control_rect", None),
                 window_rect=win_details.window_rect,
                 relative_cursor=win_details.relative_cursor,
                 cursor_x=cur_x,
@@ -208,6 +227,122 @@ class RecordingEngine:
                 self.on_step_added(step)
         except Exception as e:
             safe_print(f"[StepRecorder] Error adding comment: {e}")
+
+    def flush_text_buffer(self, trigger_key: Optional[str] = None) -> None:
+        """Flush any aggregated typing into a unified 'type_text' step."""
+        with self._text_buffer_lock:
+            if self._text_flush_timer:
+                try:
+                    self._text_flush_timer.cancel()
+                except Exception:
+                    pass
+                self._text_flush_timer = None
+
+            if not self._text_buffer:
+                return
+
+            typed_str = "".join(self._text_buffer).strip()
+            self._text_buffer.clear()
+            win_details = self._typing_win_details
+            cursor_pos = self._typing_cursor_pos
+            self._typing_win_details = None
+            self._typing_cursor_pos = None
+
+        if not typed_str:
+            return
+
+        if self.state not in ("recording", "stopped"):
+            return
+
+        threading.Thread(
+            target=self._process_type_text_step,
+            args=(typed_str, trigger_key, win_details, cursor_pos),
+            daemon=True
+        ).start()
+
+    def _process_type_text_step(
+        self,
+        typed_str: str,
+        trigger_key: Optional[str],
+        win_details: Optional[Any],
+        cursor_pos: Optional[Tuple[int, int]]
+    ) -> None:
+        """Create and record an aggregated type_text step."""
+        try:
+            if not win_details:
+                win_details = get_active_window_info(cursor_pos)
+
+            is_pwd = getattr(win_details, "is_password", False)
+            display_text = "••••••••" if is_pwd else typed_str
+
+            if win_details.process_name and win_details.process_name != "Unknown":
+                self._apps_used.add(win_details.process_name)
+
+            with self._lock:
+                if self.state not in ("recording", "stopped"):
+                    return
+                if len(self.steps) >= self.config.max_steps:
+                    return
+                step_id = len(self.steps) + 1
+
+            raw_img, mon_left, mon_top = self.capture.capture_full_screen()
+
+            control_label = win_details.ui_control
+            key_suffix = f" ({trigger_key.upper()})" if trigger_key in ("enter", "tab") else ""
+            if control_label:
+                desc = t("action_type_text_control", text=display_text + key_suffix, control=control_label, window=win_details.title)
+            else:
+                desc = t("action_type_text", text=display_text + key_suffix, window=win_details.title)
+
+            adj_rect = None
+            ctrl_rect = getattr(win_details, "control_rect", None)
+            if ctrl_rect:
+                rx, ry, rw, rh = ctrl_rect
+                adj_rect = (rx - mon_left, ry - mon_top, rx + rw - mon_left, ry + rh - mon_top)
+
+            rel_cursor = (cursor_pos[0] - mon_left, cursor_pos[1] - mon_top) if cursor_pos else None
+
+            annotated_img = annotate_screenshot(
+                raw_img,
+                cursor_pos=rel_cursor,
+                step_id=step_id,
+                highlight_rect=adj_rect,
+                color_hex=self.config.highlight_color,
+                style=self.config.highlight_style,
+                show_badge=self.config.show_step_badge_on_screenshot
+            )
+            thumb_img = self.capture.create_thumbnail(annotated_img)
+
+            step = Step(
+                step_id=step_id,
+                timestamp=datetime.now(),
+                action_type="type_text",
+                description=desc,
+                window_title=win_details.title,
+                process_name=win_details.process_name,
+                pid=win_details.pid,
+                ui_control=win_details.ui_control,
+                control_rect=ctrl_rect,
+                window_rect=win_details.window_rect,
+                relative_cursor=win_details.relative_cursor,
+                cursor_x=cursor_pos[0] if cursor_pos else None,
+                cursor_y=cursor_pos[1] if cursor_pos else None,
+                highlight_rect=adj_rect,
+                typed_text=display_text,
+                raw_image_bytes=self.capture.image_to_bytes(raw_img),
+                annotated_image_bytes=self.capture.image_to_bytes(annotated_img),
+                thumbnail_bytes=self.capture.image_to_bytes(thumb_img)
+            )
+
+            with self._lock:
+                self.steps.append(step)
+
+            safe_print(f"[StepRecorder] Step #{step_id} (Type Text): {desc}")
+
+            if self.on_step_added:
+                self.on_step_added(step)
+        except Exception as e:
+            safe_print(f"[StepRecorder] Error processing type text: {e}")
 
     # Internal listeners and handlers
     def _start_listeners(self) -> None:
@@ -253,6 +388,9 @@ class RecordingEngine:
 
         if self.is_in_ignored_region(x, y):
             return
+
+        # Flush any pending text before processing mouse click
+        self.flush_text_buffer()
 
         now = time.time()
         is_double_click = False
@@ -355,6 +493,7 @@ class RecordingEngine:
                 process_name=process_name,
                 pid=win_details.pid,
                 ui_control=win_details.ui_control,
+                control_rect=getattr(win_details, "control_rect", None),
                 window_rect=win_details.window_rect,
                 relative_cursor=win_details.relative_cursor,
                 cursor_x=x,
@@ -482,9 +621,6 @@ class RecordingEngine:
         except Exception:
             return
 
-        if self.config.special_keys_only and not is_special:
-            return
-
         if key_name in ("ctrl_l", "ctrl_r", "shift", "shift_r", "alt_l", "alt_r", "cmd", "cmd_r"):
             return
 
@@ -494,6 +630,58 @@ class RecordingEngine:
             cur_x, cur_y = int(m_ctrl.position[0]), int(m_ctrl.position[1])
         except Exception:
             cur_x, cur_y = None, None
+
+        # Smart Keystroke Aggregator
+        if getattr(self.config, "enable_keystroke_aggregator", True):
+            # Normal printable characters or space
+            if not is_special or key == keyboard.Key.space:
+                char_to_add = " " if key == keyboard.Key.space else key_name
+                with self._text_buffer_lock:
+                    if self._text_flush_timer:
+                        try:
+                            self._text_flush_timer.cancel()
+                        except Exception:
+                            pass
+                    if not self._text_buffer:
+                        cursor_tuple = (cur_x, cur_y) if (cur_x is not None and cur_y is not None) else None
+                        self._typing_win_details = get_active_window_info(cursor_pos=cursor_tuple)
+                        self._typing_cursor_pos = cursor_tuple
+                    self._text_buffer.append(char_to_add)
+                    timeout_sec = getattr(self.config, "keystroke_flush_timeout_ms", 1200) / 1000.0
+                    self._text_flush_timer = threading.Timer(timeout_sec, lambda: self.flush_text_buffer())
+                    self._text_flush_timer.daemon = True
+                    self._text_flush_timer.start()
+                return
+
+            # Backspace inside buffer
+            if key == keyboard.Key.backspace:
+                with self._text_buffer_lock:
+                    if self._text_buffer:
+                        self._text_buffer.pop()
+                        if self._text_flush_timer:
+                            try:
+                                self._text_flush_timer.cancel()
+                            except Exception:
+                                pass
+                        timeout_sec = getattr(self.config, "keystroke_flush_timeout_ms", 1200) / 1000.0
+                        self._text_flush_timer = threading.Timer(timeout_sec, lambda: self.flush_text_buffer())
+                        self._text_flush_timer.daemon = True
+                        self._text_flush_timer.start()
+                        return
+
+            # Enter / Tab commits typed text with suffix
+            if key in (keyboard.Key.enter, keyboard.Key.tab):
+                with self._text_buffer_lock:
+                    has_buffered = len(self._text_buffer) > 0
+                if has_buffered:
+                    self.flush_text_buffer(trigger_key=key_name)
+                    return
+
+        # Flush any remaining buffer before special standalone keys
+        self.flush_text_buffer()
+
+        if self.config.special_keys_only and not is_special:
+            return
 
         threading.Thread(
             target=self._process_key_event,
@@ -537,6 +725,7 @@ class RecordingEngine:
                 process_name=win_details.process_name,
                 pid=win_details.pid,
                 ui_control=win_details.ui_control,
+                control_rect=getattr(win_details, "control_rect", None),
                 window_rect=win_details.window_rect,
                 relative_cursor=win_details.relative_cursor,
                 cursor_x=cur_x,

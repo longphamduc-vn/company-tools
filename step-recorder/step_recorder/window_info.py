@@ -18,12 +18,192 @@ class WindowDetails:
     process_name: str = "Unknown Process"
     pid: Optional[int] = None
     ui_control: Optional[str] = None
+    control_type: Optional[str] = None
+    control_name: Optional[str] = None
+    automation_id: Optional[str] = None
+    control_rect: Optional[Tuple[int, int, int, int]] = None  # (left, top, width, height) of control
+    is_password: bool = False
     window_rect: Optional[Tuple[int, int, int, int]] = None  # (left, top, width, height)
     relative_cursor: Optional[Tuple[int, int]] = None
 
     def __iter__(self):
         """Allows `title, process_name = get_active_window_info()` to work seamlessly."""
         return iter((self.title, self.process_name))
+
+
+# UIA Control Type constants for Microsoft UI Automation
+UIA_CONTROL_TYPES = {
+    50000: "Button", 50001: "Calendar", 50002: "CheckBox", 50003: "ComboBox",
+    50004: "Edit", 50005: "Hyperlink", 50006: "Image", 50007: "ListItem",
+    50008: "List", 50009: "Menu", 50010: "MenuBar", 50011: "MenuItem",
+    50012: "ProgressBar", 50013: "RadioButton", 50014: "ScrollBar", 50015: "Slider",
+    50016: "Spinner", 50017: "StatusBar", 50018: "Tab", 50019: "TabItem",
+    50020: "Text", 50021: "ToolBar", 50022: "ToolTip", 50023: "Tree",
+    50024: "TreeItem", 50025: "Custom", 50026: "Group", 50027: "Thumb",
+    50028: "DataGrid", 50029: "DataItem", 50030: "Document", 50031: "SplitButton",
+    50032: "Window", 50033: "Pane", 50034: "Header", 50035: "HeaderItem",
+    50036: "Table", 50037: "TitleBar", 50038: "Separator"
+}
+
+_uia_instance = None
+_uia_initialized = False
+
+
+def _get_uia_instance():
+    """Lazily initialize and return IUIAutomation instance using ctypes COM on Windows."""
+    global _uia_instance, _uia_initialized
+    if _uia_initialized:
+        return _uia_instance
+    _uia_initialized = True
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import Structure, c_void_p, byref
+
+        ole32 = ctypes.windll.ole32
+        ole32.CoInitialize(None)
+
+        class GUID(Structure):
+            _fields_ = [
+                ("Data1", ctypes.c_ulong),
+                ("Data2", ctypes.c_ushort),
+                ("Data3", ctypes.c_ushort),
+                ("Data4", ctypes.c_ubyte * 8)
+            ]
+
+        # CLSID_CUIAutomation {FF48DB42-9D38-4614-810E-9721C0F5D127}
+        clsid = GUID(0xFF48DB42, 0x9D38, 0x4614, (ctypes.c_ubyte * 8)(0x81, 0x0E, 0x97, 0x21, 0xC0, 0xF5, 0xD1, 0x27))
+        # IID_IUIAutomation {30CBE57D-D9D0-452A-AB13-7AC5AC4825EE}
+        iid = GUID(0x30CBE57D, 0xD9D0, 0x452A, (ctypes.c_ubyte * 8)(0xAB, 0x13, 0x7A, 0xC5, 0xAC, 0x48, 0x25, 0xEE))
+
+        p_uia = c_void_p()
+        hr = ole32.CoCreateInstance(byref(clsid), None, 1 | 4, byref(iid), byref(p_uia))
+        if hr == 0 and p_uia.value:
+            _uia_instance = p_uia
+    except Exception:
+        _uia_instance = None
+    return _uia_instance
+
+
+def _inspect_element_via_uia(cx: int, cy: int) -> Optional[dict]:
+    """Inspect element under (cx, cy) using Microsoft UI Automation (Chromium, WPF, WinUI, Office)."""
+    if sys.platform != "win32":
+        return None
+
+    # Option A: Try external uiautomation package if installed
+    try:
+        import uiautomation as auto
+        ctrl = auto.ControlFromPoint(cx, cy)
+        if ctrl and ctrl.Exists(0, 0):
+            rect = ctrl.BoundingRectangle
+            ctrl_rect = None
+            if rect:
+                ctrl_rect = (rect.left, rect.top, max(0, rect.right - rect.left), max(0, rect.bottom - rect.top))
+            return {
+                "name": (ctrl.Name or "").strip(),
+                "control_type": ctrl.ControlTypeName or "Control",
+                "automation_id": getattr(ctrl, "AutomationId", "") or "",
+                "rect": ctrl_rect,
+                "is_password": getattr(ctrl, "IsPassword", False)
+            }
+    except Exception:
+        pass
+
+    # Option B: Direct native ctypes COM call to IUIAutomation
+    try:
+        import ctypes
+        from ctypes import wintypes, Structure, c_void_p, POINTER, c_long, c_wchar_p, c_int, byref, WINFUNCTYPE, HRESULT
+
+        p_uia = _get_uia_instance()
+        if not p_uia:
+            return None
+
+        class POINT(Structure):
+            _fields_ = [("x", c_long), ("y", c_long)]
+
+        class RECT(Structure):
+            _fields_ = [("left", c_long), ("top", c_long), ("right", c_long), ("bottom", c_long)]
+
+        vtbl = ctypes.cast(p_uia, POINTER(POINTER(c_void_p))).contents
+        fn_element_from_point = WINFUNCTYPE(HRESULT, c_void_p, POINT, POINTER(c_void_p))(vtbl[7])
+
+        pt = POINT(cx, cy)
+        p_elem = c_void_p()
+        hr = fn_element_from_point(p_uia, pt, byref(p_elem))
+        if hr != 0 or not p_elem.value:
+            return None
+
+        try:
+            elem_vtbl = ctypes.cast(p_elem, POINTER(POINTER(c_void_p))).contents
+
+            # 1. Name (index 23)
+            name = ""
+            try:
+                fn_get_name = WINFUNCTYPE(HRESULT, c_void_p, POINTER(c_wchar_p))(elem_vtbl[23])
+                bstr_name = c_wchar_p()
+                if fn_get_name(p_elem, byref(bstr_name)) == 0 and bstr_name.value:
+                    name = bstr_name.value.strip()
+            except Exception:
+                pass
+
+            # 2. Control Type (index 21)
+            ctrl_type = "Control"
+            try:
+                fn_get_type = WINFUNCTYPE(HRESULT, c_void_p, POINTER(c_long))(elem_vtbl[21])
+                ctrl_type_id = c_long(0)
+                if fn_get_type(p_elem, byref(ctrl_type_id)) == 0:
+                    ctrl_type = UIA_CONTROL_TYPES.get(ctrl_type_id.value, "Control")
+            except Exception:
+                pass
+
+            # 3. AutomationId (index 29)
+            auto_id = ""
+            try:
+                fn_get_auto_id = WINFUNCTYPE(HRESULT, c_void_p, POINTER(c_wchar_p))(elem_vtbl[29])
+                bstr_auto_id = c_wchar_p()
+                if fn_get_auto_id(p_elem, byref(bstr_auto_id)) == 0 and bstr_auto_id.value:
+                    auto_id = bstr_auto_id.value.strip()
+            except Exception:
+                pass
+
+            # 4. Password check (index 35)
+            is_password = False
+            try:
+                fn_get_is_pwd = WINFUNCTYPE(HRESULT, c_void_p, POINTER(c_int))(elem_vtbl[35])
+                is_pwd_val = c_int(0)
+                if fn_get_is_pwd(p_elem, byref(is_pwd_val)) == 0:
+                    is_password = bool(is_pwd_val.value)
+            except Exception:
+                pass
+
+            # 5. Bounding Rect (index 43)
+            ctrl_rect = None
+            try:
+                fn_get_rect = WINFUNCTYPE(HRESULT, c_void_p, POINTER(RECT))(elem_vtbl[43])
+                bound_rect = RECT()
+                if fn_get_rect(p_elem, byref(bound_rect)) == 0:
+                    w = max(0, bound_rect.right - bound_rect.left)
+                    h = max(0, bound_rect.bottom - bound_rect.top)
+                    ctrl_rect = (bound_rect.left, bound_rect.top, w, h)
+            except Exception:
+                pass
+
+            return {
+                "name": name,
+                "control_type": ctrl_type,
+                "automation_id": auto_id,
+                "rect": ctrl_rect,
+                "is_password": is_password
+            }
+        finally:
+            try:
+                fn_release = WINFUNCTYPE(ctypes.c_ulong, c_void_p)(elem_vtbl[2])
+                fn_release(p_elem)
+            except Exception:
+                pass
+    except Exception:
+        return None
 
 
 def get_active_window_info(cursor_pos: Optional[Tuple[int, int]] = None) -> WindowDetails:
@@ -95,33 +275,61 @@ def _get_windows_window_info(cursor_pos: Optional[Tuple[int, int]] = None) -> Wi
         # 4. Calculate relative cursor position & detect UI control
         rel_cursor = None
         ui_control = None
+        ctrl_type = None
+        ctrl_name = None
+        auto_id = None
+        ctrl_rect = None
+        is_pwd = False
 
         if cursor_pos:
             cx, cy = cursor_pos
             rel_cursor = (cx - rect.left, cy - rect.top)
 
-            # Inspect child control under cursor
-            pt = wintypes.POINT(cx, cy)
-            hwnd_child = user32.WindowFromPoint(pt)
-            if hwnd_child:
-                cbuff = ctypes.create_unicode_buffer(256)
-                user32.GetClassNameW(hwnd_child, cbuff, 256)
-                cls_name = cbuff.value
+            # Option A: Deep inspection via Microsoft UI Automation
+            uia_info = _inspect_element_via_uia(cx, cy)
+            if uia_info and (uia_info.get("name") or uia_info.get("control_type")):
+                ctrl_name = uia_info.get("name")
+                ctrl_type = uia_info.get("control_type")
+                auto_id = uia_info.get("automation_id")
+                ctrl_rect = uia_info.get("rect")
+                is_pwd = uia_info.get("is_password", False)
+                if ctrl_name and ctrl_type:
+                    ui_control = f"'{ctrl_name}' [{ctrl_type}]"
+                elif ctrl_name:
+                    ui_control = f"'{ctrl_name}'"
+                elif ctrl_type:
+                    ui_control = f"[{ctrl_type}]"
 
-                tbuff = ctypes.create_unicode_buffer(256)
-                user32.GetWindowTextW(hwnd_child, tbuff, 256)
-                ctrl_txt = tbuff.value.strip()
+            # Option B: Fallback to Win32 WindowFromPoint if UIA didn't resolve named control
+            if not ui_control:
+                pt = wintypes.POINT(cx, cy)
+                hwnd_child = user32.WindowFromPoint(pt)
+                if hwnd_child:
+                    cbuff = ctypes.create_unicode_buffer(256)
+                    user32.GetClassNameW(hwnd_child, cbuff, 256)
+                    cls_name = cbuff.value
 
-                if ctrl_txt:
-                    ui_control = f"'{ctrl_txt}' ({cls_name})"
-                else:
-                    ui_control = f"{cls_name}"
+                    tbuff = ctypes.create_unicode_buffer(256)
+                    user32.GetWindowTextW(hwnd_child, tbuff, 256)
+                    ctrl_txt = tbuff.value.strip()
+
+                    if ctrl_txt:
+                        ui_control = f"'{ctrl_txt}' ({cls_name})"
+                        ctrl_name = ctrl_txt
+                    else:
+                        ui_control = f"{cls_name}"
+                    ctrl_type = cls_name
 
         return WindowDetails(
             title=title,
             process_name=process_name,
             pid=pid.value,
             ui_control=ui_control,
+            control_type=ctrl_type,
+            control_name=ctrl_name,
+            automation_id=auto_id,
+            control_rect=ctrl_rect,
+            is_password=is_pwd,
             window_rect=window_rect,
             relative_cursor=rel_cursor
         )
