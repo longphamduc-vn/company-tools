@@ -9,6 +9,7 @@ import time
 import shutil
 import tempfile
 import threading
+import queue
 import platform
 from datetime import datetime
 from typing import Optional, List, Callable, Tuple, Set, Any
@@ -67,6 +68,12 @@ class RecordingEngine:
         self._lock = threading.Lock()
         self._apps_used: Set[str] = set()
         self._click_counter = 0
+        self._step_counter = 0
+
+        # Sequential background worker queue for strictly monotonic FIFO step execution
+        self._event_queue: queue.Queue = queue.Queue()
+        self._worker_thread: Optional[threading.Thread] = None
+        self._worker_stop_event = threading.Event()
 
         # Smart Keystroke Aggregator
         self._text_buffer: List[str] = []
@@ -77,6 +84,142 @@ class RecordingEngine:
 
         # Tiered Storage & L2 Disk Spooling
         self._spool_dir: Optional[str] = None
+
+    def _reserve_step_id(self) -> Optional[int]:
+        """Atomically reserve the next monotonic step_id if within max_steps."""
+        with self._lock:
+            if self.state not in ("recording", "stopped"):
+                return None
+            if self._step_counter >= self.config.max_steps:
+                return None
+            self._step_counter += 1
+            return self._step_counter
+
+    def _worker_loop(self) -> None:
+        """Background worker processing events strictly sequentially in FIFO order."""
+        while not self._worker_stop_event.is_set() or not self._event_queue.empty():
+            try:
+                task = self._event_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            try:
+                if callable(task):
+                    task()
+            except Exception as e:
+                safe_print(f"[StepRecorder] Worker error processing step: {e}")
+            finally:
+                self._event_queue.task_done()
+
+    def drain_queue(self, timeout: float = 10.0) -> None:
+        """Wait until all queued capture processing tasks are completed."""
+        start = time.time()
+        while self._event_queue.unfinished_tasks > 0:
+            if time.time() - start > timeout:
+                safe_print("[StepRecorder] Warning: Timed out waiting for processing queue to drain.")
+                break
+            time.sleep(0.01)
+
+    def _enqueue_or_execute(self, task_fn: Callable[[], Any], sync: bool = False) -> Any:
+        """If worker thread is active, enqueue task; if sync requested, wait for queue. Otherwise run immediately."""
+        if self._worker_thread and self._worker_thread.is_alive():
+            self._event_queue.put(task_fn)
+            if sync:
+                self.drain_queue()
+            return None
+        else:
+            return task_fn()
+
+    def _commit_step(
+        self,
+        step_id: int,
+        action_type: str,
+        description: str,
+        window_title: str,
+        process_name: str,
+        pid: Optional[int],
+        ui_control: Optional[str],
+        control_rect: Optional[Tuple[int, int, int, int]],
+        window_rect: Optional[Tuple[int, int, int, int]],
+        relative_cursor: Optional[Tuple[int, int]],
+        cursor_x: Optional[int],
+        cursor_y: Optional[int],
+        raw_img: Image.Image,
+        rel_cursor: Optional[Tuple[int, int]] = None,
+        highlight_rect: Optional[Tuple[int, int, int, int]] = None,
+        typed_text: Optional[str] = None,
+        user_comment: Optional[str] = None,
+        is_section_header: bool = False,
+        section_title: Optional[str] = None,
+        section_description: Optional[str] = None,
+        log_tag: str = ""
+    ) -> Step:
+        """
+        Unified step commit pipeline:
+        Annotate screenshot, generate thumbnail, spool to disk/RAM,
+        append final Step to self.steps, print log, and notify listeners.
+        """
+        if process_name and process_name != "Unknown":
+            self._apps_used.add(process_name)
+
+        # 1. Annotate
+        annotated_img = annotate_screenshot(
+            raw_img,
+            cursor_pos=rel_cursor,
+            step_id=step_id,
+            highlight_rect=highlight_rect,
+            color_hex=self.config.highlight_color,
+            radius=self.config.highlight_radius,
+            style=self.config.highlight_style,
+            show_badge=self.config.show_step_badge_on_screenshot
+        )
+
+        # 2. Thumbnail
+        thumb_img = self.capture.create_thumbnail(annotated_img)
+
+        # 3. Spool images
+        spool_raw, spool_ann, spool_thumb, raw_b, ann_b, thumb_b, mime = self._spool_step_images(
+            step_id, raw_img, annotated_img, thumb_img
+        )
+
+        step = Step(
+            step_id=step_id,
+            timestamp=datetime.now(),
+            action_type=action_type,
+            description=description,
+            window_title=window_title,
+            process_name=process_name,
+            pid=pid,
+            ui_control=ui_control,
+            control_rect=control_rect,
+            window_rect=window_rect,
+            relative_cursor=relative_cursor,
+            cursor_x=cursor_x,
+            cursor_y=cursor_y,
+            highlight_rect=highlight_rect,
+            typed_text=typed_text,
+            user_comment=user_comment,
+            is_section_header=is_section_header,
+            section_title=section_title,
+            section_description=section_description,
+            spool_raw_path=spool_raw,
+            spool_annotated_path=spool_ann,
+            spool_thumb_path=spool_thumb,
+            raw_image_bytes=raw_b,
+            annotated_image_bytes=ann_b,
+            thumbnail_bytes=thumb_b,
+            image_mime_type=mime
+        )
+
+        with self._lock:
+            self.steps.append(step)
+
+        tag_str = f" ({log_tag})" if log_tag else ""
+        safe_print(f"[StepRecorder] Step #{step_id}{tag_str}: {description}")
+
+        if self.on_step_added:
+            self.on_step_added(step)
+
+        return step
 
     def _spool_step_images(
         self,
@@ -121,9 +264,14 @@ class RecordingEngine:
                 safe_print(f"[StepRecorder] Warning cleaning spool dir: {e}")
 
     def close(self) -> None:
-        """Release capture driver and clean up temporary spool resources."""
+        """Release capture driver, drain worker queue, and clean up temporary spool resources."""
         self._stop_listeners()
         self.flush_text_buffer()
+        self.drain_queue(timeout=5.0)
+        self._worker_stop_event.set()
+        if self._worker_thread and self._worker_thread.is_alive():
+            self._worker_thread.join(timeout=1.0)
+            self._worker_thread = None
         if hasattr(self, "capture") and self.capture:
             try:
                 self.capture.close()
@@ -149,14 +297,31 @@ class RecordingEngine:
         return False
 
     def start_recording(self, title: str = "Problem Steps Recording", description: str = "") -> None:
-        """Start a new recording session."""
+        """Start a new recording session and start sequential background worker."""
         if self.state == "recording":
             return
 
         self.steps.clear()
         self._apps_used.clear()
         self._click_counter = 0
-        
+        self._step_counter = 0
+
+        # Reset and start the sequential processing worker
+        while not self._event_queue.empty():
+            try:
+                self._event_queue.get_nowait()
+                self._event_queue.task_done()
+            except Exception:
+                break
+
+        self._worker_stop_event.clear()
+        self._worker_thread = threading.Thread(
+            target=self._worker_loop,
+            name="StepRecorderWorker",
+            daemon=True
+        )
+        self._worker_thread.start()
+
         session_id = datetime.now().strftime("rec_%Y%m%d_%H%M%S")
         if getattr(self.config, "enable_disk_spooling", True):
             base_dir = self.config.disk_spool_dir or tempfile.gettempdir()
@@ -186,6 +351,7 @@ class RecordingEngine:
         if self.state == "recording":
             self.state = "paused"
             self.flush_text_buffer()
+            self.drain_queue(timeout=5.0)
             if self.on_state_changed:
                 self.on_state_changed(self.state)
 
@@ -197,11 +363,19 @@ class RecordingEngine:
                 self.on_state_changed(self.state)
 
     def stop_recording(self) -> None:
-        """Stop and finalize active recording."""
+        """Stop and finalize active recording, draining sequential worker queue."""
         if self.state in ("recording", "paused"):
             self.state = "stopped"
             self.flush_text_buffer()
             self._stop_listeners()
+
+            # Ensure all queued frames are fully processed and saved before returning
+            self.drain_queue(timeout=10.0)
+            self._worker_stop_event.set()
+            if self._worker_thread and self._worker_thread.is_alive():
+                self._worker_thread.join(timeout=2.0)
+                self._worker_thread = None
+
             if self.metadata:
                 self.metadata.end_time = datetime.now()
                 self.metadata.total_steps = len(self.steps)
@@ -237,33 +411,18 @@ class RecordingEngine:
                 scope=getattr(self.config, "capture_scope", "cursor_monitor"),
                 padding=getattr(self.config, "active_window_padding", 24)
             )
-            if win_details.process_name and win_details.process_name != "Unknown":
-                self._apps_used.add(win_details.process_name)
 
-            step_id = len(self.steps) + 1
+            step_id = self._reserve_step_id()
+            if step_id is None:
+                return
             
             adj_rect = None
             if highlight_rect:
                 rx1, ry1, rx2, ry2 = highlight_rect
                 adj_rect = (rx1 - mon_left, ry1 - mon_top, rx2 - mon_left, ry2 - mon_top)
 
-            annotated_img = annotate_screenshot(
-                raw_img,
+            task = lambda: self._commit_step(
                 step_id=step_id,
-                highlight_rect=adj_rect,
-                color_hex=self.config.highlight_color,
-                style=self.config.highlight_style
-            )
-            
-            thumb_img = self.capture.create_thumbnail(annotated_img)
-            
-            spool_raw, spool_ann, spool_thumb, raw_b, ann_b, thumb_b, mime = self._spool_step_images(
-                step_id, raw_img, annotated_img, thumb_img
-            )
-
-            step = Step(
-                step_id=step_id,
-                timestamp=datetime.now(),
                 action_type="comment",
                 description=f"User Comment: {comment_text}",
                 window_title=win_details.title,
@@ -275,27 +434,15 @@ class RecordingEngine:
                 relative_cursor=win_details.relative_cursor,
                 cursor_x=cur_x,
                 cursor_y=cur_y,
+                raw_img=raw_img,
                 highlight_rect=adj_rect,
                 user_comment=comment_text,
                 is_section_header=is_section_header,
                 section_title=section_title,
                 section_description=section_description,
-                spool_raw_path=spool_raw,
-                spool_annotated_path=spool_ann,
-                spool_thumb_path=spool_thumb,
-                raw_image_bytes=raw_b,
-                annotated_image_bytes=ann_b,
-                thumbnail_bytes=thumb_b,
-                image_mime_type=mime
+                log_tag="Comment"
             )
-
-            with self._lock:
-                self.steps.append(step)
-
-            safe_print(f"[StepRecorder] Step #{step.step_id} (Comment): {comment_text}")
-
-            if self.on_step_added:
-                self.on_step_added(step)
+            self._enqueue_or_execute(task, sync=True)
         except Exception as e:
             safe_print(f"[StepRecorder] Error adding comment: {e}")
 
@@ -336,7 +483,8 @@ class RecordingEngine:
         typed_str: str,
         trigger_key: Optional[str],
         win_details: Optional[Any],
-        cursor_pos: Optional[Tuple[int, int]]
+        cursor_pos: Optional[Tuple[int, int]],
+        sync: bool = False
     ) -> None:
         """Create and record an aggregated type_text step."""
         try:
@@ -346,15 +494,9 @@ class RecordingEngine:
             is_pwd = getattr(win_details, "is_password", False)
             display_text = "••••••••" if is_pwd else typed_str
 
-            if win_details.process_name and win_details.process_name != "Unknown":
-                self._apps_used.add(win_details.process_name)
-
-            with self._lock:
-                if self.state not in ("recording", "stopped"):
-                    return
-                if len(self.steps) >= self.config.max_steps:
-                    return
-                step_id = len(self.steps) + 1
+            step_id = self._reserve_step_id()
+            if step_id is None:
+                return
 
             raw_img, mon_left, mon_top = self.capture.capture_for_event(
                 cursor_pos=cursor_pos,
@@ -378,24 +520,8 @@ class RecordingEngine:
 
             rel_cursor = (cursor_pos[0] - mon_left, cursor_pos[1] - mon_top) if cursor_pos else None
 
-            annotated_img = annotate_screenshot(
-                raw_img,
-                cursor_pos=rel_cursor,
+            task = lambda: self._commit_step(
                 step_id=step_id,
-                highlight_rect=adj_rect,
-                color_hex=self.config.highlight_color,
-                style=self.config.highlight_style,
-                show_badge=self.config.show_step_badge_on_screenshot
-            )
-            thumb_img = self.capture.create_thumbnail(annotated_img)
-
-            spool_raw, spool_ann, spool_thumb, raw_b, ann_b, thumb_b, mime = self._spool_step_images(
-                step_id, raw_img, annotated_img, thumb_img
-            )
-
-            step = Step(
-                step_id=step_id,
-                timestamp=datetime.now(),
                 action_type="type_text",
                 description=desc,
                 window_title=win_details.title,
@@ -407,24 +533,13 @@ class RecordingEngine:
                 relative_cursor=win_details.relative_cursor,
                 cursor_x=cursor_pos[0] if cursor_pos else None,
                 cursor_y=cursor_pos[1] if cursor_pos else None,
+                raw_img=raw_img,
+                rel_cursor=rel_cursor,
                 highlight_rect=adj_rect,
                 typed_text=display_text,
-                spool_raw_path=spool_raw,
-                spool_annotated_path=spool_ann,
-                spool_thumb_path=spool_thumb,
-                raw_image_bytes=raw_b,
-                annotated_image_bytes=ann_b,
-                thumbnail_bytes=thumb_b,
-                image_mime_type=mime
+                log_tag="Type Text"
             )
-
-            with self._lock:
-                self.steps.append(step)
-
-            safe_print(f"[StepRecorder] Step #{step_id} (Type Text): {desc}")
-
-            if self.on_step_added:
-                self.on_step_added(step)
+            self._enqueue_or_execute(task, sync=sync)
         except Exception as e:
             safe_print(f"[StepRecorder] Error processing type text: {e}")
 
@@ -467,8 +582,9 @@ class RecordingEngine:
             return
         if self.state != "recording":
             return
-        if len(self.steps) >= self.config.max_steps:
-            return
+        with self._lock:
+            if self._step_counter >= self.config.max_steps:
+                return
 
         if self.is_in_ignored_region(x, y):
             return
@@ -495,9 +611,11 @@ class RecordingEngine:
         self._click_counter += 1
         click_id = self._click_counter
 
+        # Launch fast capture dispatcher (takes raw screen, sleeps 20ms, takes 2nd raw screen, enqueues to worker)
         threading.Thread(
             target=self._process_click_event,
             args=(x, y, button, is_double_click, click_id),
+            kwargs={"sync": False},
             daemon=True
         ).start()
 
@@ -507,16 +625,17 @@ class RecordingEngine:
         y: int,
         button: mouse.Button,
         is_double_click: bool,
-        click_id: int = 0
+        click_id: int = 0,
+        sync: bool = True
     ) -> None:
-        """Process click in background thread: immediate capture, annotate, log; then delayed 2nd capture if enabled."""
+        """Fast capture dispatcher: immediate screen grab, delayed 2nd grab if enabled, then enqueue to sequential worker."""
         try:
             # 1. Single capture mode delay if dual capture is disabled
             if not getattr(self.config, "dual_capture_on_click", True):
                 if self.config.screenshot_delay_ms > 0:
                     time.sleep(self.config.screenshot_delay_ms / 1000.0)
 
-            # Rich window and control inspection
+            # Rich window and control inspection at click moment
             win_details = get_active_window_info(cursor_pos=(x, y))
             window_title = win_details.title
             process_name = win_details.process_name
@@ -529,15 +648,10 @@ class RecordingEngine:
                 padding=getattr(self.config, "active_window_padding", 24)
             )
 
-            if process_name and process_name != "Unknown":
-                self._apps_used.add(process_name)
-
-            with self._lock:
-                if self.state != "recording":
-                    return
-                if len(self.steps) >= self.config.max_steps:
-                    return
-                step_id = len(self.steps) + 1
+            # Atomically reserve step ID
+            step_id = self._reserve_step_id()
+            if step_id is None:
+                return
 
             rel_x = x - mon_left
             rel_y = y - mon_top
@@ -562,24 +676,8 @@ class RecordingEngine:
                 else:
                     desc = t("action_left_click", x=x, y=y, window=window_title)
 
-            annotated_img = annotate_screenshot(
-                raw_img,
-                cursor_pos=(rel_x, rel_y),
+            task1 = lambda: self._commit_step(
                 step_id=step_id,
-                color_hex=self.config.highlight_color,
-                radius=self.config.highlight_radius,
-                style=self.config.highlight_style,
-                show_badge=self.config.show_step_badge_on_screenshot
-            )
-            thumb_img = self.capture.create_thumbnail(annotated_img)
-
-            spool_raw, spool_ann, spool_thumb, raw_b, ann_b, thumb_b, mime = self._spool_step_images(
-                step_id, raw_img, annotated_img, thumb_img
-            )
-
-            step = Step(
-                step_id=step_id,
-                timestamp=datetime.now(),
                 action_type=action_type,
                 description=desc,
                 window_title=window_title,
@@ -591,124 +689,89 @@ class RecordingEngine:
                 relative_cursor=win_details.relative_cursor,
                 cursor_x=x,
                 cursor_y=y,
-                spool_raw_path=spool_raw,
-                spool_annotated_path=spool_ann,
-                spool_thumb_path=spool_thumb,
-                raw_image_bytes=raw_b,
-                annotated_image_bytes=ann_b,
-                thumbnail_bytes=thumb_b,
-                image_mime_type=mime
+                raw_img=raw_img,
+                rel_cursor=(rel_x, rel_y),
+                log_tag="Click 1/2 - Chụp ngay"
             )
 
-            with self._lock:
-                self.steps.append(step)
+            # If dual capture is disabled, enqueue task1 and return
+            if not getattr(self.config, "dual_capture_on_click", True):
+                self._enqueue_or_execute(task1, sync=sync)
+                return
+            else:
+                self._enqueue_or_execute(task1, sync=False)
 
-            safe_print(f"[StepRecorder] Step #{step_id} (Click 1/2 - Chụp ngay): {desc}")
+            # 3. Second capture: If dual_capture_on_click is enabled, wait delay_ms and capture result
+            delay_ms = getattr(self.config, "second_capture_delay_ms", 20)
+            if delay_ms > 0:
+                time.sleep(delay_ms / 1000.0)
 
-            if self.on_step_added:
-                self.on_step_added(step)
+            # Check if recording is still active after delay
+            if self.state != "recording":
+                if sync:
+                    self.drain_queue()
+                return
 
-            # 3. Second capture: If dual_capture_on_click is enabled, wait ms and capture result
-            if getattr(self.config, "dual_capture_on_click", True):
-                delay_ms = getattr(self.config, "second_capture_delay_ms", 500)
-                if delay_ms > 0:
-                    time.sleep(delay_ms / 1000.0)
+            # If user clicked again during the sleep, skip this intermediate delayed shot
+            if click_id > 0 and self._click_counter > click_id:
+                if sync:
+                    self.drain_queue()
+                return
 
-                # Check if recording is still active after delay
-                if self.state != "recording":
+            # Capture 2: Result screen after delay
+            win_details2 = get_active_window_info(cursor_pos=(x, y))
+            win2_title = win_details2.title
+            proc2_name = win_details2.process_name
+
+            raw_img2, mon_left2, mon_top2 = self.capture.capture_for_event(
+                cursor_pos=(x, y),
+                window_rect=win_details2.window_rect,
+                scope=getattr(self.config, "capture_scope", "cursor_monitor"),
+                padding=getattr(self.config, "active_window_padding", 24)
+            )
+
+            # Smart Auto-Detection: Check if UI actually changed
+            if getattr(self.config, "dual_capture_smart_detect", True):
+                if not has_ui_changed(
+                    raw_img, raw_img2,
+                    click_pos=(rel_x, rel_y),
+                    win1=window_title,
+                    win2=win2_title
+                ):
+                    safe_print(f"[StepRecorder] Giao diện không đổi -> Tự động giữ 1 ảnh cho Bước #{step_id}.")
+                    if sync:
+                        self.drain_queue()
                     return
 
-                with self._lock:
-                    if self.state != "recording":
-                        return
-                    if len(self.steps) >= self.config.max_steps:
-                        return
-                    # If user clicked again during the sleep, skip this intermediate delayed shot
-                    if click_id > 0 and self._click_counter > click_id:
-                        return
+            step_id2 = self._reserve_step_id()
+            if step_id2 is None:
+                if sync:
+                    self.drain_queue()
+                return
 
-                # Capture 2: Result screen after delay
-                win_details2 = get_active_window_info(cursor_pos=(x, y))
-                win2_title = win_details2.title
-                proc2_name = win_details2.process_name
+            if win2_title and win2_title != window_title:
+                desc2 = t("action_click_result_switched", delay=delay_ms, window=win2_title)
+            else:
+                desc2 = t("action_click_result", delay=delay_ms, window=window_title)
 
-                raw_img2, mon_left2, mon_top2 = self.capture.capture_for_event(
-                    cursor_pos=(x, y),
-                    window_rect=win_details2.window_rect,
-                    scope=getattr(self.config, "capture_scope", "cursor_monitor"),
-                    padding=getattr(self.config, "active_window_padding", 24)
-                )
-
-                # Smart Auto-Detection: Check if UI actually changed
-                if getattr(self.config, "dual_capture_smart_detect", True):
-                    if not has_ui_changed(
-                        raw_img, raw_img2,
-                        click_pos=(rel_x, rel_y),
-                        win1=window_title,
-                        win2=win2_title
-                    ):
-                        safe_print(f"[StepRecorder] Giao diện không đổi -> Tự động giữ 1 ảnh cho Bước #{step_id}.")
-                        return
-
-                with self._lock:
-                    if self.state != "recording" or len(self.steps) >= self.config.max_steps:
-                        return
-                    step_id2 = len(self.steps) + 1
-
-                if proc2_name and proc2_name != "Unknown":
-                    self._apps_used.add(proc2_name)
-
-                # Result description
-                if win2_title and win2_title != window_title:
-                    desc2 = t("action_click_result_switched", delay=delay_ms, window=win2_title)
-                else:
-                    desc2 = t("action_click_result", delay=delay_ms, window=window_title)
-
-                # Annotate step 2: no cursor click marker, but include step badge
-                annotated_img2 = annotate_screenshot(
-                    raw_img2,
-                    cursor_pos=None,
-                    step_id=step_id2,
-                    color_hex=self.config.highlight_color,
-                    radius=self.config.highlight_radius,
-                    style=self.config.highlight_style,
-                    show_badge=self.config.show_step_badge_on_screenshot
-                )
-                thumb_img2 = self.capture.create_thumbnail(annotated_img2)
-
-                spool_raw2, spool_ann2, spool_thumb2, raw_b2, ann_b2, thumb_b2, mime2 = self._spool_step_images(
-                    step_id2, raw_img2, annotated_img2, thumb_img2
-                )
-
-                step2 = Step(
-                    step_id=step_id2,
-                    timestamp=datetime.now(),
-                    action_type="click_result",
-                    description=desc2,
-                    window_title=win2_title,
-                    process_name=proc2_name,
-                    pid=win_details2.pid,
-                    ui_control=win_details2.ui_control,
-                    window_rect=win_details2.window_rect,
-                    relative_cursor=win_details2.relative_cursor,
-                    cursor_x=None,
-                    cursor_y=None,
-                    spool_raw_path=spool_raw2,
-                    spool_annotated_path=spool_ann2,
-                    spool_thumb_path=spool_thumb2,
-                    raw_image_bytes=raw_b2,
-                    annotated_image_bytes=ann_b2,
-                    thumbnail_bytes=thumb_b2,
-                    image_mime_type=mime2
-                )
-
-                with self._lock:
-                    self.steps.append(step2)
-
-                safe_print(f"[StepRecorder] Step #{step_id2} (Click 2/2 - Kết quả sau {delay_ms}ms): {desc2}")
-
-                if self.on_step_added:
-                    self.on_step_added(step2)
+            task2 = lambda: self._commit_step(
+                step_id=step_id2,
+                action_type="click_result",
+                description=desc2,
+                window_title=win2_title,
+                process_name=proc2_name,
+                pid=win_details2.pid,
+                ui_control=win_details2.ui_control,
+                control_rect=None,
+                window_rect=win_details2.window_rect,
+                relative_cursor=win_details2.relative_cursor,
+                cursor_x=None,
+                cursor_y=None,
+                raw_img=raw_img2,
+                rel_cursor=None,
+                log_tag=f"Click 2/2 - Kết quả sau {delay_ms}ms"
+            )
+            self._enqueue_or_execute(task2, sync=sync)
 
         except Exception as e:
             safe_print(f"[StepRecorder] Error processing click: {e}")
@@ -717,8 +780,9 @@ class RecordingEngine:
         """Triggered on key press event."""
         if self.state != "recording":
             return
-        if len(self.steps) >= self.config.max_steps:
-            return
+        with self._lock:
+            if self._step_counter >= self.config.max_steps:
+                return
 
         key_name = ""
         is_special = False
@@ -797,10 +861,11 @@ class RecordingEngine:
         threading.Thread(
             target=self._process_key_event,
             args=(key_name, cur_x, cur_y),
+            kwargs={"sync": False},
             daemon=True
         ).start()
 
-    def _process_key_event(self, key_name: str, cur_x: Optional[int], cur_y: Optional[int]) -> None:
+    def _process_key_event(self, key_name: str, cur_x: Optional[int], cur_y: Optional[int], sync: bool = True) -> None:
         """Process keyboard action step."""
         try:
             if self.config.screenshot_delay_ms > 0:
@@ -815,30 +880,16 @@ class RecordingEngine:
                 scope=getattr(self.config, "capture_scope", "cursor_monitor"),
                 padding=getattr(self.config, "active_window_padding", 24)
             )
-            
-            if win_details.process_name and win_details.process_name != "Unknown":
-                self._apps_used.add(win_details.process_name)
 
-            step_id = len(self.steps) + 1
+            step_id = self._reserve_step_id()
+            if step_id is None:
+                return
+
             desc = t("action_key_press", key=key_name.upper(), window=win_details.title)
+            rel_cursor = (cur_x - mon_left, cur_y - mon_top) if cursor_tuple else None
 
-            # Annotate with badge
-            annotated_img = annotate_screenshot(
-                raw_img,
-                cursor_pos=(cur_x - mon_left, cur_y - mon_top) if cursor_tuple else None,
+            task = lambda: self._commit_step(
                 step_id=step_id,
-                color_hex=self.config.highlight_color,
-                style=self.config.highlight_style
-            )
-            thumb_img = self.capture.create_thumbnail(annotated_img)
-
-            spool_raw, spool_ann, spool_thumb, raw_b, ann_b, thumb_b, mime = self._spool_step_images(
-                step_id, raw_img, annotated_img, thumb_img
-            )
-
-            step = Step(
-                step_id=step_id,
-                timestamp=datetime.now(),
                 action_type="key_press",
                 description=desc,
                 window_title=win_details.title,
@@ -850,21 +901,9 @@ class RecordingEngine:
                 relative_cursor=win_details.relative_cursor,
                 cursor_x=cur_x,
                 cursor_y=cur_y,
-                spool_raw_path=spool_raw,
-                spool_annotated_path=spool_ann,
-                spool_thumb_path=spool_thumb,
-                raw_image_bytes=raw_b,
-                annotated_image_bytes=ann_b,
-                thumbnail_bytes=thumb_b,
-                image_mime_type=mime
+                raw_img=raw_img,
+                rel_cursor=rel_cursor
             )
-
-            with self._lock:
-                self.steps.append(step)
-
-            safe_print(f"[StepRecorder] Step #{step_id}: {desc}")
-
-            if self.on_step_added:
-                self.on_step_added(step)
+            self._enqueue_or_execute(task, sync=sync)
         except Exception as e:
             safe_print(f"[StepRecorder] Error processing key: {e}")

@@ -483,15 +483,7 @@ class TriageView(ttk.Frame):
                 accum_path = f"{accum_path}\\{part}" if accum_path else part
                 fld_id = f"fld_{accum_path.lower().replace(' ', '_')}"
                 if fld_id not in folder_nodes_map:
-                    if depth == 0:
-                        level_label = f"📁 [Team] {part}"
-                    elif depth == 1:
-                        level_label = f"  📁 [Part] {part}"
-                    elif depth == 2:
-                        level_label = f"    📁 [Unit] {part}"
-                    else:
-                        level_label = f"      📁 {part}"
-
+                    level_label = f"📁 [L{depth+1}] {part}"
                     self.tree_rules.insert(
                         parent_node, tk.END, iid=fld_id,
                         text=level_label,
@@ -785,7 +777,146 @@ class TriageView(ttk.Frame):
         if not self.selected_message:
             messagebox.showwarning("Notice", "Select an email message first.")
             return
-        self._stage_create_new_rule(self.selected_message)
+        self._open_create_hierarchical_rule_dialog(self.selected_message)
+
+    def _open_create_hierarchical_rule_dialog(self, msg: EmailMessage):
+        r"""Open modal dialog to configure Team \ Part \ Unit hierarchy for new rule."""
+        suggested_name, suggested_folder = suggest_rule_and_folder(msg.sender_name, msg.sender_email)
+        sender_email = msg.sender_email
+        sender_domain = f"@{sender_email.split('@')[1]}" if "@" in sender_email else ""
+
+        # Parse suggested segments
+        segs = [s.strip() for s in re.split(r'[\\/]', suggested_folder) if s.strip()]
+        sug_team = segs[0] if len(segs) >= 1 else "Engineering_Team"
+        sug_part = segs[1] if len(segs) >= 2 else "General_Part"
+        sug_unit = segs[2] if len(segs) >= 3 else f"{suggested_name.replace(' ', '_')}_Unit"
+
+        dlg = tk.Toplevel(self)
+        dlg.title("Create Hierarchical Rule (Team \\ Part \\ Unit)")
+        dlg.geometry("520x460")
+        dlg.minsize(480, 420)
+        dlg.transient(self)
+        dlg.grab_set()
+
+        frm = ttk.Frame(dlg, padding=16)
+        frm.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(frm, text="Create Rule (Team \\ Part \\ Unit)", font=("", 12, "bold"), foreground="#15803d").pack(anchor=tk.W, pady=(0, 4))
+        ttk.Label(frm, text=f"Source: {msg.sender_name} <{sender_email}>", font=("", 9, "bold")).pack(anchor=tk.W, pady=(0, 8))
+
+        # Form
+        box_form = ttk.LabelFrame(frm, text="Rule & Folder Hierarchy", padding=10)
+        box_form.pack(fill=tk.X, pady=(0, 8))
+
+        grid = ttk.Frame(box_form)
+        grid.pack(fill=tk.X)
+
+        ttk.Label(grid, text="Rule Name:").grid(row=0, column=0, sticky=tk.W, pady=3)
+        ent_name = ttk.Entry(grid, width=32)
+        ent_name.grid(row=0, column=1, sticky=tk.EW, padx=6, pady=3)
+        ent_name.insert(0, suggested_name)
+
+        teams, parts, units = self.yaml_mgr.get_existing_hierarchy()
+
+        ttk.Label(grid, text="Team (Level 1):").grid(row=1, column=0, sticky=tk.W, pady=3)
+        cbo_t = ttk.Combobox(grid, width=28, values=teams)
+        cbo_t.grid(row=1, column=1, sticky=tk.EW, padx=6, pady=3)
+        cbo_t.set(sug_team)
+
+        ttk.Label(grid, text="Part (Level 2):").grid(row=2, column=0, sticky=tk.W, pady=3)
+        cbo_p = ttk.Combobox(grid, width=28, values=parts)
+        cbo_p.grid(row=2, column=1, sticky=tk.EW, padx=6, pady=3)
+        cbo_p.set(sug_part)
+
+        ttk.Label(grid, text="Unit (Level 3):").grid(row=3, column=0, sticky=tk.W, pady=3)
+        cbo_u = ttk.Combobox(grid, width=28, values=units)
+        cbo_u.grid(row=3, column=1, sticky=tk.EW, padx=6, pady=3)
+        cbo_u.set(sug_unit)
+
+        ttk.Label(grid, text="Folder Path (L1\\L2\\L3...):", font=("", 9, "bold")).grid(row=4, column=0, sticky=tk.W, pady=4)
+        ent_full = ttk.Entry(grid, width=32)
+        ent_full.grid(row=4, column=1, sticky=tk.EW, padx=6, pady=4)
+        ent_full.insert(0, f"{sug_team}\\{sug_part}\\{sug_unit}")
+
+        def _sync_full_path(*args):
+            t = cbo_t.get().strip()
+            p = cbo_p.get().strip()
+            u = cbo_u.get().strip()
+            res = "\\".join([s for s in [t, p, u] if s])
+            ent_full.delete(0, tk.END)
+            ent_full.insert(0, res)
+
+        cbo_t.bind("<<ComboboxSelected>>", _sync_full_path)
+        cbo_t.bind("<KeyRelease>", _sync_full_path)
+        cbo_p.bind("<<ComboboxSelected>>", _sync_full_path)
+        cbo_p.bind("<KeyRelease>", _sync_full_path)
+        cbo_u.bind("<<ComboboxSelected>>", _sync_full_path)
+        cbo_u.bind("<KeyRelease>", _sync_full_path)
+
+        # Match Scope Options
+        box_scope = ttk.LabelFrame(frm, text="Match Condition", padding=8)
+        box_scope.pack(fill=tk.X, pady=(0, 10))
+
+        var_scope = tk.StringVar(value="email")
+        rb_email = ttk.Radiobutton(box_scope, text=f"Match exact email: {sender_email}", variable=var_scope, value="email")
+        rb_email.pack(anchor=tk.W, pady=2)
+
+        if sender_domain:
+            rb_domain = ttk.Radiobutton(
+                box_scope,
+                text=f"Match entire domain: *{sender_domain} (Recommended for vendors/teams)",
+                variable=var_scope,
+                value="domain"
+            )
+            rb_domain.pack(anchor=tk.W, pady=2)
+            if any(w in sender_domain for w in ["omron", "automation", "partner", "corp", "vendor"]):
+                var_scope.set("domain")
+
+        # Buttons
+        btn_bar = ttk.Frame(frm)
+        btn_bar.pack(fill=tk.X, side=tk.BOTTOM)
+
+        def on_confirm_stage():
+            r_name = ent_name.get().strip()
+            r_path = ent_full.get().strip()
+            if not r_name or not r_path:
+                messagebox.showwarning("Notice", "Specify both Rule Name and Target Folder.")
+                return
+
+            dlg.destroy()
+
+            # Clean path to Team\Part\Unit format
+            norm_path = "\\".join([s.strip() for s in re.split(r'[\\/]', r_path) if s.strip()])
+            mode = var_scope.get()
+
+            # Remove previous staged for this message
+            for existing in self.staged_actions:
+                if existing.message_id == msg.entry_id:
+                    self.staged_actions.remove(existing)
+                    break
+
+            action = StagedAction(
+                action_type="create_rule",
+                rule_name=r_name,
+                rule_id=f"rule_{re.sub(r'[^a-zA-Z0-9_]', '_', r_name.lower())}",
+                target_folder=norm_path,
+                sender_email=sender_email,
+                sender_domain=sender_domain,
+                match_mode=mode,
+                message_id=msg.entry_id,
+                subject=msg.subject
+            )
+            self.staged_actions.append(action)
+
+            self.refresh_rules_tree()
+            self._populate_inbox_table()
+            self._update_dock()
+
+        btn_cancel = ttk.Button(btn_bar, text="Cancel", command=dlg.destroy)
+        btn_cancel.pack(side=tk.RIGHT, padx=4)
+
+        btn_ok = ttk.Button(btn_bar, text="Stage Hierarchical Rule", command=on_confirm_stage)
+        btn_ok.pack(side=tk.RIGHT, padx=4)
 
     def _menu_stage_existing_rule(self):
         if not self.selected_message:

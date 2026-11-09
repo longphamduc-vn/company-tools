@@ -1,0 +1,73 @@
+version: '2.0'
+settings:
+  auto_split_threshold: 40
+  unclassified_folder: _Unclassified
+  backup_versions: 30
+stores:
+  active_archive:
+    name: Archive 2025
+    file_path: C:\Outlook_Data\longp_Archive_2025.pst
+groups:
+  executive:
+    name: Executive Board
+    domains: []
+    emails:
+    - ceo@company.com
+    - coo@company.com
+  engineering:
+    name: Engineering SCADA Team
+    domains:
+    - '@techpartner.com'
+    emails:
+    - eng1@company.com
+    - eng2@company.com
+    - lead.scada@company.com
+  suppliers:
+    name: Equipment Suppliers
+    domains:
+    - '@omron.com'
+    - '@mitsubishi.com'
+    emails:
+    - sales@vendor.com
+unclassified_pool:
+- former.contractor@vendor.com
+rules:
+- id: rule_executive
+  name: Executive Board
+  enabled: true
+  groups:
+  - executive
+  emails: []
+  domains: []
+  subject_keywords: []
+  target_store: active_archive
+  target_folder: Management\Executive_Board\Directors
+- id: rule_engineering
+  name: SCADA PLC Maintenance
+  enabled: true
+  groups:
+  - engineering
+  emails: []
+  domains: []
+  subject_keywords: []
+  target_store: active_archive
+  target_folder: Purchasing_Team
+- id: rule_suppliers
+  name: Omron Equipment
+  enabled: true
+  groups:
+  - suppliers
+  emails: []
+  domains: []
+  subject_keywords: []
+  target_store: active_archive
+  target_folder: Management\Executive_Board
+- id: rule_unclassified
+  name: '[Unclassified]'
+  enabled: true
+  groups: []
+  emails: []
+  domains: []
+  subject_keywords: []
+  target_store: active_archive
+  target_folder: _Unclassified

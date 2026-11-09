@@ -1026,6 +1026,61 @@ class TestStepRecorder(unittest.TestCase):
 
         self.assertEqual(errors, [], f"Found unresolved type annotations: {errors}")
 
+    def test_concurrent_clicks_strict_monotonic_ordering(self):
+        """Verify rapid concurrent clicks never produce duplicate step IDs or overwrite spool files."""
+        import threading
+        from pynput.mouse import Button
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = RecorderConfig(
+                output_dir=tmpdir,
+                capture_clicks=False,
+                capture_keys=False,
+                dual_capture_on_click=False,
+                enable_disk_spooling=True,
+                disk_spool_dir=tmpdir
+            )
+            engine = RecordingEngine(config)
+            engine.start_recording("Concurrent Click Test")
+
+            dummy = Image.new("RGB", (200, 200), color=(80, 90, 100))
+            engine.capture.capture_full_screen = lambda: (dummy, 0, 0)
+
+            # Fire 8 concurrent clicks in rapid background threads
+            threads = []
+            for i in range(8):
+                t = threading.Thread(
+                    target=engine._process_click_event,
+                    args=(100 + i * 10, 100 + i * 10, Button.left, False, i + 1),
+                    kwargs={"sync": False}
+                )
+                threads.append(t)
+
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            engine.stop_recording()
+
+            # Verify total steps and strict monotonic ordering [1, 2, 3, 4, 5, 6, 7, 8]
+            self.assertEqual(len(engine.steps), 8)
+            step_ids = [s.step_id for s in engine.steps]
+            self.assertEqual(step_ids, list(range(1, 9)))
+
+            # Verify unique spool files exist for every step without any overwrites
+            spool_paths = set()
+            for s in engine.steps:
+                self.assertIsNotNone(s.spool_raw_path)
+                self.assertIsNotNone(s.spool_annotated_path)
+                self.assertTrue(os.path.exists(s.spool_raw_path))
+                self.assertTrue(os.path.exists(s.spool_annotated_path))
+                spool_paths.add(s.spool_annotated_path)
+
+            self.assertEqual(len(spool_paths), 8)
+            engine.cleanup_spool()
+            engine.close()
+
 
 if __name__ == "__main__":
     unittest.main()

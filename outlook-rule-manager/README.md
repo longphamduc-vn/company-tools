@@ -6,6 +6,8 @@
 
 ## 🌟 Key Features
 
+- **Visual Folder Treeview & Drag-and-Drop Reorganization**: Browse hierarchical `Team \ Part \ Unit` folder trees visually. Reorganize rules and folders by dragging and dropping them directly between folders with instant YAML persistence.
+- **Rule Studio & Inspector**: Dedicated clean cards for rules, folders, address groups, and orphaned pools with breadcrumb navigation and visual recipient pills.
 - **YAML Rule & Group Management**: Define rules, reusable address groups, and domains in a clean `rules.yaml` file. Manage thousands of addresses without Outlook's 64KB UI limitation.
 - **Native Outlook Synchronization**: Outlook executes all rules natively (24/7 in the background, even when this companion app is closed). Sync YAML configurations directly into Outlook with one click.
 - **Auto-Split Recipient Quotas**: Automatically splits oversized rules into sub-rules (`Rule (Part 1)`, `Rule (Part 2)`) to prevent Outlook RPC/quota errors.

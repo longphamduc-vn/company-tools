@@ -36,3 +36,6 @@ venv/
 # User config & output files
 .scada_tracelog_config.json
 *.csv
+
+
+*.webp

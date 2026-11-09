@@ -52,6 +52,10 @@ class DryRunView(ttk.Frame):
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
 
+    def refresh_simulation(self):
+        """Alias for run_simulation to update simulation view."""
+        self.run_simulation()
+
     def run_simulation(self):
         """Execute simulation against Inbox."""
         self.tree.delete(*self.tree.get_children())

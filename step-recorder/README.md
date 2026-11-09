@@ -32,6 +32,7 @@ Từ Windows 11 bản cập nhật mới, Microsoft đã chính thức thông b�
 | **Gom cụm thao tác gõ (Smart Keystroke)** | ❌ Bỏ qua text nhập liệu hoặc phân mảnh | ⌨️ **Smart Keystroke Aggregator**: Tự động gom chuỗi gõ phím vào đúng ô nhập liệu thành 1 bước hoàn chỉnh |
 | **Nhận diện UI hiện đại (UIA)** | Chỉ dùng Win32 API cũ, không đọc được Chrome/Electron | 🔍 **Microsoft UI Automation (UIA)**: Đọc sâu tên nút bấm, loại control (Button, Edit, Tab, Menu) trên Chromium, Edge, Office |
 | **Trình chiếu tương tác (Walkthrough Player)** | ❌ Không hỗ trợ | 🎮 **Interactive Guide Player**: Trình chiếu từng bước như Scribe/Tango với Radar Pulse Hotspot và chế độ Nhấp chuột chuyển bước (Click-to-advance) |
+| **Vòng đời ảnh & Tối ưu RAM (Tiered Storage)** | ❌ Lưu ảnh thô trong RAM, tốn dung lượng | 🚀 **L2 Disk Spooling & WebP**: Giảm 96% RAM khi ghi (chỉ lưu Thumbnail 30KB trong RAM), chụp thông minh theo màn hình chứa chuột, xuất file WebP siêu nhẹ (giảm 80% dung lượng HTML) |
 | **Tùy biến chỉ điểm (Click Marker)** | Chỉ có vòng tròn xanh/đỏ cố định | **4 phong cách** (Ring, Crosshair, Glow, Solid) + Chọn màu HEX bất kỳ + Đánh số Badge |
 | **Bảo vệ ứng dụng** | Hay bị ghi đè click chính nó | **Tự động nhận diện toạ độ Toolbar để bỏ qua click trên app** |
 | **Chế độ dòng lệnh (CLI)** | Hạn chế | ✅ Hỗ trợ đầy đủ cờ CLI `--cli` cho headless / automation |

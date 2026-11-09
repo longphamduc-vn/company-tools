@@ -118,6 +118,8 @@ class MainWindow(tk.Tk):
             self.tab_rules.refresh_all()
         elif current_idx == 2:
             self.tab_rollover.refresh_view()
+        elif current_idx == 3:
+            self.tab_dryrun.refresh_simulation()
 
     def _reload_yaml(self):
         self.yaml_mgr.load()
