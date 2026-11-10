@@ -3,6 +3,7 @@ Image annotation module for drawing click markers, highlight regions,
 and step number badges onto screenshots.
 """
 
+import math
 from typing import Tuple, Optional
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageChops, ImageStat
 
@@ -261,6 +262,93 @@ def draw_box_annotation(
     draw.rectangle([left, top, right, bottom], fill=fill_rgba, outline=main_rgba, width=width)
     result = Image.alpha_composite(img_rgba, overlay)
     return result.convert("RGB")
+
+
+def draw_drag_arrow(
+    image: Image.Image,
+    start_pos: Tuple[int, int],
+    end_pos: Tuple[int, int],
+    color_hex: str = "#38BDF8",
+    step_id: Optional[int] = None,
+    show_badge: bool = True
+) -> Image.Image:
+    """
+    Draw a directional drag-and-drop arrow trajectory from start_pos to end_pos
+    with starting halo dot and dynamic arrowhead.
+    """
+    x1, y1 = start_pos
+    x2, y2 = end_pos
+    img_rgba = image.convert("RGBA")
+    overlay = Image.new("RGBA", img_rgba.size, (255, 255, 255, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    main_color = hex_to_rgba(color_hex, 240)
+    fill_color = hex_to_rgba(color_hex, 60)
+    shadow_color = (15, 23, 42, 180)
+
+    # 1. Starting anchor circle
+    r_start = 14
+    draw.ellipse([x1 - r_start, y1 - r_start, x1 + r_start, y1 + r_start], fill=fill_color, outline=main_color, width=3)
+    draw.ellipse([x1 - 4, y1 - 4, x1 + 4, y1 + 4], fill=main_color)
+
+    # 2. Main trajectory line
+    draw.line([(x1, y1), (x2, y2)], fill=shadow_color, width=6)
+    draw.line([(x1, y1), (x2, y2)], fill=main_color, width=4)
+
+    # 3. Arrowhead at end_pos
+    angle = math.atan2(y2 - y1, x2 - x1)
+    arrow_len = 22
+    arrow_angle = math.pi / 6  # 30 degrees
+
+    p1 = (
+        int(x2 - arrow_len * math.cos(angle - arrow_angle)),
+        int(y2 - arrow_len * math.sin(angle - arrow_angle))
+    )
+    p2 = (
+        int(x2 - arrow_len * math.cos(angle + arrow_angle)),
+        int(y2 - arrow_len * math.sin(angle + arrow_angle))
+    )
+
+    draw.polygon([(x2, y2), p1, (int(x2 - (arrow_len * 0.6) * math.cos(angle)), int(y2 - (arrow_len * 0.6) * math.sin(angle))), p2], fill=main_color)
+
+    # 4. Step badge at start
+    if show_badge and step_id is not None:
+        _draw_step_badge(draw, x1, y1, step_id, color_hex, r_start)
+
+    result = Image.alpha_composite(img_rgba, overlay)
+    return result.convert("RGB")
+
+
+def generate_focus_crop(
+    image: Image.Image,
+    center_pos: Tuple[int, int],
+    crop_size: Tuple[int, int] = (440, 260),
+    border_color: str = "#38BDF8"
+) -> Image.Image:
+    """
+    Generate a zoomed spotlight crop centered around the action position
+    to present micro-focus context in visual guides.
+    """
+    cx, cy = center_pos
+    cw, ch = crop_size
+    img_w, img_h = image.size
+
+    # Ensure crop size is not larger than image
+    cw = min(cw, img_w)
+    ch = min(ch, img_h)
+
+    # Calculate top-left ensuring crop window is fully inside image bounds
+    left = max(0, min(img_w - cw, cx - (cw // 2)))
+    top = max(0, min(img_h - ch, cy - (ch // 2)))
+    right = left + cw
+    bottom = top + ch
+
+    cropped = image.crop((left, top, right, bottom))
+    draw = ImageDraw.Draw(cropped)
+    # Subtle inner border for spotlight framing
+    border_rgba = hex_to_rgba(border_color, 200)[:3]
+    draw.rectangle([0, 0, cw - 1, ch - 1], outline=border_rgba, width=2)
+    return cropped
 
 
 def has_ui_changed(

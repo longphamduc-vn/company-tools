@@ -20,7 +20,9 @@ from step_recorder.annotator import (
     apply_blur_region,
     apply_redact_region,
     crop_image,
-    draw_box_annotation
+    draw_box_annotation,
+    draw_drag_arrow,
+    generate_focus_crop
 )
 from step_recorder.capture import ScreenCapture
 from step_recorder.window_info import get_active_window_info, WindowDetails
@@ -1080,6 +1082,76 @@ class TestStepRecorder(unittest.TestCase):
             self.assertEqual(len(spool_paths), 8)
             engine.cleanup_spool()
             engine.close()
+
+    def test_draw_drag_arrow(self):
+        """Verify directional arrow annotation for drag-and-drop operations."""
+        img = Image.new("RGB", (800, 600), (240, 240, 240))
+        arrow_img = draw_drag_arrow(img, start_pos=(100, 100), end_pos=(300, 300), step_id=1)
+        self.assertEqual(arrow_img.size, (800, 600))
+        self.assertNotEqual(img.tobytes(), arrow_img.tobytes())
+
+    def test_generate_focus_crop(self):
+        """Verify focus spotlight zoom crop extraction."""
+        img = Image.new("RGB", (1920, 1080), (30, 30, 30))
+        crop = generate_focus_crop(img, center_pos=(500, 400), crop_size=(440, 260))
+        self.assertEqual(crop.size, (440, 260))
+
+    def test_mouse_up_click_vs_drag(self):
+        """Test Mouse Up trigger distinguishing between Click (d < 10px) and Drag (d >= 10px)."""
+        from pynput.mouse import Button
+        config = RecorderConfig(
+            capture_clicks=False,
+            capture_keys=False,
+            enable_mouse_up_trigger=True,
+            drag_threshold_px=10,
+            enable_drag_capture=True,
+            dual_capture_on_click=False
+        )
+        engine = RecordingEngine(config)
+        engine.state = "recording"
+
+        # 1. Simulate Click: Down at (100, 100), Up at (102, 101) -> dist < 10px
+        engine._on_mouse_click(100, 100, Button.left, pressed=True)
+        self.assertEqual(len(engine.steps), 0)
+        engine._on_mouse_click(102, 101, Button.left, pressed=False)
+        engine.drain_queue(timeout=5.0)
+        self.assertEqual(len(engine.steps), 1)
+        self.assertEqual(engine.steps[0].action_type, "left_click")
+
+        # 2. Simulate Drag: Down at (200, 200), Up at (350, 400) -> dist > 10px
+        engine._on_mouse_click(200, 200, Button.left, pressed=True)
+        engine._on_mouse_click(350, 400, Button.left, pressed=False)
+        engine.drain_queue(timeout=5.0)
+        self.assertEqual(len(engine.steps), 2)
+        drag_step = engine.steps[1]
+        self.assertEqual(drag_step.action_type, "drag_and_drop")
+        self.assertEqual(drag_step.drag_start, (200, 200))
+        self.assertEqual(drag_step.drag_end, (350, 400))
+
+    def test_unified_dual_capture_single_step(self):
+        """Verify unified dual capture consolidates Action + Result into 1 single comprehensive step."""
+        from pynput.mouse import Button
+        config = RecorderConfig(
+            capture_clicks=False,
+            capture_keys=False,
+            dual_capture_on_click=True,
+            unified_dual_capture=True,
+            second_capture_delay_ms=20,
+            dual_capture_smart_detect=False
+        )
+        engine = RecordingEngine(config)
+        engine.state = "recording"
+
+        # Trigger click event with unified_dual_capture=True
+        engine._process_click_event(100, 100, Button.left, is_double_click=False, click_id=1, sync=True)
+        engine.drain_queue(timeout=5.0)
+
+        # Should produce exactly 1 step (instead of 2)
+        self.assertEqual(len(engine.steps), 1)
+        step = engine.steps[0]
+        self.assertEqual(step.action_type, "left_click")
+        # Pre-action image (before) should be captured
+        self.assertIsNotNone(step.get_before_bytes())
 
 
 if __name__ == "__main__":

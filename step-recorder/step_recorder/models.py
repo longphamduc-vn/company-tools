@@ -29,6 +29,10 @@ class Step:
     typed_text: Optional[str] = None  # Aggregated typed text for "type_text" action
     control_rect: Optional[Tuple[int, int, int, int]] = None  # (left, top, width, height) of targeted UI element
     
+    # Drag & Drop trajectory coordinates
+    drag_start: Optional[Tuple[int, int]] = None  # (x, y) start point of drag
+    drag_end: Optional[Tuple[int, int]] = None    # (x, y) release point of drag
+
     # SOP Section / Chapter markers
     is_section_header: bool = False
     section_title: Optional[str] = None
@@ -51,11 +55,16 @@ class Step:
     raw_image_bytes: Optional[bytes] = None
     annotated_image_bytes: Optional[bytes] = None
     thumbnail_bytes: Optional[bytes] = None
+    image_before_bytes: Optional[bytes] = None
+    image_after_bytes: Optional[bytes] = None
+    focus_crop_bytes: Optional[bytes] = None
 
     # L2 Disk Spooling paths (Tiered storage)
     spool_raw_path: Optional[str] = None
     spool_annotated_path: Optional[str] = None
     spool_thumb_path: Optional[str] = None
+    spool_before_path: Optional[str] = None
+    spool_focus_crop_path: Optional[str] = None
     image_mime_type: str = "image/png"
 
     def get_annotated_bytes(self) -> Optional[bytes]:
@@ -116,6 +125,31 @@ class Step:
         """Free raw and annotated full-size bytes from RAM to keep footprint minimal."""
         self.raw_image_bytes = None
         self.annotated_image_bytes = None
+        self.image_before_bytes = None
+
+    def get_focus_crop_bytes(self) -> Optional[bytes]:
+        """Get focus zoom cropped image bytes."""
+        if self.focus_crop_bytes is not None:
+            return self.focus_crop_bytes
+        if self.spool_focus_crop_path and os.path.exists(self.spool_focus_crop_path):
+            try:
+                with open(self.spool_focus_crop_path, "rb") as f:
+                    return f.read()
+            except Exception:
+                pass
+        return None
+
+    def get_before_bytes(self) -> Optional[bytes]:
+        """Get pre-action (before) image bytes if available."""
+        if self.image_before_bytes is not None:
+            return self.image_before_bytes
+        if self.spool_before_path and os.path.exists(self.spool_before_path):
+            try:
+                with open(self.spool_before_path, "rb") as f:
+                    return f.read()
+            except Exception:
+                pass
+        return None
 
     @property
     def image_filename(self) -> str:
@@ -140,10 +174,14 @@ class Step:
             "left_click": "badge-primary",
             "right_click": "badge-secondary",
             "double_click": "badge-accent",
+            "drag_and_drop": "badge-warning",
             "key_press": "badge-warning",
             "type_text": "badge-accent",
             "comment": "badge-info",
             "click_result": "badge-success",
+            "hover": "badge-info",
+            "scroll": "badge-secondary",
+            "timer_capture": "badge-default",
         }
         return mapping.get(self.action_type, "badge-default")
 
@@ -154,10 +192,14 @@ class Step:
             "left_click": "👆",
             "right_click": "👉",
             "double_click": "✌️",
+            "drag_and_drop": "↔️",
             "key_press": "⌨️",
             "type_text": "⌨️",
             "comment": "💬",
             "click_result": "⚡",
+            "hover": "👀",
+            "scroll": "📜",
+            "timer_capture": "⏱️",
         }
         return mapping.get(self.action_type, "📌")
 
@@ -176,6 +218,40 @@ class Step:
         if data:
             return base64.b64encode(data).decode("ascii")
         return self.base64_image
+
+    @property
+    def base64_focus_crop(self) -> Optional[str]:
+        """Return base64 string for focus zoom cropped image."""
+        data = self.get_focus_crop_bytes()
+        if data:
+            return base64.b64encode(data).decode("ascii")
+        return None
+
+    @property
+    def focus_crop_data_uri(self) -> Optional[str]:
+        """Return full data URI for focus crop."""
+        b64 = self.base64_focus_crop
+        if not b64:
+            return None
+        mime = self.image_mime_type or "image/png"
+        return f"data:{mime};base64,{b64}"
+
+    @property
+    def base64_before(self) -> Optional[str]:
+        """Return base64 string for before-action frame."""
+        data = self.get_before_bytes()
+        if data:
+            return base64.b64encode(data).decode("ascii")
+        return None
+
+    @property
+    def image_before_data_uri(self) -> Optional[str]:
+        """Return full data URI for before frame."""
+        b64 = self.base64_before
+        if not b64:
+            return None
+        mime = self.image_mime_type or "image/png"
+        return f"data:{mime};base64,{b64}"
 
     @property
     def image_data_uri(self) -> Optional[str]:
@@ -210,6 +286,8 @@ class Step:
             "relative_cursor": self.relative_cursor,
             "cursor_x": self.cursor_x,
             "cursor_y": self.cursor_y,
+            "drag_start": self.drag_start,
+            "drag_end": self.drag_end,
             "highlight_rect": self.highlight_rect,
             "user_comment": self.user_comment,
             "typed_text": self.typed_text,
@@ -227,6 +305,8 @@ class Step:
             "annotated_image_path": self.annotated_image_path,
             "spool_raw_path": self.spool_raw_path,
             "spool_annotated_path": self.spool_annotated_path,
+            "spool_before_path": self.spool_before_path,
+            "spool_focus_crop_path": self.spool_focus_crop_path,
             "image_mime_type": self.image_mime_type,
         }
 
@@ -258,6 +338,8 @@ class Step:
             relative_cursor=tuple(data["relative_cursor"]) if data.get("relative_cursor") else None,
             cursor_x=data.get("cursor_x"),
             cursor_y=data.get("cursor_y"),
+            drag_start=tuple(data["drag_start"]) if data.get("drag_start") else None,
+            drag_end=tuple(data["drag_end"]) if data.get("drag_end") else None,
             highlight_rect=tuple(data["highlight_rect"]) if data.get("highlight_rect") else None,
             user_comment=data.get("user_comment"),
             typed_text=data.get("typed_text"),
@@ -275,6 +357,8 @@ class Step:
             annotated_image_path=data.get("annotated_image_path"),
             spool_raw_path=data.get("spool_raw_path"),
             spool_annotated_path=data.get("spool_annotated_path"),
+            spool_before_path=data.get("spool_before_path"),
+            spool_focus_crop_path=data.get("spool_focus_crop_path"),
             image_mime_type=data.get("image_mime_type", "image/png"),
         )
 

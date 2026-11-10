@@ -119,7 +119,7 @@ class ReportExporter:
                 zf.write(html_file, arcname="report.html")
                 zf.write(md_file, arcname="report.md")
                 zf.write(json_file, arcname="session.json")
-                for img_file in images_dir.glob("*.png"):
+                for img_file in list(images_dir.glob("*.png")) + list(images_dir.glob("*.webp")):
                     zf.write(img_file, arcname=f"images/{img_file.name}")
             results["zip"] = str(zip_file)
 
@@ -244,6 +244,9 @@ class ReportExporter:
             lines.append(f"- **{lbl_window}**: `{step.window_title}` (`{step.process_name}`)")
             if step.cursor_x is not None and step.cursor_y is not None:
                 lines.append(f"- **{lbl_coords}**: `({step.cursor_x}, {step.cursor_y})`")
+            if step.drag_start and step.drag_end:
+                drag_lbl = "Quỹ đạo Kéo Thả" if is_vi else "Drag Trajectory"
+                lines.append(f"- **{drag_lbl}**: `({step.drag_start[0]}, {step.drag_start[1]}) ➔ ({step.drag_end[0]}, {step.drag_end[1]})`")
             lines.append(f"- **{lbl_action}**: {step.description}")
 
             if step.user_comment:

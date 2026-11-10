@@ -23,18 +23,31 @@ class RecorderConfig:
     dual_capture_on_click: bool = True
     second_capture_delay_ms: int = 500  # ms delay before capturing second result screenshot
     dual_capture_smart_detect: bool = True  # Auto-detect: only capture 2nd shot if UI genuinely changed
+    unified_dual_capture: bool = False  # If True, consolidates Action + Result into 1 single comprehensive step
     
     # Event capture triggers
     capture_clicks: bool = True
     capture_double_clicks: bool = True
+    enable_mouse_up_trigger: bool = True  # Trigger click capture upon mouse button release
+    drag_threshold_px: int = 10  # Minimum cursor delta to classify as Drag & Drop
+    enable_drag_capture: bool = True  # Capture Drag & Drop with directional trajectory arrow
     capture_keys: bool = True
     special_keys_only: bool = True  # If True, records only Enter, Tab, Esc, shortcuts, etc.
     enable_keystroke_aggregator: bool = True  # Automatically aggregate consecutive typing into input fields
     keystroke_flush_timeout_ms: int = 1200  # Debounce delay (ms) to flush typing buffer into 1 step
     enable_ui_automation: bool = True  # Deep control inspection via Windows UI Automation (UIA)
+
+    # Rich Guide Triggers
+    enable_hover_capture: bool = False  # Capture hover/dwell when cursor stays still for > 800ms
+    hover_delay_ms: int = 800  # Dwell delay to trigger hover step
+    enable_scroll_capture: bool = False  # Capture scroll operations with 500ms debounce
+    interval_capture_seconds: int = 0  # 0 = disabled. If > 0, auto-captures screen periodically
     
     # Interactive Guide Player (Walkthrough Mode)
     enable_interactive_player: bool = True
+    enable_focus_zoom_crop: bool = True  # Auto-generate magnified focus spotlight crop for each step
+    focus_crop_width: int = 440
+    focus_crop_height: int = 260
     
     # Highlight & visual styling
     highlight_style: str = "ring"  # "ring", "glow", "crosshair", "solid"

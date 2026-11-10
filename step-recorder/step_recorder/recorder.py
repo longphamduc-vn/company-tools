@@ -20,7 +20,7 @@ from pynput import mouse, keyboard
 from .models import Step, SessionMetadata
 from .config import RecorderConfig
 from .capture import ScreenCapture
-from .annotator import annotate_screenshot, has_ui_changed
+from .annotator import annotate_screenshot, has_ui_changed, draw_drag_arrow, generate_focus_crop
 from .window_info import get_active_window_info
 from .i18n import t, I18nManager
 
@@ -85,6 +85,40 @@ class RecordingEngine:
         # Tiered Storage & L2 Disk Spooling
         self._spool_dir: Optional[str] = None
 
+        # Tracking active asynchronous background tasks (clicks, drag, typing flush)
+        self._active_async_tasks = 0
+        self._async_tasks_lock = threading.Lock()
+
+        # Mouse gesture & drag-and-drop state machine
+        self._mouse_down_pos: Optional[Tuple[int, int]] = None
+        self._mouse_down_time: float = 0.0
+        self._mouse_down_button: Optional[mouse.Button] = None
+
+        # Keystroke early snapshot
+        self._typing_early_snapshot: Optional[Image.Image] = None
+        self._typing_mon_left: int = 0
+        self._typing_mon_top: int = 0
+
+        # Scroll debounce tracker
+        self._scroll_accum_dy: int = 0
+        self._scroll_flush_timer: Optional[threading.Timer] = None
+        self._scroll_cursor_pos: Optional[Tuple[int, int]] = None
+
+        # Interval timer capture
+        self._interval_timer_thread: Optional[threading.Thread] = None
+        self._interval_stop_event = threading.Event()
+        self._last_screen_for_timer: Optional[Image.Image] = None
+
+    def _async_task_started(self) -> None:
+        """Mark an asynchronous event capture task as started."""
+        with self._async_tasks_lock:
+            self._active_async_tasks += 1
+
+    def _async_task_done(self) -> None:
+        """Mark an asynchronous event capture task as completed."""
+        with self._async_tasks_lock:
+            self._active_async_tasks = max(0, self._active_async_tasks - 1)
+
     def _reserve_step_id(self) -> Optional[int]:
         """Atomically reserve the next monotonic step_id if within max_steps."""
         with self._lock:
@@ -111,9 +145,14 @@ class RecordingEngine:
                 self._event_queue.task_done()
 
     def drain_queue(self, timeout: float = 10.0) -> None:
-        """Wait until all queued capture processing tasks are completed."""
+        """Wait until all queued capture processing tasks and background dispatchers are completed."""
         start = time.time()
-        while self._event_queue.unfinished_tasks > 0:
+        while True:
+            with self._async_tasks_lock:
+                active = self._active_async_tasks
+            unfinished = self._event_queue.unfinished_tasks
+            if unfinished == 0 and active == 0:
+                break
             if time.time() - start > timeout:
                 safe_print("[StepRecorder] Warning: Timed out waiting for processing queue to drain.")
                 break
@@ -151,34 +190,65 @@ class RecordingEngine:
         is_section_header: bool = False,
         section_title: Optional[str] = None,
         section_description: Optional[str] = None,
+        drag_start: Optional[Tuple[int, int]] = None,
+        drag_end: Optional[Tuple[int, int]] = None,
+        drag_start_rel: Optional[Tuple[int, int]] = None,
+        drag_end_rel: Optional[Tuple[int, int]] = None,
+        image_before: Optional[Image.Image] = None,
+        image_after: Optional[Image.Image] = None,
         log_tag: str = ""
     ) -> Step:
         """
         Unified step commit pipeline:
-        Annotate screenshot, generate thumbnail, spool to disk/RAM,
+        Annotate screenshot, generate thumbnail & focus crop, spool to disk/RAM,
         append final Step to self.steps, print log, and notify listeners.
         """
         if process_name and process_name != "Unknown":
             self._apps_used.add(process_name)
 
         # 1. Annotate
-        annotated_img = annotate_screenshot(
-            raw_img,
-            cursor_pos=rel_cursor,
-            step_id=step_id,
-            highlight_rect=highlight_rect,
-            color_hex=self.config.highlight_color,
-            radius=self.config.highlight_radius,
-            style=self.config.highlight_style,
-            show_badge=self.config.show_step_badge_on_screenshot
-        )
+        if action_type == "drag_and_drop" and drag_start_rel and drag_end_rel:
+            annotated_img = draw_drag_arrow(
+                raw_img,
+                start_pos=drag_start_rel,
+                end_pos=drag_end_rel,
+                color_hex=self.config.highlight_color,
+                step_id=step_id,
+                show_badge=self.config.show_step_badge_on_screenshot
+            )
+        else:
+            annotated_img = annotate_screenshot(
+                raw_img,
+                cursor_pos=rel_cursor,
+                step_id=step_id,
+                highlight_rect=highlight_rect,
+                color_hex=self.config.highlight_color,
+                radius=self.config.highlight_radius,
+                style=self.config.highlight_style,
+                show_badge=self.config.show_step_badge_on_screenshot
+            )
 
-        # 2. Thumbnail
+        # 2. Focus Zoom Crop
+        focus_crop_img: Optional[Image.Image] = None
+        focus_center = rel_cursor or drag_end_rel or drag_start_rel
+        if getattr(self.config, "enable_focus_zoom_crop", True) and focus_center:
+            try:
+                cw = getattr(self.config, "focus_crop_width", 440)
+                ch = getattr(self.config, "focus_crop_height", 260)
+                focus_crop_img = generate_focus_crop(annotated_img, focus_center, crop_size=(cw, ch))
+            except Exception:
+                focus_crop_img = None
+
+        # 3. Thumbnail
         thumb_img = self.capture.create_thumbnail(annotated_img)
 
-        # 3. Spool images
-        spool_raw, spool_ann, spool_thumb, raw_b, ann_b, thumb_b, mime = self._spool_step_images(
-            step_id, raw_img, annotated_img, thumb_img
+        # 4. Spool images
+        (
+            spool_raw, spool_ann, spool_thumb, spool_bef, spool_crop,
+            raw_b, ann_b, thumb_b, bef_b, crop_b, mime
+        ) = self._spool_step_images(
+            step_id, raw_img, annotated_img, thumb_img,
+            image_before=image_before, focus_crop=focus_crop_img
         )
 
         step = Step(
@@ -195,6 +265,8 @@ class RecordingEngine:
             relative_cursor=relative_cursor,
             cursor_x=cursor_x,
             cursor_y=cursor_y,
+            drag_start=drag_start,
+            drag_end=drag_end,
             highlight_rect=highlight_rect,
             typed_text=typed_text,
             user_comment=user_comment,
@@ -204,9 +276,13 @@ class RecordingEngine:
             spool_raw_path=spool_raw,
             spool_annotated_path=spool_ann,
             spool_thumb_path=spool_thumb,
+            spool_before_path=spool_bef,
+            spool_focus_crop_path=spool_crop,
             raw_image_bytes=raw_b,
             annotated_image_bytes=ann_b,
             thumbnail_bytes=thumb_b,
+            image_before_bytes=bef_b,
+            focus_crop_bytes=crop_b,
             image_mime_type=mime
         )
 
@@ -226,13 +302,17 @@ class RecordingEngine:
         step_id: int,
         raw_img: Image.Image,
         annotated_img: Image.Image,
-        thumb_img: Image.Image
-    ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[bytes], Optional[bytes], Optional[bytes], str]:
+        thumb_img: Image.Image,
+        image_before: Optional[Image.Image] = None,
+        focus_crop: Optional[Image.Image] = None
+    ) -> Tuple[
+        Optional[str], Optional[str], Optional[str], Optional[str], Optional[str],
+        Optional[bytes], Optional[bytes], Optional[bytes], Optional[bytes], Optional[bytes], str
+    ]:
         """
         Handle Tiered Storage for step screenshots:
-        - If disk spooling enabled: save raw & annotated to SSD temp files; step keeps only thumbnail bytes in RAM.
-        - If disk spooling disabled: keep all bytes in RAM (legacy mode).
-        Returns (spool_raw_path, spool_ann_path, spool_thumb_path, raw_bytes, ann_bytes, thumb_bytes, mime_type).
+        - If disk spooling enabled: save raw, annotated, before & crop to SSD temp files.
+        - If disk spooling disabled: keep all bytes in RAM.
         """
         fmt = getattr(self.config, "image_format", "WEBP").upper()
         ext = "webp" if fmt == "WEBP" else "png"
@@ -244,15 +324,27 @@ class RecordingEngine:
         if self._spool_dir and getattr(self.config, "enable_disk_spooling", True):
             raw_path = os.path.join(self._spool_dir, f"raw_step_{step_id:04d}.{ext}")
             ann_path = os.path.join(self._spool_dir, f"annotated_step_{step_id:04d}.{ext}")
+            bef_path = None
+            crop_path = None
 
             self.capture.save_image_to_file(raw_img, raw_path, format=fmt, quality=quality)
             self.capture.save_image_to_file(annotated_img, ann_path, format=fmt, quality=quality)
 
-            return (raw_path, ann_path, None, None, None, thumb_bytes, mime_type)
+            if image_before:
+                bef_path = os.path.join(self._spool_dir, f"before_step_{step_id:04d}.{ext}")
+                self.capture.save_image_to_file(image_before, bef_path, format=fmt, quality=quality)
+
+            if focus_crop:
+                crop_path = os.path.join(self._spool_dir, f"crop_step_{step_id:04d}.{ext}")
+                self.capture.save_image_to_file(focus_crop, crop_path, format=fmt, quality=quality)
+
+            return (raw_path, ann_path, None, bef_path, crop_path, None, None, thumb_bytes, None, None, mime_type)
         else:
             raw_bytes = self.capture.image_to_bytes(raw_img, format=fmt, quality=quality)
             ann_bytes = self.capture.image_to_bytes(annotated_img, format=fmt, quality=quality)
-            return (None, None, None, raw_bytes, ann_bytes, thumb_bytes, mime_type)
+            bef_bytes = self.capture.image_to_bytes(image_before, format=fmt, quality=quality) if image_before else None
+            crop_bytes = self.capture.image_to_bytes(focus_crop, format=fmt, quality=quality) if focus_crop else None
+            return (None, None, None, None, None, raw_bytes, ann_bytes, thumb_bytes, bef_bytes, crop_bytes, mime_type)
 
     def cleanup_spool(self, force: bool = False) -> None:
         """Clean up temporary disk spool directory."""
@@ -446,7 +538,7 @@ class RecordingEngine:
         except Exception as e:
             safe_print(f"[StepRecorder] Error adding comment: {e}")
 
-    def flush_text_buffer(self, trigger_key: Optional[str] = None) -> None:
+    def flush_text_buffer(self, trigger_key: Optional[str] = None, sync: bool = False) -> None:
         """Flush any aggregated typing into a unified 'type_text' step."""
         with self._text_buffer_lock:
             if self._text_flush_timer:
@@ -463,8 +555,10 @@ class RecordingEngine:
             self._text_buffer.clear()
             win_details = self._typing_win_details
             cursor_pos = self._typing_cursor_pos
+            early_snapshot = self._typing_early_snapshot
             self._typing_win_details = None
             self._typing_cursor_pos = None
+            self._typing_early_snapshot = None
 
         if not typed_str:
             return
@@ -472,11 +566,16 @@ class RecordingEngine:
         if self.state not in ("recording", "stopped"):
             return
 
-        threading.Thread(
-            target=self._process_type_text_step,
-            args=(typed_str, trigger_key, win_details, cursor_pos),
-            daemon=True
-        ).start()
+        if sync or (self._worker_thread is None or not self._worker_thread.is_alive()):
+            self._process_type_text_step(typed_str, trigger_key, win_details, cursor_pos, early_snapshot=early_snapshot, sync=True)
+        else:
+            self._async_task_started()
+            def _runner():
+                try:
+                    self._process_type_text_step(typed_str, trigger_key, win_details, cursor_pos, early_snapshot=early_snapshot, sync=False)
+                finally:
+                    self._async_task_done()
+            threading.Thread(target=_runner, daemon=True).start()
 
     def _process_type_text_step(
         self,
@@ -484,6 +583,7 @@ class RecordingEngine:
         trigger_key: Optional[str],
         win_details: Optional[Any],
         cursor_pos: Optional[Tuple[int, int]],
+        early_snapshot: Optional[Image.Image] = None,
         sync: bool = False
     ) -> None:
         """Create and record an aggregated type_text step."""
@@ -537,6 +637,7 @@ class RecordingEngine:
                 rel_cursor=rel_cursor,
                 highlight_rect=adj_rect,
                 typed_text=display_text,
+                image_before=early_snapshot,
                 log_tag="Type Text"
             )
             self._enqueue_or_execute(task, sync=sync)
@@ -547,9 +648,10 @@ class RecordingEngine:
     def _start_listeners(self) -> None:
         """Initialize and start input event listeners."""
         if self.config.capture_clicks:
-            self._mouse_listener = mouse.Listener(
-                on_click=self._on_mouse_click
-            )
+            listeners_kwargs = {"on_click": self._on_mouse_click}
+            if getattr(self.config, "enable_scroll_capture", False):
+                listeners_kwargs["on_scroll"] = self._on_mouse_scroll
+            self._mouse_listener = mouse.Listener(**listeners_kwargs)
             self._mouse_listener.daemon = True
             self._mouse_listener.start()
 
@@ -560,8 +662,12 @@ class RecordingEngine:
             self._keyboard_listener.daemon = True
             self._keyboard_listener.start()
 
+        if getattr(self.config, "interval_capture_seconds", 0) > 0:
+            self._start_interval_timer()
+
     def _stop_listeners(self) -> None:
-        """Stop input listeners."""
+        """Stop input listeners and periodic timers."""
+        self._stop_interval_timer()
         if self._mouse_listener:
             try:
                 self._mouse_listener.stop()
@@ -578,8 +684,6 @@ class RecordingEngine:
 
     def _on_mouse_click(self, x: int, y: int, button: mouse.Button, pressed: bool) -> None:
         """Triggered on mouse click event."""
-        if not pressed:
-            return
         if self.state != "recording":
             return
         with self._lock:
@@ -589,35 +693,272 @@ class RecordingEngine:
         if self.is_in_ignored_region(x, y):
             return
 
-        # Flush any pending text before processing mouse click
+        # Flush any pending text before processing mouse actions
         self.flush_text_buffer()
 
-        now = time.time()
-        is_double_click = False
-        
-        if (
-            self.config.capture_double_clicks
-            and button == self._last_click_button
-            and (now - self._last_click_time) < 0.38
-            and abs(x - self._last_click_pos[0]) < 8
-            and abs(y - self._last_click_pos[1]) < 8
-        ):
-            is_double_click = True
+        if getattr(self.config, "enable_mouse_up_trigger", True):
+            if pressed:
+                # Mouse Down: record start position & timestamp
+                self._mouse_down_pos = (x, y)
+                self._mouse_down_time = time.time()
+                self._mouse_down_button = button
+                return
+            else:
+                # Mouse Up: evaluate gesture (Click vs Drag)
+                down_pos = self._mouse_down_pos or (x, y)
+                down_time = self._mouse_down_time or time.time()
+                self._mouse_down_pos = None
 
-        self._last_click_time = now
-        self._last_click_pos = (x, y)
-        self._last_click_button = button
+                dx = x - down_pos[0]
+                dy = y - down_pos[1]
+                dist = (dx * dx + dy * dy) ** 0.5
+                threshold = getattr(self.config, "drag_threshold_px", 10)
 
-        self._click_counter += 1
-        click_id = self._click_counter
+                if getattr(self.config, "enable_drag_capture", True) and dist >= threshold:
+                    self._click_counter += 1
+                    click_id = self._click_counter
+                    self._async_task_started()
+                    def _drag_runner():
+                        try:
+                            self._process_drag_event(down_pos, (x, y), button, click_id, sync=False)
+                        finally:
+                            self._async_task_done()
+                    threading.Thread(target=_drag_runner, daemon=True).start()
+                    return
 
-        # Launch fast capture dispatcher (takes raw screen, sleeps 20ms, takes 2nd raw screen, enqueues to worker)
-        threading.Thread(
-            target=self._process_click_event,
-            args=(x, y, button, is_double_click, click_id),
-            kwargs={"sync": False},
-            daemon=True
-        ).start()
+                # Regular click upon release
+                now = time.time()
+                is_double_click = False
+                if (
+                    self.config.capture_double_clicks
+                    and button == self._last_click_button
+                    and (now - self._last_click_time) < 0.38
+                    and abs(x - self._last_click_pos[0]) < 8
+                    and abs(y - self._last_click_pos[1]) < 8
+                ):
+                    is_double_click = True
+
+                self._last_click_time = now
+                self._last_click_pos = (x, y)
+                self._last_click_button = button
+
+                self._click_counter += 1
+                click_id = self._click_counter
+
+                self._async_task_started()
+                def _click_runner():
+                    try:
+                        self._process_click_event(x, y, button, is_double_click, click_id, sync=False)
+                    finally:
+                        self._async_task_done()
+                threading.Thread(target=_click_runner, daemon=True).start()
+        else:
+            # Legacy mode: trigger on Mouse Down
+            if not pressed:
+                return
+            now = time.time()
+            is_double_click = False
+            if (
+                self.config.capture_double_clicks
+                and button == self._last_click_button
+                and (now - self._last_click_time) < 0.38
+                and abs(x - self._last_click_pos[0]) < 8
+                and abs(y - self._last_click_pos[1]) < 8
+            ):
+                is_double_click = True
+
+            self._last_click_time = now
+            self._last_click_pos = (x, y)
+            self._last_click_button = button
+
+            self._click_counter += 1
+            click_id = self._click_counter
+
+            self._async_task_started()
+            def _legacy_click_runner():
+                try:
+                    self._process_click_event(x, y, button, is_double_click, click_id, sync=False)
+                finally:
+                    self._async_task_done()
+            threading.Thread(target=_legacy_click_runner, daemon=True).start()
+
+    def _process_drag_event(
+        self,
+        start_pos: Tuple[int, int],
+        end_pos: Tuple[int, int],
+        button: mouse.Button,
+        click_id: int = 0,
+        sync: bool = False
+    ) -> None:
+        """Process Drag & Drop action step with directional trajectory arrow."""
+        try:
+            win_details = get_active_window_info(cursor_pos=start_pos)
+            raw_img, mon_left, mon_top = self.capture.capture_for_event(
+                cursor_pos=end_pos,
+                window_rect=win_details.window_rect,
+                scope=getattr(self.config, "capture_scope", "cursor_monitor"),
+                padding=getattr(self.config, "active_window_padding", 24)
+            )
+
+            step_id = self._reserve_step_id()
+            if step_id is None:
+                return
+
+            rel_start = (start_pos[0] - mon_left, start_pos[1] - mon_top)
+            rel_end = (end_pos[0] - mon_left, end_pos[1] - mon_top)
+
+            if win_details.ui_control:
+                desc = t("action_drag_and_drop_control", control=win_details.ui_control, x1=start_pos[0], y1=start_pos[1], x2=end_pos[0], y2=end_pos[1], window=win_details.title)
+            else:
+                desc = t("action_drag_and_drop", x1=start_pos[0], y1=start_pos[1], x2=end_pos[0], y2=end_pos[1], window=win_details.title)
+
+            task = lambda: self._commit_step(
+                step_id=step_id,
+                action_type="drag_and_drop",
+                description=desc,
+                window_title=win_details.title,
+                process_name=win_details.process_name,
+                pid=win_details.pid,
+                ui_control=win_details.ui_control,
+                control_rect=getattr(win_details, "control_rect", None),
+                window_rect=win_details.window_rect,
+                relative_cursor=win_details.relative_cursor,
+                cursor_x=end_pos[0],
+                cursor_y=end_pos[1],
+                raw_img=raw_img,
+                rel_cursor=rel_end,
+                drag_start=start_pos,
+                drag_end=end_pos,
+                drag_start_rel=rel_start,
+                drag_end_rel=rel_end,
+                log_tag="Drag & Drop"
+            )
+            self._enqueue_or_execute(task, sync=sync)
+        except Exception as e:
+            safe_print(f"[StepRecorder] Error processing drag: {e}")
+
+    def _on_mouse_scroll(self, x: int, y: int, dx: int, dy: int) -> None:
+        """Triggered on mouse scroll event."""
+        if self.state != "recording":
+            return
+        if not getattr(self.config, "enable_scroll_capture", False):
+            return
+
+        with self._lock:
+            if self._step_counter >= self.config.max_steps:
+                return
+
+        self._scroll_accum_dy += dy
+        self._scroll_cursor_pos = (x, y)
+
+        if self._scroll_flush_timer:
+            try:
+                self._scroll_flush_timer.cancel()
+            except Exception:
+                pass
+
+        self._scroll_flush_timer = threading.Timer(0.45, self._flush_scroll_event)
+        self._scroll_flush_timer.daemon = True
+        self._scroll_flush_timer.start()
+
+    def _flush_scroll_event(self) -> None:
+        """Flush debounced scroll into a single step."""
+        accum = self._scroll_accum_dy
+        pos = self._scroll_cursor_pos
+        self._scroll_accum_dy = 0
+        if accum == 0 or self.state != "recording":
+            return
+
+        direction = "Xuống (Down)" if accum < 0 else "Lên (Up)"
+        win_details = get_active_window_info(cursor_pos=pos)
+
+        raw_img, mon_left, mon_top = self.capture.capture_for_event(
+            cursor_pos=pos,
+            window_rect=win_details.window_rect,
+            scope=getattr(self.config, "capture_scope", "cursor_monitor"),
+            padding=getattr(self.config, "active_window_padding", 24)
+        )
+
+        step_id = self._reserve_step_id()
+        if step_id is None:
+            return
+
+        rel_pos = (pos[0] - mon_left, pos[1] - mon_top) if pos else None
+        desc = t("action_scroll", direction=direction, window=win_details.title)
+
+        task = lambda: self._commit_step(
+            step_id=step_id,
+            action_type="scroll",
+            description=desc,
+            window_title=win_details.title,
+            process_name=win_details.process_name,
+            pid=win_details.pid,
+            ui_control=win_details.ui_control,
+            control_rect=getattr(win_details, "control_rect", None),
+            window_rect=win_details.window_rect,
+            relative_cursor=win_details.relative_cursor,
+            cursor_x=pos[0] if pos else None,
+            cursor_y=pos[1] if pos else None,
+            raw_img=raw_img,
+            rel_cursor=rel_pos,
+            log_tag="Scroll"
+        )
+        self._enqueue_or_execute(task, sync=False)
+
+    def _start_interval_timer(self) -> None:
+        """Start background interval timer capture thread."""
+        interval = getattr(self.config, "interval_capture_seconds", 0)
+        if interval <= 0:
+            return
+        self._interval_stop_event.clear()
+
+        def _loop():
+            while not self._interval_stop_event.is_set() and self.state == "recording":
+                time.sleep(interval)
+                if self.state != "recording" or self._interval_stop_event.is_set():
+                    break
+                try:
+                    win_details = get_active_window_info()
+                    raw_img, mon_left, mon_top = self.capture.capture_for_event(
+                        scope=getattr(self.config, "capture_scope", "cursor_monitor")
+                    )
+                    if self._last_screen_for_timer is not None:
+                        if not has_ui_changed(self._last_screen_for_timer, raw_img, win1=win_details.title, win2=win_details.title):
+                            continue
+                    self._last_screen_for_timer = raw_img.copy()
+
+                    step_id = self._reserve_step_id()
+                    if step_id is None:
+                        break
+
+                    desc = t("action_timer_capture", window=win_details.title)
+                    task = lambda: self._commit_step(
+                        step_id=step_id,
+                        action_type="timer_capture",
+                        description=desc,
+                        window_title=win_details.title,
+                        process_name=win_details.process_name,
+                        pid=win_details.pid,
+                        ui_control=None,
+                        control_rect=None,
+                        window_rect=win_details.window_rect,
+                        relative_cursor=None,
+                        cursor_x=None,
+                        cursor_y=None,
+                        raw_img=raw_img,
+                        log_tag=f"Timer {interval}s"
+                    )
+                    self._enqueue_or_execute(task, sync=False)
+                except Exception as e:
+                    safe_print(f"[StepRecorder] Error in interval timer capture: {e}")
+
+        self._interval_timer_thread = threading.Thread(target=_loop, daemon=True)
+        self._interval_timer_thread.start()
+
+    def _stop_interval_timer(self) -> None:
+        """Stop background interval timer capture thread."""
+        self._interval_stop_event.set()
+        self._interval_timer_thread = None
 
     def _process_click_event(
         self,
@@ -676,32 +1017,32 @@ class RecordingEngine:
                 else:
                     desc = t("action_left_click", x=x, y=y, window=window_title)
 
-            task1 = lambda: self._commit_step(
-                step_id=step_id,
-                action_type=action_type,
-                description=desc,
-                window_title=window_title,
-                process_name=process_name,
-                pid=win_details.pid,
-                ui_control=win_details.ui_control,
-                control_rect=getattr(win_details, "control_rect", None),
-                window_rect=win_details.window_rect,
-                relative_cursor=win_details.relative_cursor,
-                cursor_x=x,
-                cursor_y=y,
-                raw_img=raw_img,
-                rel_cursor=(rel_x, rel_y),
-                log_tag="Click 1/2 - Chụp ngay"
-            )
+            # Check if Unified Dual Capture is active
+            use_unified = getattr(self.config, "unified_dual_capture", True)
 
-            # If dual capture is disabled, enqueue task1 and return
+            # If dual capture is disabled, commit task1 immediately and return
             if not getattr(self.config, "dual_capture_on_click", True):
+                task1 = lambda: self._commit_step(
+                    step_id=step_id,
+                    action_type=action_type,
+                    description=desc,
+                    window_title=window_title,
+                    process_name=process_name,
+                    pid=win_details.pid,
+                    ui_control=win_details.ui_control,
+                    control_rect=getattr(win_details, "control_rect", None),
+                    window_rect=win_details.window_rect,
+                    relative_cursor=win_details.relative_cursor,
+                    cursor_x=x,
+                    cursor_y=y,
+                    raw_img=raw_img,
+                    rel_cursor=(rel_x, rel_y),
+                    log_tag="Click"
+                )
                 self._enqueue_or_execute(task1, sync=sync)
                 return
-            else:
-                self._enqueue_or_execute(task1, sync=False)
 
-            # 3. Second capture: If dual_capture_on_click is enabled, wait delay_ms and capture result
+            # Dual Capture enabled: wait delay_ms and capture result
             delay_ms = getattr(self.config, "second_capture_delay_ms", 20)
             if delay_ms > 0:
                 time.sleep(delay_ms / 1000.0)
@@ -731,47 +1072,105 @@ class RecordingEngine:
             )
 
             # Smart Auto-Detection: Check if UI actually changed
+            has_change = True
             if getattr(self.config, "dual_capture_smart_detect", True):
-                if not has_ui_changed(
+                has_change = has_ui_changed(
                     raw_img, raw_img2,
                     click_pos=(rel_x, rel_y),
                     win1=window_title,
                     win2=win2_title
-                ):
-                    safe_print(f"[StepRecorder] Giao diện không đổi -> Tự động giữ 1 ảnh cho Bước #{step_id}.")
-                    if sync:
-                        self.drain_queue()
-                    return
+                )
 
-            step_id2 = self._reserve_step_id()
-            if step_id2 is None:
-                if sync:
-                    self.drain_queue()
+            if not has_change:
+                safe_print(f"[StepRecorder] Giao diện không đổi -> Tự động giữ 1 ảnh cho Bước #{step_id}.")
+                task_single = lambda: self._commit_step(
+                    step_id=step_id,
+                    action_type=action_type,
+                    description=desc,
+                    window_title=window_title,
+                    process_name=process_name,
+                    pid=win_details.pid,
+                    ui_control=win_details.ui_control,
+                    control_rect=getattr(win_details, "control_rect", None),
+                    window_rect=win_details.window_rect,
+                    relative_cursor=win_details.relative_cursor,
+                    cursor_x=x,
+                    cursor_y=y,
+                    raw_img=raw_img,
+                    rel_cursor=(rel_x, rel_y),
+                    log_tag="Click"
+                )
+                self._enqueue_or_execute(task_single, sync=sync)
                 return
 
-            if win2_title and win2_title != window_title:
-                desc2 = t("action_click_result_switched", delay=delay_ms, window=win2_title)
+            if use_unified:
+                # UNIFIED MODE: Commit 1 step with image_before=raw_img, main image=raw_img2
+                task_unified = lambda: self._commit_step(
+                    step_id=step_id,
+                    action_type=action_type,
+                    description=desc,
+                    window_title=win2_title or window_title,
+                    process_name=proc2_name or process_name,
+                    pid=win_details2.pid or win_details.pid,
+                    ui_control=win_details.ui_control,
+                    control_rect=getattr(win_details, "control_rect", None),
+                    window_rect=win_details2.window_rect or win_details.window_rect,
+                    relative_cursor=win_details.relative_cursor,
+                    cursor_x=x,
+                    cursor_y=y,
+                    raw_img=raw_img2,
+                    rel_cursor=(rel_x, rel_y),
+                    image_before=raw_img,
+                    image_after=raw_img2,
+                    log_tag="Unified Click (Action+Result)"
+                )
+                self._enqueue_or_execute(task_unified, sync=sync)
             else:
-                desc2 = t("action_click_result", delay=delay_ms, window=window_title)
+                # LEGACY 2-STEP MODE: Commit Task 1 (Action), then Task 2 (Result)
+                task1 = lambda: self._commit_step(
+                    step_id=step_id,
+                    action_type=action_type,
+                    description=desc,
+                    window_title=window_title,
+                    process_name=process_name,
+                    pid=win_details.pid,
+                    ui_control=win_details.ui_control,
+                    control_rect=getattr(win_details, "control_rect", None),
+                    window_rect=win_details.window_rect,
+                    relative_cursor=win_details.relative_cursor,
+                    cursor_x=x,
+                    cursor_y=y,
+                    raw_img=raw_img,
+                    rel_cursor=(rel_x, rel_y),
+                    log_tag="Click 1/2 - Chụp ngay"
+                )
+                self._enqueue_or_execute(task1, sync=False)
 
-            task2 = lambda: self._commit_step(
-                step_id=step_id2,
-                action_type="click_result",
-                description=desc2,
-                window_title=win2_title,
-                process_name=proc2_name,
-                pid=win_details2.pid,
-                ui_control=win_details2.ui_control,
-                control_rect=None,
-                window_rect=win_details2.window_rect,
-                relative_cursor=win_details2.relative_cursor,
-                cursor_x=None,
-                cursor_y=None,
-                raw_img=raw_img2,
-                rel_cursor=None,
-                log_tag=f"Click 2/2 - Kết quả sau {delay_ms}ms"
-            )
-            self._enqueue_or_execute(task2, sync=sync)
+                step_id2 = self._reserve_step_id()
+                if step_id2 is not None:
+                    if win2_title and win2_title != window_title:
+                        desc2 = t("action_click_result_switched", delay=delay_ms, window=win2_title)
+                    else:
+                        desc2 = t("action_click_result", delay=delay_ms, window=window_title)
+
+                    task2 = lambda: self._commit_step(
+                        step_id=step_id2,
+                        action_type="click_result",
+                        description=desc2,
+                        window_title=win2_title,
+                        process_name=proc2_name,
+                        pid=win_details2.pid,
+                        ui_control=win_details2.ui_control,
+                        control_rect=None,
+                        window_rect=win_details2.window_rect,
+                        relative_cursor=win_details2.relative_cursor,
+                        cursor_x=None,
+                        cursor_y=None,
+                        raw_img=raw_img2,
+                        rel_cursor=None,
+                        log_tag=f"Click 2/2 - Kết quả sau {delay_ms}ms"
+                    )
+                    self._enqueue_or_execute(task2, sync=sync)
 
         except Exception as e:
             safe_print(f"[StepRecorder] Error processing click: {e}")
@@ -821,6 +1220,15 @@ class RecordingEngine:
                         cursor_tuple = (cur_x, cur_y) if (cur_x is not None and cur_y is not None) else None
                         self._typing_win_details = get_active_window_info(cursor_pos=cursor_tuple)
                         self._typing_cursor_pos = cursor_tuple
+                        try:
+                            self._typing_early_snapshot, self._typing_mon_left, self._typing_mon_top = self.capture.capture_for_event(
+                                cursor_pos=cursor_tuple,
+                                window_rect=self._typing_win_details.window_rect if self._typing_win_details else None,
+                                scope=getattr(self.config, "capture_scope", "cursor_monitor"),
+                                padding=getattr(self.config, "active_window_padding", 24)
+                            )
+                        except Exception:
+                            self._typing_early_snapshot = None
                     self._text_buffer.append(char_to_add)
                     timeout_sec = getattr(self.config, "keystroke_flush_timeout_ms", 1200) / 1000.0
                     self._text_flush_timer = threading.Timer(timeout_sec, lambda: self.flush_text_buffer())

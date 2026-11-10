@@ -17,7 +17,11 @@ Từ Windows 11 bản cập nhật mới, Microsoft đã chính thức thông b�
 | **Chỉnh sửa sau khi ghi (Review & Editor)** | ❌ Không thể sửa, xóa hay sắp xếp bước | ✅ **Trình duyệt & chỉnh sửa toàn diện**: Xóa, di chuyển, vẽ lại vùng Focus/Highlight, sửa ghi chú |
 | **Công cụ bảo mật Che mờ / Bôi đen (Blur / Redact)** | ❌ Không hỗ trợ | 🛡️ **Che thông tin nhạy cảm**: Làm mờ Gaussian Blur (`💧`), Bôi đen Redact Blackout (`⬛`), Khung đỏ (`🔴`), Hoàn tác (`↺`) |
 | **Cắt xén ảnh chụp (Crop Screenshot)** | ❌ Không hỗ trợ | ✂️ **Cắt xén tức thì**: Kéo chuột để crop ảnh về vùng quan tâm của ứng dụng |
-| **Chụp 2 lần khi nhấp chuột (Dual Capture)** | ❌ Chỉ chụp 1 lần duy nhất | ⚡ **Chụp kép Action & Result**: Chụp ngay khi click (hiện con trỏ/nút bấm) + Chụp sau ms (hiện kết quả modal/chuyển trang) |
+| **Chụp 2 lần khi nhấp chuột (Dual Capture)** | ❌ Chỉ chụp 1 lần duy nhất | ⚡ **Chụp kép Action & Result (Unified)**: Chụp trước thao tác + sau thao tác; tự động gộp thành 1 bước duy nhất kèm nút bấm **Chuyển Trước/Sau (Before/After Toggle)** |
+| **Kéo và Thả (Drag & Drop)** | ❌ Coi như cú click thông thường, không có hướng kéo | 🏹 **Quỹ đạo Kéo Thả (Drag & Drop Arrow)**: Nhận diện Mouse Up state machine, phân loại $d \ge 10\text{px}$, vẽ mũi tên chỉ hướng quỹ đạo kèm toạ độ đầu-cuối `(x1, y1) ➔ (x2, y2)` |
+| **Thu phóng Tiêu điểm (Focus Spotlight Zoom)** | ❌ Chỉ có ảnh toàn màn hình | 🔍 **Dual-View Focus Spotlight**: Tự động trích xuất ảnh zoom cận cảnh quanh toạ độ thao tác đặt cạnh ảnh toàn cảnh, người xem nhận biết ngay điểm thao tác |
+| **Gõ phím thông minh & Chụp sớm (Smart Keystroke)** | ❌ Bỏ qua text nhập liệu hoặc phân mảnh | ⌨️ **Early Snapshot & Keystroke Aggregator**: Chụp ngay ảnh trạng thái form ở phím đầu tiên, gom chuỗi gõ phím vào đúng ô nhập liệu thành 1 bước hoàn chỉnh |
+| **Thao tác Cuộn & Định kỳ (Scroll & Interval Capture)** | ❌ Không hỗ trợ | 📜 **Tự động bắt sự kiện Cuộn trang & Chụp định kỳ**: Ghi nhận thao tác scroll debounced và chụp chu kỳ theo thời gian khi giao diện thay đổi |
 | **Phím tắt toàn cục (Global Hotkeys)** | Hạn chế phím tắt | ⌨️ **Hands-free Hotkeys**: F7 (Ghi/Dừng), F8 (Tạm dừng), F9 (Ghi chú), F10 (Phân đoạn), F11 (Chỉnh sửa) |
 | **Mở & Chèn tài liệu cũ (Open & Insert)** | ❌ Không hỗ trợ | 📂 **Quản lý đa phiên**: Mở phiên cũ chỉnh sửa tiếp, Chèn gộp nhiều tài liệu lại thành 1 bộ SOP |
 | **Giới hạn số bước** | Mặc định chỉ 25 bước | **Tùy biến không giới hạn** (mặc định 200+) |
@@ -170,7 +174,7 @@ Dự án đi kèm bộ test toàn diện:
 python -m unittest tests/test_all.py
 ```
 
-Kết quả: Toàn bộ 12 bài test về Config, Screen Capture, Marker Annotations, Cross-platform Window Info, Section Headers, Table of Contents, Jinja2 Template rendering và Lifecycle State đều vượt qua 100% trên cả Linux và Windows.
+Kết quả: Toàn bộ **33** bài test tự động bao quát toàn bộ hệ thống (Config, Screen Capture, Marker Annotations, Drag Arrow, Focus Spotlight Crop, Cross-platform Window Info, Section Headers, Table of Contents, Jinja2 Template rendering, Mouse Up state machine, Unified Dual Capture, L2 Disk Spooling, Keystroke Aggregator và Lifecycle State) đều vượt qua **100% OK** trên cả Linux và Windows.
 
 ---
 

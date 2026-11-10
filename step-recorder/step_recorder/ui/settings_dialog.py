@@ -345,7 +345,22 @@ class SettingsDialog:
             activeforeground="#34d399",
             font=("Segoe UI", 8, "bold")
         )
-        smart_chk.pack(anchor="w", padx=(18, 0), pady=(0, 6))
+        smart_chk.pack(anchor="w", padx=(18, 0), pady=(0, 4))
+
+        # Unified Dual Capture Checkbox
+        self.unified_var = tk.BooleanVar(value=getattr(self.config, "unified_dual_capture", False))
+        unified_chk = tk.Checkbutton(
+            sec_dual,
+            text=t("opt_unified_dual_capture"),
+            variable=self.unified_var,
+            bg="#1e293b",
+            fg="#f59e0b",
+            selectcolor="#0f172a",
+            activebackground="#1e293b",
+            activeforeground="#f59e0b",
+            font=("Segoe UI", 8, "bold")
+        )
+        unified_chk.pack(anchor="w", padx=(18, 0), pady=(0, 6))
 
         # Explanatory bullet points
         hint_box = tk.Frame(sec_dual, bg="#0f172a", padx=10, pady=8, highlightbackground="#334155", highlightthickness=1)
@@ -547,6 +562,16 @@ class SettingsDialog:
         self.badge_var = tk.BooleanVar(value=self.config.show_step_badge_on_screenshot)
         self._create_checkbox(sec4, t("opt_step_badge"), self.badge_var)
 
+        # Mouse Up, Drag & Focus Zoom options
+        self.mouse_up_var = tk.BooleanVar(value=getattr(self.config, "enable_mouse_up_trigger", True))
+        self._create_checkbox(sec4, t("opt_mouse_up_trigger"), self.mouse_up_var)
+
+        self.drag_var = tk.BooleanVar(value=getattr(self.config, "enable_drag_capture", True))
+        self._create_checkbox(sec4, t("opt_drag_capture"), self.drag_var)
+
+        self.focus_crop_var = tk.BooleanVar(value=getattr(self.config, "enable_focus_zoom_crop", True))
+        self._create_checkbox(sec4, t("opt_focus_zoom_crop"), self.focus_crop_var)
+
         self.dark_mode_var = tk.BooleanVar(value=self.config.dark_mode_report)
         self._create_checkbox(sec4, t("opt_dark_mode"), self.dark_mode_var)
 
@@ -699,6 +724,10 @@ class SettingsDialog:
             self.config.enable_disk_spooling = bool(self.spool_var.get())
             self.config.dual_capture_on_click = bool(self.dual_capture_var.get())
             self.config.dual_capture_smart_detect = bool(self.smart_detect_var.get())
+            self.config.unified_dual_capture = bool(self.unified_var.get())
+            self.config.enable_mouse_up_trigger = bool(self.mouse_up_var.get())
+            self.config.enable_drag_capture = bool(self.drag_var.get())
+            self.config.enable_focus_zoom_crop = bool(self.focus_crop_var.get())
             self.config.capture_keys = bool(self.key_var.get())
             self.config.enable_keystroke_aggregator = bool(self.aggregator_var.get())
             self.config.enable_ui_automation = bool(self.uia_var.get())

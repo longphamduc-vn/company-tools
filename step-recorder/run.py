@@ -9,6 +9,18 @@ import os
 import shutil
 import subprocess
 
+# Ensure UTF-8 stdout/stderr on Windows to avoid UnicodeEncodeError with emojis
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, CURRENT_DIR)
 
@@ -66,8 +78,16 @@ def main():
     if maybe_forward_to_windows():
         return
 
-    from step_recorder.cli import main as cli_main
-    cli_main()
+    try:
+        from step_recorder.cli import main as cli_main
+        cli_main()
+    except ModuleNotFoundError as e:
+        print("=" * 68)
+        print(f"❌ Thiếu thư viện phụ thuộc: {e}")
+        print("💡 Vui lòng cài đặt các thư viện cần thiết:")
+        print("   pip install -r requirements.txt")
+        print("=" * 68)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -707,6 +707,46 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "vi": "Ghi chú",
         "en": "Comment"
     },
+    "action_name_drag_and_drop": {
+        "vi": "Kéo & Thả",
+        "en": "Drag & Drop"
+    },
+    "action_drag_and_drop": {
+        "vi": "Người dùng Kéo từ ({x1}, {y1}) và Thả tại ({x2}, {y2}) trên [{window}]",
+        "en": "User Dragged from ({x1}, {y1}) and Dropped at ({x2}, {y2}) on [{window}]"
+    },
+    "action_drag_and_drop_control": {
+        "vi": "Người dùng Kéo [{control}] từ ({x1}, {y1}) đến ({x2}, {y2}) trong [{window}]",
+        "en": "User Dragged [{control}] from ({x1}, {y1}) to ({x2}, {y2}) in [{window}]"
+    },
+    "action_name_hover": {
+        "vi": "Rê chuột",
+        "en": "Hover"
+    },
+    "action_hover": {
+        "vi": "Người dùng Rê chuột tại ({x}, {y}) trên [{window}]",
+        "en": "User Hovered at ({x}, {y}) on [{window}]"
+    },
+    "action_hover_control": {
+        "vi": "Người dùng Rê chuột vào [{control}] trên [{window}]",
+        "en": "User Hovered over [{control}] on [{window}]"
+    },
+    "action_name_scroll": {
+        "vi": "Cuộn trang",
+        "en": "Scroll"
+    },
+    "action_scroll": {
+        "vi": "Người dùng Cuộn trang {direction} trên [{window}]",
+        "en": "User Scrolled {direction} on [{window}]"
+    },
+    "action_name_timer_capture": {
+        "vi": "Chụp định kỳ",
+        "en": "Timed Capture"
+    },
+    "action_timer_capture": {
+        "vi": "Tự động ghi hình định kỳ trên [{window}]",
+        "en": "Automated periodic capture on [{window}]"
+    },
     "action_name_type_text": {
         "vi": "Nhập văn bản",
         "en": "Type Text"
@@ -722,6 +762,26 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "opt_keystroke_aggregator": {
         "vi": "Tự động gom chuỗi gõ phím vào ô nhập liệu (Keystroke Aggregator)",
         "en": "Automatically aggregate typed text into input fields"
+    },
+    "opt_unified_dual_capture": {
+        "vi": "Gộp Chụp Kép thành 1 bước gọn gàng (Unified Step)",
+        "en": "Consolidate Dual Capture into 1 Unified Step"
+    },
+    "opt_mouse_up_trigger": {
+        "vi": "Kích hoạt chụp khi nhả chuột (Mouse Up)",
+        "en": "Trigger click capture upon mouse release (Mouse Up)"
+    },
+    "opt_drag_capture": {
+        "vi": "Tự động phát hiện Kéo & Thả (Drag & Drop)",
+        "en": "Auto-detect Drag & Drop gestures"
+    },
+    "opt_focus_zoom_crop": {
+        "vi": "Tự động tạo khung Zoom tiêu điểm (Focus Spotlight Zoom)",
+        "en": "Auto-generate Focus Spotlight Zoom crop"
+    },
+    "lbl_interval_seconds": {
+        "vi": "Chụp định kỳ (giây, 0 = tắt):",
+        "en": "Periodic capture interval (sec, 0 = off):"
     },
     "opt_enable_uia": {
         "vi": "Nhận diện sâu nút bấm & ô nhập qua UI Automation (UIA)",

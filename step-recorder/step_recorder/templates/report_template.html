@@ -1620,14 +1620,41 @@
             </div>
             {% endif %}
 
+            {% if step.drag_start and step.drag_end %}
+            <div style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 6px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; font-size: 0.82rem; margin-bottom: 12px;">
+              <span>↔️ Quỹ đạo Kéo & Thả:</span>
+              <strong>({{ step.drag_start[0] }}, {{ step.drag_start[1] }}) ➔ ({{ step.drag_end[0] }}, {{ step.drag_end[1] }})</strong>
+            </div>
+            {% endif %}
+
+            {% if step.focus_crop_data_uri %}
+            <div class="focus-zoom-container" style="display: flex; gap: 14px; margin-bottom: 12px; align-items: center; background: rgba(15, 23, 42, 0.6); padding: 10px; border-radius: 8px; border: 1px solid rgba(56, 189, 248, 0.25);">
+              <div style="flex-shrink: 0; max-width: 280px; border-radius: 6px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.4); border: 2px solid #38bdf8;">
+                <img src="{{ step.focus_crop_data_uri }}" style="width: 100%; display: block;" alt="Focus zoom spotlight">
+              </div>
+              <div style="font-size: 0.82rem; color: #94a3b8; line-height: 1.4;">
+                <strong style="color: #38bdf8; display: block; margin-bottom: 4px;">🔍 Tiêu điểm thao tác (Spotlight Zoom)</strong>
+                Khu vực trọng tâm quanh vị trí tương tác của bước này. Bấm vào ảnh bên dưới để xem toàn màn hình.
+              </div>
+            </div>
+            {% endif %}
+
+            {% if step.image_before_data_uri %}
+            <div style="margin-bottom: 8px; display: flex; gap: 8px;">
+              <button type="button" onclick="event.stopPropagation(); toggleBeforeAfter('step-img-{{ step.step_id }}', '{{ step.image_data_uri }}', '{{ step.image_before_data_uri }}', this)" style="padding: 5px 12px; font-size: 0.8rem; border-radius: 6px; border: 1px solid #38bdf8; background: rgba(56, 189, 248, 0.1); color: #38bdf8; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-weight: 600;">
+                <span class="toggle-text">👁️ Xem trạng thái Trước thao tác</span>
+              </button>
+            </div>
+            {% endif %}
+
             {% if step.base64_image or step.annotated_image_path or step.image_data_uri %}
             <div class="screenshot-wrapper" onclick="openLightbox({{ loop.index0 }})">
               {% if step.image_data_uri %}
-              <img src="{{ step.image_data_uri }}" alt="Step {{ step.step_id }} screenshot" loading="lazy" decoding="async">
+              <img id="step-img-{{ step.step_id }}" src="{{ step.image_data_uri }}" alt="Step {{ step.step_id }} screenshot" loading="lazy" decoding="async">
               {% elif step.base64_image %}
-              <img src="data:{{ step.image_mime_type or 'image/png' }};base64,{{ step.base64_image }}" alt="Step {{ step.step_id }} screenshot" loading="lazy" decoding="async">
+              <img id="step-img-{{ step.step_id }}" src="data:{{ step.image_mime_type or 'image/png' }};base64,{{ step.base64_image }}" alt="Step {{ step.step_id }} screenshot" loading="lazy" decoding="async">
               {% else %}
-              <img src="{{ step.annotated_image_path }}" alt="Step {{ step.step_id }} screenshot" loading="lazy" decoding="async">
+              <img id="step-img-{{ step.step_id }}" src="{{ step.annotated_image_path }}" alt="Step {{ step.step_id }} screenshot" loading="lazy" decoding="async">
               {% endif %}
               <div class="zoom-hint" data-i18n="zoom_hint">🔍 Click to zoom</div>
             </div>
@@ -1825,6 +1852,21 @@
         hotspot_tooltip: "👆 Click here"
       }
     };
+
+    function toggleBeforeAfter(imgId, afterSrc, beforeSrc, btnEl) {
+      const img = document.getElementById(imgId);
+      if (!img) return;
+      const isBefore = img.dataset.state === 'before';
+      if (isBefore) {
+        img.src = afterSrc;
+        img.dataset.state = 'after';
+        btnEl.querySelector('.toggle-text').textContent = '👁️ Xem trạng thái Trước thao tác';
+      } else {
+        img.src = beforeSrc;
+        img.dataset.state = 'before';
+        btnEl.querySelector('.toggle-text').textContent = '👁️ Xem kết quả Sau thao tác';
+      }
+    }
 
     let activeLang = "{{ config.language or 'vi' }}";
 
