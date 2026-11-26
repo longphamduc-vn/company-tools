@@ -107,6 +107,8 @@ class SyncEngine:
             legacy_base_names=legacy_base_names,
             remove_legacy_names=remove_legacy_names,
         )
+        if success and not self.outlook.is_simulated():
+            self.yaml_mgr.mark_synced()
         if skipped_empty_rules:
             msg += f"\nWarning - skipped rules with no conditions: {', '.join(skipped_empty_rules)}"
         if skipped_no_folder_rules:

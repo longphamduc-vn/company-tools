@@ -944,7 +944,10 @@ class TriageView(ttk.Frame):
         store_path = store.file_path if store else ""
         ok = self.outlook.move_message(self.selected_message.entry_id, rule.target_folder, store_path)
         if ok:
-            messagebox.showinfo("Moved", f"Email moved to '{rule.target_folder}'.")
+            move_msg = f"Email moved to '{rule.target_folder}'."
+            if self.outlook.is_simulated():
+                move_msg = f"[SIMULATION] No changes were made to Outlook.\n\n{move_msg}"
+            messagebox.showinfo("Moved", move_msg)
             self.refresh_inbox()
 
     def _on_inbox_right_click(self, event):
@@ -1090,8 +1093,10 @@ class TriageView(ttk.Frame):
         self.refresh_inbox()
 
         if success:
+            sim_prefix = "[SIMULATION] No changes were made to Outlook.\n\n" if self.outlook.is_simulated() else ""
             messagebox.showinfo(
                 "Sync Complete",
+                f"{sim_prefix}"
                 f"Successfully applied {count} actions!\n"
                 f"Created {new_rules_count} new rules, updated {add_rules_count} rules.\n"
                 f"Outlook native rules are now synchronized."

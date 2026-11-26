@@ -20,6 +20,7 @@ class RuleManagerView(ttk.Frame):
 
         # Selection state
         self.selected_rule: Optional[RuleConfig] = None
+        self._editing_rule_group_ids: List[str] = []
         self.selected_folder_path: Optional[str] = None
         self.selected_group: Optional[AddressGroup] = None
         self.selected_pool_item: Optional[str] = None
@@ -219,6 +220,19 @@ class RuleManagerView(ttk.Frame):
         # 3. Recipients & Conditions Notebook / Mode Switcher
         card_cond = tk.LabelFrame(self.frame_rule, text="Filter Conditions (Emails & Domains)", bg="#ffffff", padx=8, pady=8)
         card_cond.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+
+        # Linked Groups (above Direct Emails, visible in both Visual and Bulk modes)
+        frame_linked_groups = tk.Frame(card_cond, bg="#ffffff")
+        frame_linked_groups.pack(fill=tk.X, pady=(0, 6))
+
+        row_grp_hdr = tk.Frame(frame_linked_groups, bg="#ffffff")
+        row_grp_hdr.pack(fill=tk.X, pady=(0, 2))
+        tk.Label(row_grp_hdr, text="Linked Groups:", bg="#ffffff", font=("", 8, "bold"), fg="#475569").pack(side=tk.LEFT)
+        ttk.Button(row_grp_hdr, text="Link Group...", command=self._link_group_to_rule).pack(side=tk.LEFT, padx=(6, 2))
+        ttk.Button(row_grp_hdr, text="Unlink", command=self._unlink_group_from_rule).pack(side=tk.LEFT, padx=2)
+
+        self.lst_rule_groups = tk.Listbox(frame_linked_groups, font=("Consolas", 9), height=3, selectmode=tk.EXTENDED)
+        self.lst_rule_groups.pack(fill=tk.X)
 
         mode_strip = tk.Frame(card_cond, bg="#ffffff")
         mode_strip.pack(fill=tk.X, pady=(0, 4))
@@ -648,6 +662,10 @@ class RuleManagerView(ttk.Frame):
                 text=f"Outlook Quota: {total_recipients} senders exceeds {threshold} limit -> Auto-splits into {num_parts} sub-rules",
                 fg="#ea580c"
             )
+
+        # Linked Groups
+        self._editing_rule_group_ids = list(rule.groups)
+        self._refresh_linked_groups_listbox()
 
         # Visual Lists
         self.lst_emails.delete(0, tk.END)
@@ -1237,6 +1255,7 @@ class RuleManagerView(ttk.Frame):
 
         domains = YamlConfigManager.normalize_domains(raw_domains)
 
+        self.selected_rule.groups = list(self._editing_rule_group_ids)
         self.selected_rule.emails = sorted(list(set(emails)))
         self.selected_rule.domains = sorted(list(set(domains)))
 
@@ -1297,6 +1316,71 @@ class RuleManagerView(ttk.Frame):
     # -----------------------------------------------------------------
     # CONDITION EDITORS & CHIPS
     # -----------------------------------------------------------------
+    def _refresh_linked_groups_listbox(self):
+        self.lst_rule_groups.delete(0, tk.END)
+        for g_id in self._editing_rule_group_ids:
+            grp = self.yaml_mgr.groups.get(g_id)
+            if grp:
+                label = f"{grp.name} ({len(grp.emails)} emails, {len(grp.domains)} domains)"
+            else:
+                label = f"{g_id} (missing group)"
+            self.lst_rule_groups.insert(tk.END, label)
+
+    def _link_group_to_rule(self):
+        if not self.selected_rule:
+            return
+        available = [
+            grp for g_id, grp in self.yaml_mgr.groups.items()
+            if g_id not in self._editing_rule_group_ids
+        ]
+        if not available:
+            messagebox.showinfo("Link Group", "No additional groups available to link.")
+            return
+
+        dlg = tk.Toplevel(self)
+        dlg.title("Link Address Group")
+        dlg.geometry("380x280")
+        dlg.transient(self)
+        dlg.grab_set()
+
+        tk.Label(
+            dlg,
+            text=f"Select group(s) to link to '{self.selected_rule.name}':",
+            font=("", 9, "bold"),
+            padx=10,
+            pady=8,
+        ).pack(anchor=tk.W)
+
+        lst = tk.Listbox(dlg, font=("Consolas", 9), selectmode=tk.EXTENDED)
+        lst.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+        for grp in available:
+            lst.insert(tk.END, f"{grp.name} ({len(grp.emails)} emails, {len(grp.domains)} domains)")
+
+        def _apply():
+            sel = lst.curselection()
+            if not sel:
+                return
+            for idx in sel:
+                g_id = available[idx].id
+                if g_id not in self._editing_rule_group_ids:
+                    self._editing_rule_group_ids.append(g_id)
+            self._refresh_linked_groups_listbox()
+            dlg.destroy()
+
+        btn_bar = ttk.Frame(dlg, padding=8)
+        btn_bar.pack(fill=tk.X, side=tk.BOTTOM)
+        ttk.Button(btn_bar, text="Link Selected", style="Accent.TButton", command=_apply).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(btn_bar, text="Cancel", command=dlg.destroy).pack(side=tk.RIGHT, padx=4)
+
+    def _unlink_group_from_rule(self):
+        sel = list(self.lst_rule_groups.curselection())
+        if not sel:
+            return
+        for idx in reversed(sel):
+            if 0 <= idx < len(self._editing_rule_group_ids):
+                self._editing_rule_group_ids.pop(idx)
+        self._refresh_linked_groups_listbox()
+
     def _set_condition_mode(self, mode: str):
         self.condition_mode = mode
         if mode == "visual":
@@ -1454,7 +1538,7 @@ class RuleManagerView(ttk.Frame):
         g_name = simpledialog.askstring("New Address Group", "Enter Group Name:")
         if not g_name:
             return
-        g_id = f"group_{len(self.yaml_mgr.groups) + 1}"
+        g_id = self.yaml_mgr.generate_group_id(g_name)
         new_g = AddressGroup(id=g_id, name=g_name)
         self.yaml_mgr.groups[g_id] = new_g
         self.yaml_mgr.save()

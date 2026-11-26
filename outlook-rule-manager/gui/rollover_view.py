@@ -230,6 +230,8 @@ class RolloverView(ttk.Frame):
 
         success, msg = self.sync_engine.perform_rollover(new_name, new_path)
         if success:
+            if self.outlook.is_simulated():
+                msg = f"[SIMULATION] No changes were made to Outlook.\n\n{msg}"
             messagebox.showinfo("Rollover Complete", msg)
             self.refresh_view()
         else:

@@ -230,8 +230,10 @@ class ConflictDialog(tk.Toplevel):
             remove_legacy=remove_legacy,
             remove_legacy_names=remove_legacy_names,
         )
+        sim_prefix = "[SIMULATION] No changes were made to Outlook.\n\n" if self.sync_engine.outlook.is_simulated() else ""
         messagebox.showinfo(
             "Conflict Resolution Complete",
+            f"{sim_prefix}"
             f"Resolved {len(self.conflicts)} conflicts.\n"
             f"• Imported to YAML: {import_count}\n"
             f"• Overwritten in Outlook: {overwrite_count}\n"

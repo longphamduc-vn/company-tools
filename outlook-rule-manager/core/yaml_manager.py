@@ -4,7 +4,7 @@ import shutil
 import glob
 import re
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import yaml
 
 from core.models import StoreConfig, AddressGroup, RuleConfig
@@ -29,6 +29,9 @@ class YamlConfigManager:
         self.groups: Dict[str, AddressGroup] = {}
         self.rules: List[RuleConfig] = []
         self.unclassified_pool: List[str] = []
+        self.unsynced_changes: int = 0
+        self.has_synced: bool = False
+        self._change_listeners: List[Callable[[], Any]] = []
 
         self.load()
 
@@ -180,7 +183,25 @@ class YamlConfigManager:
                 f"Failed to save configuration atomically to '{self.config_path}': {exc}"
             ) from exc
 
+        self.unsynced_changes += 1
+        self._notify_change_listeners()
         return True
+
+    def add_change_listener(self, callback: Callable[[], Any]) -> None:
+        """Register a callback invoked when saved config or sync status changes."""
+        if callback not in self._change_listeners:
+            self._change_listeners.append(callback)
+
+    def _notify_change_listeners(self) -> None:
+        """Notify all registered change listeners."""
+        for callback in list(self._change_listeners):
+            callback()
+
+    def mark_synced(self) -> None:
+        """Reset unsynced change counter after a real Outlook sync."""
+        self.unsynced_changes = 0
+        self.has_synced = True
+        self._notify_change_listeners()
 
     def _prune_backups(self):
         """Keep only the latest N backup files sorted chronologically by filename."""
@@ -475,18 +496,17 @@ class YamlConfigManager:
         self.save()
         return len(affected_rules)
 
-    def generate_rule_id(self, base: str) -> str:
-        """Generate a unique slugified rule ID starting with 'rule_'."""
+    def _generate_unique_id(self, prefix: str, base: str, existing_ids: Set[str]) -> str:
+        """Generate a unique slugified ID starting with the given prefix."""
         slug = re.sub(r"[^a-z0-9_]", "_", (base or "").lower())
         slug = re.sub(r"_+", "_", slug).lstrip("_")
-        if slug.startswith("rule_"):
-            slug = slug[len("rule_"):]
+        if slug.startswith(prefix):
+            slug = slug[len(prefix):]
         slug = slug.strip("_")
         if not slug:
             slug = "new"
-        candidate_base = f"rule_{slug}"
+        candidate_base = f"{prefix}{slug}"
 
-        existing_ids = {r.id for r in self.rules}
         if candidate_base not in existing_ids:
             return candidate_base
 
@@ -494,6 +514,14 @@ class YamlConfigManager:
         while f"{candidate_base}_{suffix}" in existing_ids:
             suffix += 1
         return f"{candidate_base}_{suffix}"
+
+    def generate_rule_id(self, base: str) -> str:
+        """Generate a unique slugified rule ID starting with 'rule_'."""
+        return self._generate_unique_id("rule_", base, {r.id for r in self.rules})
+
+    def generate_group_id(self, base: str) -> str:
+        """Generate a unique slugified group ID starting with 'grp_'."""
+        return self._generate_unique_id("grp_", base, set(self.groups.keys()))
 
     def duplicate_rule(self, rule_id: str) -> Optional[RuleConfig]:
         """Duplicate an existing rule with a unique ID and 'Copy of' name."""

@@ -54,6 +54,8 @@ class BaseOutlookClient:
     """Interface for Outlook operations."""
     def is_connected(self) -> bool:
         raise NotImplementedError
+    def is_simulated(self) -> bool:
+        raise NotImplementedError
     def get_mode_name(self) -> str:
         raise NotImplementedError
     def get_current_user_account(self) -> str:
@@ -101,6 +103,9 @@ class WindowsOutlookClient(BaseOutlookClient):
 
     def is_connected(self) -> bool:
         return self._connected
+
+    def is_simulated(self) -> bool:
+        return False
 
     def get_mode_name(self) -> str:
         return "Outlook Classic (COM MAPI)"
@@ -760,6 +765,9 @@ class MockOutlookClient(BaseOutlookClient):
         ]
 
     def is_connected(self) -> bool:
+        return True
+
+    def is_simulated(self) -> bool:
         return True
 
     def get_mode_name(self) -> str:
