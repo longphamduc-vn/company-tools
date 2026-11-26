@@ -16,6 +16,12 @@ def extract_base_rule_name(rule_name: str) -> str:
     return _COMPILED_SUFFIX_RE.sub("", name)
 
 
+def pluralize_count(count: int, singular: str, plural: Optional[str] = None) -> str:
+    """Format an integer count with singular/plural unit (e.g. '1 sender', '2 senders')."""
+    unit = singular if count == 1 else (plural or f"{singular}s")
+    return f"{count} {unit}"
+
+
 @dataclass
 class StoreConfig:
     id: str

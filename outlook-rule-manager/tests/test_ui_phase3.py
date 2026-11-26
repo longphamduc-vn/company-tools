@@ -7,7 +7,7 @@ from tkinter import ttk
 import unittest
 from unittest.mock import patch
 
-from core.models import RuleConfig
+from core.models import AddressGroup, RuleConfig, pluralize_count
 from core.outlook_client import MockOutlookClient, WindowsOutlookClient
 from core.sync_engine import SyncEngine, match_email_domain
 from core.yaml_manager import YamlConfigManager
@@ -90,11 +90,13 @@ class TestUiPhase3(unittest.TestCase):
             self.assertEqual(len(drop_labels), 1)
             self.assertEqual(drop_labels[0].cget("text"), "Drop an email here to create a new rule")
 
-            # Assign button has no duplicate arrow in text; Search label precedes ent_search
+            # Assign button has no duplicate arrow in text; Search label mapped & left of ent_search
             self.assertEqual(triage.mb_assign_rule.cget("text"), "Assign to Rule...")
             search_lbl = next(
                 lbl for lbl in _find_widgets(triage.frame_center, tk.Label) if lbl.cget("text") == "Search:"
             )
+            self.assertTrue(bool(search_lbl.winfo_ismapped()))
+            self.assertGreater(search_lbl.winfo_width(), 20)
             self.assertLess(search_lbl.winfo_rootx(), triage.ent_search.winfo_rootx())
         finally:
             win.destroy()
@@ -143,13 +145,26 @@ class TestUiPhase3(unittest.TestCase):
             self.assertIn("(disabled)", win.tab_triage.tree_rules.item("rule_rule_executive", "text"))
             self.assertIn("rule_disabled", win.tab_triage.tree_rules.item("rule_rule_executive", "tags"))
 
-            # [Unclassified] rule counts unclassified_pool addresses (rules_sample has 1 address)
-            self.assertEqual(win.tab_rules.tree.item("rule_rule_unclassified", "values")[0], "1 senders")
+            # [Unclassified] rule counts 1 singular sender; single-item group counts 1 member
+            self.assertEqual(pluralize_count(1, "sender"), "1 sender")
+            self.assertEqual(pluralize_count(2, "sender"), "2 senders")
+            self.assertEqual(pluralize_count(0, "domain"), "0 domains")
+            self.assertEqual(win.tab_rules.tree.item("rule_rule_unclassified", "values")[0], "1 sender")
             unclass_children = [
                 win.tab_triage.tree_rules.item(c, "text").strip()
                 for c in win.tab_triage.tree_rules.get_children("rule_rule_unclassified")
             ]
             self.assertIn("former.contractor@vendor.com", unclass_children)
+
+            # Panel title is "Navigator" (no duplicate "Folders & Rules" panel header); clean folder buttons
+            left_lbls = [l.cget("text") for l in _find_widgets(win.tab_rules.frame_left, tk.Label)]
+            self.assertIn("Navigator", left_lbls)
+            self.assertNotIn("Folders & Rules", left_lbls)
+            rules_toolbar_btns = [b.cget("text") for b in _find_widgets(win.tab_rules, ttk.Button)]
+            self.assertIn("+ Top-level Folder", rules_toolbar_btns)
+            self.assertIn("+ Subfolder", rules_toolbar_btns)
+            self.assertNotIn("+ Root Folder (L1)", rules_toolbar_btns)
+            self.assertNotIn("+ Subfolder (L+1)", rules_toolbar_btns)
 
             # Left panel duplicate buttons removed from frame_left; kept in inspector footer
             left_btns = [b.cget("text") for b in _find_widgets(win.tab_rules.frame_left, ttk.Button)]
@@ -165,13 +180,41 @@ class TestUiPhase3(unittest.TestCase):
                 win.winfo_rootx() + win.winfo_width(),
             )
 
-            # Checkbox "Enabled" + "(applies to Outlook on next Sync)" caption
+            # Checkbox "Enabled" + "(applies to Outlook on next Sync)", clean breadcrumb, singular emails/domains
             win.tab_rules.tree.selection_set("rule_rule_executive")
             win.tab_rules._on_tree_select()
             win.update()
+            crumb = win.tab_rules.lbl_breadcrumb.cget("text")
+            self.assertNotIn("[L1]", crumb)
+            self.assertNotIn("[L2]", crumb)
+            self.assertTrue(crumb.endswith("(Level 3)"))
             self.assertEqual(win.tab_rules.chk_rule_enabled.cget("text"), "Enabled")
             hdr_labels = [l.cget("text") for l in _find_widgets(win.tab_rules.frame_rule, tk.Label)]
             self.assertIn("(applies to Outlook on next Sync)", hdr_labels)
+            self.assertIn("0 domains", win.tab_rules.lst_rule_groups.get(0))
+
+            # Rule with 1 email, 1 domain, 1 keyword -> singular quota text & "1 native rule" vs "3 native rules"
+            win.tab_rules.tree.selection_set("rule_rule_suppliers")
+            win.tab_rules._on_tree_select()
+            win.update()
+            self.assertIn("(1 email, 2 domains)", win.tab_rules.lst_rule_groups.get(0))
+
+            one_rule = RuleConfig(
+                id="rule_one",
+                name="One Item",
+                enabled=True,
+                emails=["one@x.com"],
+                target_folder="One\\Folder",
+            )
+            win.yaml_mgr.rules.append(one_rule)
+            win.yaml_mgr.groups["solo_grp"] = AddressGroup(id="solo_grp", name="Solo Group", emails=["solo@x.com"])
+            win.yaml_mgr.save()
+            win.tab_rules.refresh_all()
+            self.assertEqual(win.tab_rules.tree.item("grp_solo_grp", "values")[0], "1 member")
+            win.tab_rules.tree.selection_set("rule_rule_one")
+            win.tab_rules._on_tree_select()
+            self.assertIn("1 sender, 0 domains, 0 keywords → 1 native rule", win.tab_rules.lbl_quota.cget("text"))
+            self.assertNotIn("1 native rules", win.tab_rules.lbl_quota.cget("text"))
         finally:
             win.destroy()
 
@@ -224,7 +267,7 @@ class TestUiPhase3(unittest.TestCase):
             view.tree.selection_set("rule_rule_multi")
             view._on_tree_select()
             win.update()
-            self.assertIn("3 native rule(s)", view.lbl_quota.cget("text"))
+            self.assertIn("1 sender, 1 domain, 1 keyword → 3 native rules", view.lbl_quota.cget("text"))
             self.assertEqual(view.lbl_quota.cget("fg"), "#16a34a")
 
             # GUI Test Match rejects x@notvendor.com and accepts a@vendor.com

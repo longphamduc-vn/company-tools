@@ -294,7 +294,7 @@ class TestUiPhase2(unittest.TestCase):
             view._on_tree_select()
             win.update()
             quota_txt = view.lbl_quota.cget("text")
-            self.assertIn("41 senders, 1 domains, 1 keywords → 4 native rule(s)", quota_txt)
+            self.assertIn("41 senders, 1 domain, 1 keyword → 4 native rules", quota_txt)
             self.assertIn("Big Vendor (Keywords)", view.lbl_quota_subrules.cget("text"))
 
             # Link group "executive" via modal dialog -> immediately updates to 43 senders BEFORE Save
@@ -308,19 +308,19 @@ class TestUiPhase2(unittest.TestCase):
             link_btn = next(b for b in btn_bar.winfo_children() if isinstance(b, ttk.Button) and b.cget("text") == "Link Selected")
             link_btn.invoke()
             win.update_idletasks()
-            self.assertIn("43 senders, 1 domains, 1 keywords → 4 native rule(s)", view.lbl_quota.cget("text"))
+            self.assertIn("43 senders, 1 domain, 1 keyword → 4 native rules", view.lbl_quota.cget("text"))
 
             # Unlink via UI method -> drops back to 41 senders immediately
             view.lst_rule_groups.selection_set(0)
             view._unlink_group_from_rule()
-            self.assertIn("41 senders, 1 domains, 1 keywords → 4 native rule(s)", view.lbl_quota.cget("text"))
+            self.assertIn("41 senders, 1 domain, 1 keyword → 4 native rules", view.lbl_quota.cget("text"))
 
             # Remove keyword and Save -> drops to 0 keywords and 3 native rules
             view.lst_keywords.selection_set(0)
             view._remove_keyword_chip()
             with patch.object(view, "_show_toast"):
                 view._save_rule_changes()
-            self.assertIn("41 senders, 1 domains, 0 keywords → 3 native rule(s)", view.lbl_quota.cget("text"))
+            self.assertIn("41 senders, 1 domain, 0 keywords → 3 native rules", view.lbl_quota.cget("text"))
 
             # Rule without conditions -> warning
             empty_rule = RuleConfig(

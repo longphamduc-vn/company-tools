@@ -182,7 +182,7 @@ class TriageView(ttk.Frame):
 
         # Filter Strip
         filter_strip = tk.Frame(self.frame_center, bg="#f8fafc")
-        filter_strip.pack(fill=tk.X, pady=(0, 6))
+        filter_strip.pack(fill=tk.X, pady=(0, 4))
 
         self.btn_f_all = tk.Button(
             filter_strip, text="All", relief="flat", bg="#0284c7", fg="#ffffff",
@@ -202,10 +202,15 @@ class TriageView(ttk.Frame):
         )
         self.btn_f_staged.pack(side=tk.LEFT, padx=1)
 
-        self.ent_search = ttk.Entry(filter_strip, width=16)
-        self.ent_search.pack(side=tk.RIGHT, padx=2)
+        # Dedicated Search row so "Search:" label & input never get clipped at 1120x720
+        search_strip = tk.Frame(self.frame_center, bg="#f8fafc")
+        search_strip.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(search_strip, text="Search:", bg="#f8fafc", fg="#475569", font=("", 8, "bold")).pack(
+            side=tk.LEFT, padx=(0, 4)
+        )
+        self.ent_search = ttk.Entry(search_strip, width=20)
+        self.ent_search.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.ent_search.bind("<KeyRelease>", lambda e: self._on_search_change())
-        tk.Label(filter_strip, text="Search:", bg="#f8fafc", fg="#64748b", font=("", 8)).pack(side=tk.RIGHT, padx=2)
 
         # High-Speed Treeview for Inbox Messages (Virtual rendering, 0ms lag)
         inbox_container = ttk.Frame(self.frame_center)

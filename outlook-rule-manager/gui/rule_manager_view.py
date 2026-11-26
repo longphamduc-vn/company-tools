@@ -5,7 +5,7 @@ import os
 import re
 from typing import Optional, List, Tuple, Dict, Any
 
-from core.models import RuleConfig, AddressGroup
+from core.models import RuleConfig, AddressGroup, pluralize_count
 from core.yaml_manager import YamlConfigManager
 from core.sync_engine import SyncEngine
 
@@ -86,8 +86,8 @@ class RuleManagerView(ttk.Frame):
         toolbar.pack(fill=tk.X, side=tk.TOP)
 
         # Quick action buttons (Dynamic arbitrary levels)
-        ttk.Button(toolbar, text="+ Root Folder (L1)", command=self._add_root_folder).pack(side=tk.LEFT, padx=(0, 4))
-        ttk.Button(toolbar, text="+ Subfolder (L+1)", command=self._add_subfolder).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="+ Top-level Folder", command=self._add_root_folder).pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Button(toolbar, text="+ Subfolder", command=self._add_subfolder).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="+ New Rule", command=self._add_rule_in_selected_folder).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="+ New Group", command=self._add_group).pack(side=tk.LEFT, padx=4)
 
@@ -137,7 +137,7 @@ class RuleManagerView(ttk.Frame):
         tree_header.pack(fill=tk.X)
         tk.Label(
             tree_header,
-            text="Folders & Rules",
+            text="Navigator",
             bg="#f1f5f9",
             fg="#334155",
             font=("", 9, "bold")
@@ -284,7 +284,7 @@ class RuleManagerView(ttk.Frame):
 
         self.lbl_breadcrumb = tk.Label(
             self.bar_breadcrumb,
-            text="Folder: [L1] Engineering_Team > [L2] SCADA_Part > [L3] PLC_Unit",
+            text="Folder: Engineering_Team > SCADA_Part > PLC_Unit (Level 3)",
             bg="#f1f5f9",
             fg="#0369a1",
             font=("", 9, "bold")
@@ -319,7 +319,7 @@ class RuleManagerView(ttk.Frame):
         # Quota meter (live compiled preview)
         self.lbl_quota = tk.Label(
             card_header,
-            text="Outlook: 0 senders, 0 domains, 0 keywords → 0 native rule(s)",
+            text="Outlook: 0 senders, 0 domains, 0 keywords → 0 native rules",
             bg="#ffffff",
             fg="#16a34a",
             font=("", 8, "bold")
@@ -535,7 +535,7 @@ class RuleManagerView(ttk.Frame):
         self.btn_bar_folder.pack(fill=tk.X, side=tk.BOTTOM)
 
         ttk.Button(self.btn_bar_folder, text="+ Add Rule Here", command=self._add_rule_in_selected_folder).pack(side=tk.LEFT, padx=2)
-        ttk.Button(self.btn_bar_folder, text="+ Subfolder (L+1)", command=self._add_subfolder).pack(side=tk.LEFT, padx=2)
+        ttk.Button(self.btn_bar_folder, text="+ Subfolder", command=self._add_subfolder).pack(side=tk.LEFT, padx=2)
 
         self.btn_promote_root = ttk.Button(self.btn_bar_folder, text="Promote to Root (L1)", command=self._promote_selected_folder_to_root)
         self.btn_move_up = ttk.Button(self.btn_bar_folder, text="Move Up 1 Level", command=self._move_selected_folder_up)
@@ -707,7 +707,7 @@ class RuleManagerView(ttk.Frame):
                 self.tree.insert(
                     fld_node_id, tk.END, iid=rule_iid,
                     text=rule_label,
-                    values=(f"{total_senders} senders",),
+                    values=(pluralize_count(total_senders, "sender"),),
                     open=False,
                     tags=rule_tags,
                 )
@@ -723,7 +723,10 @@ class RuleManagerView(ttk.Frame):
                     continue
                 count = len(grp.emails) + len(grp.domains)
                 grp_iid = f"grp_{g_id}"
-                self.tree.insert(root_grp_id, tk.END, iid=grp_iid, text=f"👥 {grp.name}", values=(f"{count} members",))
+                self.tree.insert(
+                    root_grp_id, tk.END, iid=grp_iid,
+                    text=f"👥 {grp.name}", values=(pluralize_count(count, "member"),)
+                )
 
             # ---------------------------------------------------------
             # Category 3: Unclassified Pool
@@ -973,10 +976,10 @@ class RuleManagerView(ttk.Frame):
     def _populate_rule_inspector(self, rule: RuleConfig):
         self._populating_inspector = True
         try:
-            # Breadcrumbs with Dynamic Level tags
+            # Breadcrumbs without [L1]/[L2] prefix, keeping (Level N) at end
             folder_path = rule.target_folder or "_Unclassified"
             parts = [p.strip() for p in re.split(r'[\\/]', folder_path) if p.strip()]
-            breadcrumb_str = " > ".join(f"[L{i+1}] {p}" for i, p in enumerate(parts)) if parts else "(Root)"
+            breadcrumb_str = " > ".join(parts) if parts else "(Root)"
             self.lbl_breadcrumb.config(text=f"📁 {breadcrumb_str} (Level {len(parts)})")
 
             # Core properties
@@ -1048,9 +1051,10 @@ class RuleManagerView(ttk.Frame):
         color = "#ea580c" if has_threshold_split else "#16a34a"
         self.lbl_quota.config(
             text=(
-                f"Outlook: {summary['email_count']} senders, "
-                f"{summary['domain_count']} domains, "
-                f"{summary['keyword_count']} keywords → {len(names)} native rule(s)"
+                f"Outlook: {pluralize_count(summary['email_count'], 'sender')}, "
+                f"{pluralize_count(summary['domain_count'], 'domain')}, "
+                f"{pluralize_count(summary['keyword_count'], 'keyword')} → "
+                f"{pluralize_count(len(names), 'native rule')}"
             ),
             fg=color,
         )
@@ -1062,7 +1066,7 @@ class RuleManagerView(ttk.Frame):
         depth = len(parts)
 
         parent_text = parts[-2] if depth > 1 else "(Root)"
-        crumb_text = " > ".join(f"[L{i+1}] {p}" for i, p in enumerate(parts))
+        crumb_text = " > ".join(parts)
         self.lbl_folder_level.config(text=f"Level: Level {depth}  |  Parent: {parent_text}\nPath: {crumb_text}")
 
         # Rules in folder
@@ -1080,7 +1084,9 @@ class RuleManagerView(ttk.Frame):
         self.tree_folder_rules.delete(*self.tree_folder_rules.get_children())
         for r in folder_rules:
             st = "Active" if r.enabled else "Disabled"
-            self.tree_folder_rules.insert("", tk.END, iid=f"frule_{r.id}", text=r.name, values=(st, f"{rule_counts[r.id]} senders"))
+            self.tree_folder_rules.insert(
+                "", tk.END, iid=f"frule_{r.id}", text=r.name, values=(st, pluralize_count(rule_counts[r.id], "sender"))
+            )
 
         # Configure Level shifting buttons (Promote / Move Up)
         if depth > 1:
@@ -1726,7 +1732,10 @@ class RuleManagerView(ttk.Frame):
         for g_id in self._editing_rule_group_ids:
             grp = self.yaml_mgr.groups.get(g_id)
             if grp:
-                label = f"{grp.name} ({len(grp.emails)} emails, {len(grp.domains)} domains)"
+                label = (
+                    f"{grp.name} ({pluralize_count(len(grp.emails), 'email')}, "
+                    f"{pluralize_count(len(grp.domains), 'domain')})"
+                )
             else:
                 label = f"{g_id} (missing group)"
             self.lst_rule_groups.insert(tk.END, label)
@@ -1759,7 +1768,10 @@ class RuleManagerView(ttk.Frame):
         lst = tk.Listbox(dlg, font=("Consolas", 9), selectmode=tk.EXTENDED)
         lst.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
         for grp in available:
-            lst.insert(tk.END, f"{grp.name} ({len(grp.emails)} emails, {len(grp.domains)} domains)")
+            lst.insert(
+                tk.END,
+                f"{grp.name} ({pluralize_count(len(grp.emails), 'email')}, {pluralize_count(len(grp.domains), 'domain')})",
+            )
 
         def _apply():
             sel = lst.curselection()
