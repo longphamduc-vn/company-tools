@@ -226,3 +226,9 @@ Sau mỗi phase, agent báo lại: commit hash, danh sách file đổi, output `
   - `tests/test_phase3_rollover.py`: thêm 6 test (dùng `WindowsOutlookClient(namespace=FakeNamespace(...))` và `MockOutlookClient`) cho so khớp chính xác `"Archive 2025"` vs `"Archive 2025 Old"`, rollover đường dẫn sai, rollback khi Outlook save lỗi, rollover giữ nguyên cây thư mục `Team\Part\Unit` và không đụng rule không prefix, `save_native_rules` với store không tồn tại, và `move_message` với store không tồn tại.
 - **Lệch plan & lý do:**
   - Thực hiện rollover theo phương án khuyến nghị (cập nhật `active_archive` tạm trong bộ nhớ rồi gọi `push_to_outlook()`, chỉ `save()` khi thành công) và xóa `rollover_rules` khỏi cả 3 lớp client thay vì giữ lại phương thức không còn sử dụng (theo chỉ dẫn của user).
+
+### Phase 3 — Review fixes
+- **Đã làm:**
+  - `core/outlook_client.py` (`MockOutlookClient`): bỏ kiểm tra store chặt trong `save_native_rules` và `move_message` để Mock mode vẫn chạy được với `config/rules.yaml` thật (`C:\Outlook_Data\...`), giữ nguyên `MockOutlookClient.store_exists` chặt và toàn bộ kiểm tra chặt của `WindowsOutlookClient`.
+  - `tests/test_phase3_rollover.py`: thêm test dùng `MockOutlookClient` với bản copy `config/rules.yaml` trong thư mục tạm -> `push_to_outlook()` và `move_message()` đều trả `True`.
+- **Lệch plan & lý do:** Không có.

@@ -667,10 +667,6 @@ class MockOutlookClient(BaseOutlookClient):
         remove_legacy: bool = False,
         legacy_base_names: Optional[List[str]] = None,
     ) -> Tuple[bool, str]:
-        target_store = self._find_store(target_store_path)
-        if target_store is None:
-            return False, f"Target store not found: {target_store_path}"
-
         yaml_base_names = set(legacy_base_names or [])
         compiled_names = {r["name"] for r in rules_data}
         if not yaml_base_names:
@@ -720,8 +716,6 @@ class MockOutlookClient(BaseOutlookClient):
         return True, msg
 
     def move_message(self, entry_id: str, target_folder_path: str, store_path: str = "") -> bool:
-        if self._find_store(store_path) is None:
-            return False
         self._inbox = [m for m in self._inbox if m.entry_id != entry_id]
         return True
 

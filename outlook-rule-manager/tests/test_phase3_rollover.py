@@ -212,3 +212,19 @@ class TestPhase3SafeRolloverAndStoreLookup(unittest.TestCase):
         self.assertIsNotNone(mail.moved_to)
         self.assertEqual(mail.moved_to.FolderPath, r"\\Archive 2026\Team\Part\Unit")
         self.assertEqual(self.default_store.GetRootFolder().Folders.Count, 0)
+
+    def test_mock_outlook_client_succeeds_with_copy_of_real_rules_yaml(self):
+        real_config_src = os.path.join(os.path.dirname(__file__), "..", "config", "rules.yaml")
+        real_config_copy = os.path.join(self.temp_dir, "real_rules_copy.yaml")
+        shutil.copy2(real_config_src, real_config_copy)
+
+        yaml_mgr = YamlConfigManager(real_config_copy)
+        mock_client = MockOutlookClient()
+        engine = SyncEngine(yaml_mgr, mock_client)
+
+        store_path = yaml_mgr.stores["active_archive"].file_path
+        ok, msg = engine.push_to_outlook()
+        self.assertTrue(ok, msg)
+
+        moved = mock_client.move_message("MSG_001", r"Management\Directors", store_path)
+        self.assertTrue(moved)
