@@ -205,3 +205,12 @@ Sau mỗi phase, agent báo lại: commit hash, danh sách file đổi, output `
 - **Lệch plan & lý do:**
   - `extract_base_rule_name` xử lý đồng nhất cả `(Part N)`, `(Domains)`, `(Keywords)` khi nhận diện tên rule legacy và trong `ConflictDetector`, tránh bỏ sót sub-rule tách theo domain/keyword hoặc báo trùng lặp `SENDER_OVERLAP` ở `ConflictDetector`.
   - Ở `gui/main_window.py`, kiểm tra danh sách rule legacy qua `find_legacy_rules()` trước khi gọi `push_to_outlook(remove_legacy=...)` để chỉ chạy sync Outlook một lần thay vì hai lần (vẫn hỏi người dùng đúng một lần kèm danh sách tên).
+
+### Phase 2 — Review fixes
+- **Đã làm:**
+  - `core/outlook_client.py` (`WindowsOutlookClient._is_conditionless_move_rule`): chuyển sang duyệt toàn bộ condition qua `rule.Conditions.Count` và `rule.Conditions.Item(i)` (1-based); chỉ coi là không có condition khi không có condition nào `Enabled`, và trả `False` (không tắt rule) nếu gặp exception khi đọc `Conditions`.
+  - `core/outlook_client.py` (`WindowsOutlookClient.save_native_rules`): tính `ExecutionOrder = (số rule không prefix còn lại sau khi xóa) + thứ tự trong compiled list (bắt đầu từ 1)` để đặt rule managed sau các rule không prefix của người dùng mà không đụng tới `ExecutionOrder` của rule người dùng.
+  - `core/sync_engine.py` (`match_message`): cập nhật docstring ghi rõ dry-run chỉ mô phỏng rule managed (`[Companion]`), không tính rule không prefix của người dùng.
+  - `tests/fakes.py`: thêm `FakeSentToCondition`, `FakeBodyCondition` và hỗ trợ `Count` / `Item(i)` (1-based) cho `FakeConditions`.
+  - `tests/test_phase2_lifecycle.py`: cập nhật test `ExecutionOrder` và thêm test cho rule người dùng đứng trước (`ExecutionOrder`), cũng như rule legacy trùng tên YAML có `SentTo` bật hoặc `Conditions` lỗi không bị tắt.
+- **Lệch plan & lý do:** Không có.

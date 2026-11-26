@@ -77,11 +77,40 @@ class FakeSubjectCondition:
 
 
 @dataclass
+class FakeSentToCondition:
+    """Fake Rule.Conditions.SentTo."""
+    Enabled: bool = False
+    Recipients: FakeRecipients = field(default_factory=FakeRecipients)
+
+
+@dataclass
+class FakeBodyCondition:
+    """Fake Rule.Conditions.Body."""
+    Enabled: bool = False
+    Text: List[str] = field(default_factory=list)
+
+
+@dataclass
 class FakeConditions:
-    """Fake Rule.Conditions."""
+    """Fake Rule.Conditions supporting Count and 1-based Item(index)."""
     From: FakeFromCondition = field(default_factory=FakeFromCondition)
     SenderAddress: FakeSenderAddressCondition = field(default_factory=FakeSenderAddressCondition)
     Subject: FakeSubjectCondition = field(default_factory=FakeSubjectCondition)
+    SentTo: FakeSentToCondition = field(default_factory=FakeSentToCondition)
+    Body: FakeBodyCondition = field(default_factory=FakeBodyCondition)
+
+    def _all_conditions(self):
+        return [self.From, self.SenderAddress, self.Subject, self.SentTo, self.Body]
+
+    @property
+    def Count(self) -> int:
+        return len(self._all_conditions())
+
+    def Item(self, index: int):
+        items = self._all_conditions()
+        if not isinstance(index, int) or index < 1 or index > len(items):
+            raise IndexError(f"Condition index out of range: {index}")
+        return items[index - 1]
 
 
 @dataclass

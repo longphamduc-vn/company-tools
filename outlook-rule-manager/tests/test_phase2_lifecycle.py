@@ -188,14 +188,76 @@ class TestPhase2LifecycleAndReconcile(unittest.TestCase):
         for r in (r_email, r_domain, r_kw, r_unclass):
             self.assertTrue(r.Actions.Stop.Enabled)
 
-        self.assertLess(r_email.ExecutionOrder, r_domain.ExecutionOrder)
-        self.assertLess(r_domain.ExecutionOrder, r_kw.ExecutionOrder)
-        self.assertLess(r_kw.ExecutionOrder, r_unclass.ExecutionOrder)
+        self.assertEqual(r_email.ExecutionOrder, 1)
+        self.assertEqual(r_domain.ExecutionOrder, 2)
+        self.assertEqual(r_kw.ExecutionOrder, 3)
+        self.assertEqual(r_unclass.ExecutionOrder, 4)
 
         # match_message must also pick exact email over domain regardless of YAML order
         matched, _ = self.sync_engine.match_message("vip@vendor.com", "Invoice #1")
         self.assertIsNotNone(matched)
         self.assertEqual(matched.id, "r_email_second")
+
+    def test_execution_order_places_managed_rules_after_user_unprefixed_rules(self):
+        user_rule_1 = FakeRule("User Priority 1", enabled=True, execution_order=1)
+        user_rule_1.Conditions.From.Enabled = True
+        user_rule_1.Conditions.From.Recipients.Add("boss@company.com")
+        user_rule_2 = FakeRule("User Priority 2", enabled=True, execution_order=2)
+        user_rule_2.Conditions.Subject.Enabled = True
+        user_rule_2.Conditions.Subject.Text = ["Payroll"]
+        self.default_store.GetRules()._rules.extend([user_rule_1, user_rule_2])
+
+        self.yaml_mgr.rules = [
+            RuleConfig(
+                id="r_dom",
+                name="Vendors",
+                enabled=True,
+                domains=["@vendor.com"],
+                target_folder="Vendors",
+            ),
+            RuleConfig(
+                id="r_email",
+                name="VIP",
+                enabled=True,
+                emails=["vip@vendor.com"],
+                target_folder="VIP",
+            ),
+        ]
+
+        ok, msg = self.sync_engine.push_to_outlook()
+        self.assertTrue(ok, msg)
+
+        # User rules keep their ExecutionOrder untouched; managed rules start at 2 + 1
+        self.assertEqual(user_rule_1.ExecutionOrder, 1)
+        self.assertEqual(user_rule_2.ExecutionOrder, 2)
+        rules_by_name = {r.Name: r for r in self.default_store.GetRules()}
+        self.assertEqual(rules_by_name[f"{MANAGED_PREFIX}VIP"].ExecutionOrder, 3)
+        self.assertEqual(rules_by_name[f"{MANAGED_PREFIX}Vendors (Domains)"].ExecutionOrder, 4)
+
+    def test_legacy_rule_with_sentto_condition_or_unreadable_conditions_is_not_disabled(self):
+        sentto_legacy = FakeRule("Executive Board", enabled=True)
+        sentto_legacy.Conditions.SentTo.Enabled = True
+        sentto_legacy.Conditions.SentTo.Recipients.Add("board-alias@company.com")
+        sentto_legacy.Actions.MoveToFolder.Enabled = True
+        sentto_legacy.Actions.MoveToFolder.Folder = FakeFolder("Directors")
+
+        class UnreadableConditions:
+            @property
+            def Count(self):
+                raise RuntimeError("COM E_FAIL")
+
+        unreadable_legacy = FakeRule("SCADA PLC Maintenance", enabled=True)
+        unreadable_legacy.Conditions = UnreadableConditions()
+        unreadable_legacy.Actions.MoveToFolder.Enabled = True
+        unreadable_legacy.Actions.MoveToFolder.Folder = FakeFolder("PLC_Unit")
+
+        self.default_store.GetRules()._rules.extend([sentto_legacy, unreadable_legacy])
+
+        ok, msg = self.sync_engine.push_to_outlook(remove_legacy=False)
+        self.assertTrue(ok, msg)
+        self.assertTrue(sentto_legacy.Enabled)
+        self.assertTrue(unreadable_legacy.Enabled)
+        self.assertNotIn("Disabled broken", msg)
 
     def test_broken_conditionless_legacy_rule_is_disabled_immediately_and_removed_only_with_flag(self):
         broken_legacy = FakeRule("Executive Board", enabled=True)

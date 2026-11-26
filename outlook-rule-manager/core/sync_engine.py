@@ -121,9 +121,14 @@ class SyncEngine:
         return rule.id == "rule_unclassified" or rule.target_folder == "_Unclassified"
 
     def match_message(self, sender_email: str, subject: str) -> Tuple[Optional[RuleConfig], str]:
-        """Match an email against rules in the same order as Outlook ExecutionOrder.
+        """Simulate dry-run matching for managed ([Companion]) rules only.
 
-        Evaluation order (each managed Outlook rule sets Actions.Stop.Enabled = True):
+        Note: Dry-run evaluates only the YAML-defined managed rules and does not
+        account for unprefixed user-created Outlook rules (which run before
+        managed rules in Outlook's ExecutionOrder).
+
+        Evaluation order mirrors Outlook ExecutionOrder (each managed rule sets
+        Actions.Stop.Enabled = True):
         1. Exact email sub-rules (non-unclassified, YAML order)
         2. Domain sub-rules (non-unclassified, YAML order)
         3. Subject keyword sub-rules (non-unclassified, YAML order)

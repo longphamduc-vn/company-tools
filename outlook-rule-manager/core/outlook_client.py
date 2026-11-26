@@ -344,6 +344,9 @@ class WindowsOutlookClient(BaseOutlookClient):
                 existing_rules.pop(name_to_remove, None)
                 removed_count += 1
 
+            unprefixed_remaining = sum(
+                1 for name in existing_rules if not name.startswith(MANAGED_PREFIX)
+            )
             managed_order = 1
             for r_info, emails, domains, keywords in valid_rules:
                 r_name = r_info["name"]
@@ -410,7 +413,7 @@ class WindowsOutlookClient(BaseOutlookClient):
                     except Exception:
                         pass
                     try:
-                        rule.ExecutionOrder = managed_order
+                        rule.ExecutionOrder = unprefixed_remaining + managed_order
                     except Exception:
                         pass
                     managed_order += 1
@@ -433,14 +436,17 @@ class WindowsOutlookClient(BaseOutlookClient):
 
     @staticmethod
     def _is_conditionless_move_rule(rule) -> bool:
-        """Return True if rule has no conditions enabled but MoveToFolder action is enabled."""
+        """Return True only when no condition is enabled while MoveToFolder is enabled."""
         try:
             conds = rule.Conditions
-            from_on = bool(getattr(getattr(conds, "From", None), "Enabled", False))
-            sender_on = bool(getattr(getattr(conds, "SenderAddress", None), "Enabled", False))
-            subj_on = bool(getattr(getattr(conds, "Subject", None), "Enabled", False))
+            count = conds.Count
+            any_enabled = False
+            for i in range(1, count + 1):
+                if getattr(conds.Item(i), "Enabled", False):
+                    any_enabled = True
+                    break
             move_on = bool(getattr(getattr(rule.Actions, "MoveToFolder", None), "Enabled", False))
-            return not (from_on or sender_on or subj_on) and move_on
+            return (not any_enabled) and move_on
         except Exception:
             return False
 
