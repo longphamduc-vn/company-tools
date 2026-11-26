@@ -79,25 +79,6 @@ class TriageView(ttk.Frame):
 
     def _build_ui(self):
         # -------------------------------------------------------------
-        # TOP APP HEADER STRIP
-        # -------------------------------------------------------------
-        top_bar = tk.Frame(self, bg="#ffffff", highlightbackground="#e2e8f0", highlightthickness=1, padx=12, pady=6)
-        top_bar.pack(fill=tk.X, side=tk.TOP)
-
-        btn_refresh = ttk.Button(top_bar, text="Refresh Inbox", command=self.refresh_inbox)
-        btn_refresh.pack(side=tk.LEFT, padx=(0, 6))
-
-        account_name = self.outlook.get_current_user_account()
-        self.lbl_account = tk.Label(
-            top_bar,
-            text=f"Account: {account_name}",
-            bg="#ffffff",
-            fg="#0284c7",
-            font=("", 9, "bold")
-        )
-        self.lbl_account.pack(side=tk.RIGHT, padx=6)
-
-        # -------------------------------------------------------------
         # MAIN 2-PANE LAYOUT: INBOX LIST (LEFT) | READING & ACTIONS (RIGHT)
         # -------------------------------------------------------------
         self.paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
@@ -113,23 +94,27 @@ class TriageView(ttk.Frame):
         filter_strip = tk.Frame(self.frame_left, bg="#f8fafc")
         filter_strip.pack(fill=tk.X, pady=(0, 4))
 
-        self.btn_f_all = tk.Button(
-            filter_strip, text="All", relief="flat", bg="#0284c7", fg="#ffffff",
-            font=("", 8, "bold"), padx=6, pady=1, command=lambda: self._set_filter("ALL")
+        self.var_filter = tk.StringVar(value=self.active_filter)
+        self.btn_f_all = ttk.Radiobutton(
+            filter_strip, text="All", value="ALL", variable=self.var_filter,
+            style="Filter.Toolbutton", command=lambda: self._set_filter("ALL")
         )
         self.btn_f_all.pack(side=tk.LEFT, padx=1)
 
-        self.btn_f_untracked = tk.Button(
-            filter_strip, text="Needs Rule", relief="flat", bg="#e2e8f0", fg="#334155",
-            font=("", 8, "bold"), padx=6, pady=1, command=lambda: self._set_filter("UNTRACKED")
+        self.btn_f_untracked = ttk.Radiobutton(
+            filter_strip, text="Needs Rule", value="UNTRACKED", variable=self.var_filter,
+            style="Filter.Toolbutton", command=lambda: self._set_filter("UNTRACKED")
         )
         self.btn_f_untracked.pack(side=tk.LEFT, padx=1)
 
-        self.btn_f_staged = tk.Button(
-            filter_strip, text="Staged", relief="flat", bg="#e2e8f0", fg="#334155",
-            font=("", 8, "bold"), padx=6, pady=1, command=lambda: self._set_filter("STAGED")
+        self.btn_f_staged = ttk.Radiobutton(
+            filter_strip, text="Staged", value="STAGED", variable=self.var_filter,
+            style="Filter.Toolbutton", command=lambda: self._set_filter("STAGED")
         )
         self.btn_f_staged.pack(side=tk.LEFT, padx=1)
+
+        self.btn_refresh = ttk.Button(filter_strip, text="Refresh Inbox", command=self.refresh_inbox)
+        self.btn_refresh.pack(side=tk.RIGHT)
 
         # Dedicated Search row so "Search:" label & input remain clearly visible
         search_strip = tk.Frame(self.frame_left, bg="#f8fafc")
@@ -342,11 +327,8 @@ class TriageView(ttk.Frame):
     # -----------------------------------------------------------------
     def _set_filter(self, filter_name: str):
         self.active_filter = filter_name
-        for name, btn in [("ALL", self.btn_f_all), ("UNTRACKED", self.btn_f_untracked), ("STAGED", self.btn_f_staged)]:
-            if name == filter_name:
-                btn.config(bg="#0284c7", fg="#ffffff")
-            else:
-                btn.config(bg="#e2e8f0", fg="#334155")
+        if self.var_filter.get() != filter_name:
+            self.var_filter.set(filter_name)
         self._populate_inbox_table()
 
     def _on_search_change(self):

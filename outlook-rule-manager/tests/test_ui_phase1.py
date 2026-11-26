@@ -389,14 +389,14 @@ class TestUiPhase1(unittest.TestCase):
             # After 1 save -> badge updates & Sync button turns blue (SyncPending.TButton)
             win.yaml_mgr.save()
             win.update_idletasks()
-            self.assertEqual(win.lbl_sync_status.cget("text"), "● 1 unsynced change(s)")
+            self.assertEqual(win.lbl_sync_status.cget("text"), "● 1 unsynced change")
             self.assertEqual(win.btn_sync.cget("style"), "SyncPending.TButton")
 
             # Reload YAML preserves unsynced count
             with patch("gui.main_window.messagebox.showinfo"):
                 win._reload_yaml()
             win.update_idletasks()
-            self.assertEqual(win.lbl_sync_status.cget("text"), "● 1 unsynced change(s)")
+            self.assertEqual(win.lbl_sync_status.cget("text"), "● 1 unsynced change")
             self.assertEqual(win.btn_sync.cget("style"), "SyncPending.TButton")
 
             # Real sync resets status -> "✓ Outlook in sync" & Accent.TButton
@@ -411,7 +411,7 @@ class TestUiPhase1(unittest.TestCase):
             # Subsequent save switches back from in-sync to unsynced
             win.yaml_mgr.save()
             win.update_idletasks()
-            self.assertEqual(win.lbl_sync_status.cget("text"), "● 1 unsynced change(s)")
+            self.assertEqual(win.lbl_sync_status.cget("text"), "● 1 unsynced change")
             self.assertEqual(win.btn_sync.cget("style"), "SyncPending.TButton")
         finally:
             win.destroy()

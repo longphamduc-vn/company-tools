@@ -6,7 +6,9 @@ from typing import Optional, Tuple
 from core.yaml_manager import YamlConfigManager
 from core.outlook_client import BaseOutlookClient, get_outlook_client
 from core.sync_engine import SyncEngine
+from core.models import pluralize_count
 
+from gui import styles
 from gui.triage_view import TriageView
 from gui.rule_manager_view import RuleManagerView
 from gui.rollover_view import RolloverView
@@ -19,7 +21,7 @@ class MainWindow(tk.Tk):
         super().__init__()
         self.title("Outlook Rule Companion")
         self.geometry("1120x720")
-        self.minsize(920, 620)
+        self.minsize(960, 620)
 
         # Initialize Core Layers
         self.yaml_mgr = YamlConfigManager(config_path)
@@ -42,66 +44,45 @@ class MainWindow(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._on_close_window)
 
     def _apply_style(self):
-        style = ttk.Style(self)
-        available = style.theme_names()
-        if "clam" in available:
-            style.theme_use("clam")
-
-        # Clean typography and padding
-        style.configure("Accent.TButton", font=("", 9, "bold"))
-        style.configure(
-            "SyncPending.TButton",
-            font=("", 9, "bold"),
-            background="#0284c7",
-            foreground="#ffffff",
-        )
-        style.map(
-            "SyncPending.TButton",
-            background=[("active", "#0369a1")],
-            foreground=[("active", "#ffffff")],
-        )
-        style.configure("Header.TLabel", font=("", 11, "bold"))
+        styles.apply_styles(self)
 
     def _build_header(self):
-        header = ttk.Frame(self, padding=(12, 8))
+        header = ttk.Frame(self, padding=(12, 4))
         header.pack(fill=tk.X, side=tk.TOP)
 
-        # Title & Status
+        # Title + engine/account on a single line
         left_box = ttk.Frame(header)
         left_box.pack(side=tk.LEFT)
 
-        ttk.Label(left_box, text="Outlook Rule Companion", style="Header.TLabel").pack(anchor=tk.W)
+        ttk.Label(left_box, text="Outlook Rule Companion", style="Header.TLabel").pack(side=tk.LEFT)
 
-        mode_name = self.outlook.get_mode_name()
-        mode_color = "#b91c1c" if self.outlook.is_simulated() else "#2e7d32"
-        self.lbl_mode = ttk.Label(left_box, text=f"Engine: {mode_name}", foreground=mode_color, font=("", 8))
-        self.lbl_mode.pack(anchor=tk.W)
+        self.lbl_mode = ttk.Label(left_box, text="", font=("", 8))
+        self.lbl_mode.pack(side=tk.LEFT, padx=(10, 0))
 
-        # Quick Actions (Clean text labels, no broken emoji symbols)
         right_box = ttk.Frame(header)
         right_box.pack(side=tk.RIGHT)
 
         btn_reload = ttk.Button(right_box, text="Reload YAML", command=self._reload_yaml)
-        btn_reload.pack(side=tk.LEFT, padx=4)
+        btn_reload.pack(side=tk.LEFT, padx=3)
 
         self.btn_conflicts = ttk.Button(
             right_box,
             text="Check Rule Conflicts",
             command=self._open_conflict_inspector,
         )
-        self.btn_conflicts.pack(side=tk.LEFT, padx=4)
+        self.btn_conflicts.pack(side=tk.LEFT, padx=3)
 
         self.btn_rollover = ttk.Button(
             right_box,
             text="Yearly Rollover...",
             command=self._open_rollover_dialog,
         )
-        self.btn_rollover.pack(side=tk.LEFT, padx=4)
+        self.btn_rollover.pack(side=tk.LEFT, padx=3)
 
         self.lbl_sync_status = ttk.Label(
             right_box,
             text="Not synced this session",
-            foreground="#64748b",
+            foreground=styles.TEXT_MUTED,
             font=("", 8, "bold"),
         )
         self.lbl_sync_status.pack(side=tk.LEFT, padx=(8, 4))
@@ -112,32 +93,34 @@ class MainWindow(tk.Tk):
             style="Accent.TButton",
             command=self._sync_to_outlook
         )
-        self.btn_sync.pack(side=tk.LEFT, padx=4)
+        self.btn_sync.pack(side=tk.LEFT, padx=3)
 
         self._header_sep = ttk.Separator(self, orient=tk.HORIZONTAL)
         self._header_sep.pack(fill=tk.X, side=tk.TOP)
 
     def _build_simulation_banner(self):
+        # Single compact line: message on the left, Retry on the right
         self.sim_banner = tk.Frame(
             self,
-            bg="#fee2e2",
-            highlightbackground="#fca5a5",
+            bg=styles.BANNER_BG,
+            highlightbackground=styles.BANNER_BORDER,
             highlightthickness=1,
             padx=12,
-            pady=6,
+            pady=2,
         )
         self.lbl_sim_banner = tk.Label(
             self.sim_banner,
             text="SIMULATION MODE — Outlook is not connected. Sync, Move and Rollover do NOT change Outlook.",
-            bg="#fee2e2",
-            fg="#991b1b",
+            bg=styles.BANNER_BG,
+            fg=styles.BANNER_FG,
             font=("", 9, "bold"),
         )
         self.lbl_sim_banner.pack(side=tk.LEFT)
 
         self.btn_retry_conn = ttk.Button(
             self.sim_banner,
-            text="Retry Connection",
+            text="Retry",
+            style="Banner.TButton",
             command=self._retry_outlook_connection,
         )
         self.btn_retry_conn.pack(side=tk.RIGHT)
@@ -145,8 +128,9 @@ class MainWindow(tk.Tk):
     def _update_simulation_banner(self):
         mode_name = self.outlook.get_mode_name()
         simulated = self.outlook.is_simulated()
-        mode_color = "#b91c1c" if simulated else "#2e7d32"
-        self.lbl_mode.config(text=f"Engine: {mode_name}", foreground=mode_color)
+        mode_color = styles.DANGER if simulated else styles.OK
+        # Short label keeps the one-line header within the window width; full name in the footer
+        self.lbl_mode.config(text="Simulated" if simulated else "Outlook Classic", foreground=mode_color)
 
         if simulated:
             self.btn_sync.config(text="Sync (Simulated)")
@@ -162,13 +146,15 @@ class MainWindow(tk.Tk):
             return
         count = self.yaml_mgr.unsynced_changes
         if count > 0:
-            self.lbl_sync_status.config(text=f"● {count} unsynced change(s)", foreground="#ea580c")
+            self.lbl_sync_status.config(
+                text=f"● {pluralize_count(count, 'unsynced change')}", foreground=styles.WARN
+            )
             self.btn_sync.config(style="SyncPending.TButton")
         elif self.yaml_mgr.has_synced:
-            self.lbl_sync_status.config(text="✓ Outlook in sync", foreground="#16a34a")
+            self.lbl_sync_status.config(text="✓ Outlook in sync", foreground=styles.OK)
             self.btn_sync.config(style="Accent.TButton")
         else:
-            self.lbl_sync_status.config(text="Not synced this session", foreground="#64748b")
+            self.lbl_sync_status.config(text="Not synced this session", foreground=styles.TEXT_MUTED)
             self.btn_sync.config(style="Accent.TButton")
 
     def _on_yaml_state_changed(self):
@@ -195,20 +181,20 @@ class MainWindow(tk.Tk):
 
     def _build_notebook(self):
         self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=(2, 2))
 
-        # Tab 1: Inbox Triage
+        # Tab 1: Inbox
         self.tab_triage = TriageView(self.notebook, self.yaml_mgr, self.outlook, self.sync_engine)
-        self.notebook.add(self.tab_triage, text=" Inbox Triage ")
+        self.notebook.add(self.tab_triage, text="Inbox")
 
         # Tab 2: Rules & Address Groups
         self.tab_rules = RuleManagerView(self.notebook, self.yaml_mgr, self.sync_engine)
-        self.notebook.add(self.tab_rules, text=" Rules & Groups ")
+        self.notebook.add(self.tab_rules, text="Rules")
 
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_change)
 
     def _build_footer(self):
-        self.footer = ttk.Frame(self, padding=(8, 4))
+        self.footer = ttk.Frame(self, padding=(8, 2))
         self.footer.pack(fill=tk.X, side=tk.BOTTOM)
         ttk.Separator(self, orient=tk.HORIZONTAL).pack(fill=tk.X, side=tk.BOTTOM)
 
@@ -246,11 +232,16 @@ class MainWindow(tk.Tk):
             exists = False
             prefix = "Active archive: None — "
 
-        self.lbl_footer.config(text=prefix)
+        try:
+            account = self.outlook.get_current_user_account()
+        except Exception:
+            account = ""
+        engine = f"{self.outlook.get_mode_name()}" + (f" ({account})" if account else "")
+        self.lbl_footer.config(text=f"{engine} | {prefix}")
         if exists:
-            self.lbl_footer_status.config(text="found in Outlook", foreground="#16a34a")
+            self.lbl_footer_status.config(text="found in Outlook", foreground=styles.OK)
         else:
-            self.lbl_footer_status.config(text="NOT found in Outlook", foreground="#dc2626")
+            self.lbl_footer_status.config(text="NOT found in Outlook", foreground=styles.DANGER)
 
     def _on_tab_change(self, event):
         if self._restoring_tab:
@@ -293,6 +284,12 @@ class MainWindow(tk.Tk):
                 dlg.destroy()
             self._refresh_footer()
             self._update_sync_status()
+
+        # Close bar packed first so it always stays visible at the bottom
+        close_bar = ttk.Frame(dlg, padding=(14, 0, 14, 10))
+        close_bar.pack(fill=tk.X, side=tk.BOTTOM)
+        dlg.btn_close = ttk.Button(close_bar, text="Close", command=dlg.destroy)
+        dlg.btn_close.pack(side=tk.RIGHT)
 
         view = RolloverView(
             dlg,

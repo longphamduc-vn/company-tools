@@ -33,18 +33,7 @@ class RuleManagerView(ttk.Frame):
         self._in_tree_transition: bool = False
         self._current_selected_iid: Optional[str] = None
 
-        style = ttk.Style(self)
-        style.configure(
-            "DirtySave.TButton",
-            font=("", 9, "bold"),
-            background="#ea580c",
-            foreground="#ffffff",
-        )
-        style.map(
-            "DirtySave.TButton",
-            background=[("active", "#c2410c")],
-            foreground=[("active", "#ffffff")],
-        )
+        # Button styles (Accent / DirtySave / Danger) are defined centrally in gui/styles.py
 
         # Drag-and-drop state
         self.drag_source_id: Optional[str] = None
@@ -105,8 +94,7 @@ class RuleManagerView(ttk.Frame):
 
         # Bottom tip / status bar packed BEFORE paned so text is never clipped at 1120x720
         self._default_tip_text = (
-            "Tip: Drag folders to Root for Level 1, or drop into another folder/rule to reorganize. "
-            "Right-click items for more actions."
+            "Tip: drag rules or folders to reorganize. Right-click for more actions."
         )
         tip_bar = tk.Frame(self, bg="#f8fafc", highlightbackground="#e2e8f0", highlightthickness=1, padx=8, pady=4)
         tip_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=6, pady=(0, 6))
@@ -349,7 +337,7 @@ class RuleManagerView(ttk.Frame):
         self.btn_save_rule.pack(side=tk.LEFT, padx=2)
 
         ttk.Button(btn_bar_rule, text="Duplicate Rule", command=self._duplicate_selected_rule).pack(side=tk.LEFT, padx=4)
-        ttk.Button(btn_bar_rule, text="Delete Rule", command=self._delete_selected).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(btn_bar_rule, text="Delete Rule", style="Danger.TButton", command=self._delete_selected).pack(side=tk.RIGHT, padx=2)
 
         # 4. Interactive Match Tester Strip
         tester_strip = tk.Frame(
@@ -477,11 +465,11 @@ class RuleManagerView(ttk.Frame):
         ttk.Button(self.btn_bar_folder, text="+ Add Rule Here", command=self._add_rule_in_selected_folder).pack(side=tk.LEFT, padx=2)
         ttk.Button(self.btn_bar_folder, text="+ Subfolder", command=self._add_subfolder).pack(side=tk.LEFT, padx=2)
 
-        self.btn_promote_root = ttk.Button(self.btn_bar_folder, text="Promote to Root (L1)", command=self._promote_selected_folder_to_root)
+        self.btn_promote_root = ttk.Button(self.btn_bar_folder, text="Move to Top Level", command=self._promote_selected_folder_to_root)
         self.btn_move_up = ttk.Button(self.btn_bar_folder, text="Move Up 1 Level", command=self._move_selected_folder_up)
 
         ttk.Button(self.btn_bar_folder, text="Rename", command=self._rename_selected_folder).pack(side=tk.LEFT, padx=4)
-        ttk.Button(self.btn_bar_folder, text="Delete Folder", command=self._delete_selected_folder).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(self.btn_bar_folder, text="Delete Folder", style="Danger.TButton", command=self._delete_selected_folder).pack(side=tk.RIGHT, padx=2)
 
     def _build_group_inspector(self):
         header = tk.Frame(self.frame_group, bg="#f1f5f9", padx=10, pady=8, highlightbackground="#e2e8f0", highlightthickness=1)
@@ -511,7 +499,7 @@ class RuleManagerView(ttk.Frame):
         )
         self.btn_save_group.pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_bar_grp, text="Import CSV/Excel...", command=self._import_addresses_to_group).pack(side=tk.LEFT, padx=4)
-        ttk.Button(btn_bar_grp, text="Delete Group", command=self._delete_selected_group).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(btn_bar_grp, text="Delete Group", style="Danger.TButton", command=self._delete_selected_group).pack(side=tk.RIGHT, padx=2)
 
         # Scrollable Group Members area
         grp_scroll_box = tk.Frame(self.frame_group, bg="#ffffff")
@@ -560,7 +548,7 @@ class RuleManagerView(ttk.Frame):
         btn_bar_pool.pack(fill=tk.X, side=tk.BOTTOM)
         ttk.Button(btn_bar_pool, text="Assign Selected to Rule...", command=self._assign_pool_to_rule).pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_bar_pool, text="Remove from Pool", command=self._remove_from_pool).pack(side=tk.LEFT, padx=4)
-        ttk.Button(btn_bar_pool, text="Clear Entire Pool", command=self._clear_pool).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(btn_bar_pool, text="Clear Entire Pool", style="Danger.TButton", command=self._clear_pool).pack(side=tk.RIGHT, padx=2)
 
     def _show_inspector(self, target_frame: tk.Frame):
         """Switch right pane to display the requested inspector."""
@@ -1316,7 +1304,7 @@ class RuleManagerView(ttk.Frame):
                 menu.add_separator()
 
                 if depth > 1:
-                    menu.add_command(label="Promote to Root (Level 1)", command=self._promote_selected_folder_to_root)
+                    menu.add_command(label="Move to Top Level", command=self._promote_selected_folder_to_root)
                     menu.add_command(label=f"Move Up 1 Level (to Level {depth-1})", command=self._move_selected_folder_up)
 
                 menu.add_command(label="Move to Folder...", command=self._open_move_folder_dialog)

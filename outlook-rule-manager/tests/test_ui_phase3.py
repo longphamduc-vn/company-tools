@@ -10,6 +10,7 @@ from unittest.mock import patch
 from core.models import AddressGroup, RuleConfig, pluralize_count
 from core.outlook_client import MockOutlookClient, WindowsOutlookClient
 from core.sync_engine import SyncEngine, match_email_domain
+from gui import styles
 from core.yaml_manager import YamlConfigManager
 from gui.main_window import MainWindow
 from gui.rule_manager_view import RuleManagerView
@@ -75,7 +76,7 @@ class TestUiPhase3(unittest.TestCase):
 
             # Footer red status in Mock mode (store not in mock stores)
             self.assertEqual(win.lbl_footer_status.cget("text"), "NOT found in Outlook")
-            self.assertEqual(str(win.lbl_footer_status.cget("foreground")), "#dc2626")
+            self.assertEqual(str(win.lbl_footer_status.cget("foreground")), styles.DANGER)
 
             # Triage 2-pane layout (Inbox list left | Reading + Actions right), Search label & single action set
             triage = win.tab_triage

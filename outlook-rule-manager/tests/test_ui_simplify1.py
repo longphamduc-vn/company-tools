@@ -69,13 +69,15 @@ class TestUiSimplifyPhaseS1(unittest.TestCase):
             ]
             self.assertEqual(menu_labels, ["Add to Rule...", "New Rule...", "Move Now"])
 
-            # Expand/Collapse Tree buttons removed from top bar
-            top_btn_texts = [
+            # Expand/Collapse Tree buttons removed; Refresh Inbox is the only button in the filter row
+            # (S3 merged the separate top toolbar into the filter row)
+            filter_row_btn_texts = [
                 w.cget("text")
-                for w in triage.winfo_children()[0].winfo_children()
+                for w in triage.btn_refresh.master.winfo_children()
                 if isinstance(w, ttk.Button)
             ]
-            self.assertEqual(top_btn_texts, ["Refresh Inbox"])
+            self.assertEqual(filter_row_btn_texts, ["Refresh Inbox"])
+            self.assertIs(triage.btn_refresh.master, triage.btn_f_all.master)
         finally:
             win.destroy()
 

@@ -43,25 +43,21 @@ class RolloverView(ttk.Frame):
         header_row = ttk.Frame(container)
         header_row.pack(fill=tk.X, pady=(0, 6))
 
-        lbl_title = ttk.Label(header_row, text="Outlook Data Files & Yearly Rollover Manager", font=("", 12, "bold"))
+        lbl_title = ttk.Label(header_row, text="Yearly PST Rollover", font=("", 12, "bold"))
         lbl_title.pack(side=tk.LEFT)
 
         account = self.outlook.get_current_user_account()
-        self.lbl_acc_badge = tk.Label(
+        self.lbl_acc_badge = ttk.Label(
             header_row,
-            text=f"Active Account: {account}",
-            bg="#f1f5f9",
-            fg="#0284c7",
+            text=f"Account: {account}",
+            foreground="#0284c7",
             font=("", 9, "bold"),
-            padx=8,
-            pady=2
         )
         self.lbl_acc_badge.pack(side=tk.RIGHT)
 
         lbl_desc = ttk.Label(
             container,
-            text="Scan all Outlook data files (.pst), prevent multi-account confusion with account-tagged filenames, "
-                 "and 1-click re-point rules to a new yearly PST archive.",
+            text="Re-point Companion rules to a new yearly PST that is already open in Outlook.",
             wraplength=800
         )
         lbl_desc.pack(anchor=tk.W, pady=(0, 10))
@@ -69,7 +65,7 @@ class RolloverView(ttk.Frame):
         # -------------------------------------------------------------
         # Section 1: Multi-Store Deep Scanner Table
         # -------------------------------------------------------------
-        frame_stores = ttk.LabelFrame(container, text="All Detected Outlook Data Stores (Scanned across Profile)", padding=8)
+        frame_stores = ttk.LabelFrame(container, text="Outlook Data Files (click one to select it)", padding=8)
         frame_stores.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         cols = ("Name", "Size", "File Path", "Folders")
@@ -98,7 +94,7 @@ class RolloverView(ttk.Frame):
         paned_bottom.pack(fill=tk.X, pady=4)
 
         # Left: Current Active Store
-        frame_current = ttk.LabelFrame(paned_bottom, text="Active Target Store (Configured in rules.yaml)", padding=10)
+        frame_current = ttk.LabelFrame(paned_bottom, text="Current Archive", padding=10)
         paned_bottom.add(frame_current, weight=1)
 
         grid_cur = ttk.Frame(frame_current)
@@ -117,7 +113,7 @@ class RolloverView(ttk.Frame):
         self.lbl_cur_size.grid(row=2, column=1, sticky=tk.W, padx=6, pady=2)
 
         # Right: Rollover to New Store
-        frame_new = ttk.LabelFrame(paned_bottom, text="Rollover to New Yearly PST (Account Tagged)", padding=10)
+        frame_new = ttk.LabelFrame(paned_bottom, text="New Archive", padding=10)
         paned_bottom.add(frame_new, weight=1)
 
         grid_new = ttk.Frame(frame_new)

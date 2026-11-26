@@ -92,11 +92,11 @@ class TestUiSimplifyPhaseS2(unittest.TestCase):
             win.geometry("1120x720")
             win.update()
 
-            # Only 2 tabs remain: Inbox Triage and Rules & Groups
+            # Only 2 tabs remain: Inbox and Rules
             tab_ids = win.notebook.tabs()
             self.assertEqual(len(tab_ids), 2)
             tab_texts = [win.notebook.tab(tid, "text") for tid in tab_ids]
-            self.assertEqual(tab_texts, [" Inbox Triage ", " Rules & Groups "])
+            self.assertEqual(tab_texts, ["Inbox", "Rules"])
             self.assertFalse(hasattr(win, "tab_dryrun"))
             self.assertFalse(hasattr(win, "tab_rollover"))
 
