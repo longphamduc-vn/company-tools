@@ -164,3 +164,20 @@ Sau mỗi phase, agent báo lại: commit hash, danh sách file đổi, output `
 - **Lệch plan & lý do:**
   - Tạo thêm `tests/fixtures/rules_sample.yaml` và sửa đường dẫn `sample_config` trong `tests/test_rule_manager.py` (thay vì giữ nguyên việc copy `config/rules.yaml`). Lý do: `config/rules.yaml` trên repo (từ commit `c9e7f62`) đã bị đổi `target_folder` (`PLC_Unit` thay vì `Engineering_Team\SCADA_Part\PLC_Unit`, `Management\Directors` thay vì `Management\Executive_Board\Directors`) làm 7/10 test fail. Theo xác nhận của user, test không được đọc/ghi `config/rules.yaml` và giữ nguyên `config/rules.yaml` không sửa trong phase này, đồng thời không sửa assertion của test.
   - Bổ sung thêm `StoreID`, `IsDataFileStore`, `CurrentUser`, `ExecutionOrder`, `GetDefaultFolder`, `GetItemFromID` vào các lớp trong `tests/fakes.py` để khớp toàn bộ thuộc tính `WindowsOutlookClient` truy cập (ngoài danh sách tối thiểu nêu trong plan).
+
+### Tiền Phase 1 — Điều chỉnh fake COM (`1ca342f`)
+- **Đã làm:**
+  - `tests/fakes.py`: sửa `FakeRules.__iter__` để duyệt trực tiếp `self._rules` (không copy), và sửa `FakeFolderCollection.Add` để raise `ValueError` khi thêm folder trùng tên không phân biệt hoa thường.
+  - `tests/test_fakes.py`: thêm 2 test xác nhận 2 hành vi trên (`12 passed`).
+
+### Phase 1 — Không để Outlook rule thiếu điều kiện
+- **Đã làm:**
+  - `core/outlook_client.py` (`WindowsOutlookClient.save_native_rules` & `MockOutlookClient.save_native_rules`): hỗ trợ đầy đủ `From` (`emails`), `SenderAddress` (`domains`), `Subject` (`subject_keywords`); condition nào rỗng thì set `Enabled = False` và xóa giá trị cũ (`Recipients`/`Address`/`Text`). Nếu rule không có cả email, domain lẫn keyword thì bỏ qua (không tạo mới; nếu đã tồn tại thì set `Enabled = False`) và trả tên rule trong cảnh báo.
+  - `core/sync_engine.py` (`SyncEngine.push_to_outlook`): lọc trước rule không có điều kiện và ghi cảnh báo vào message; biên dịch riêng từng loại điều kiện thành sub-rule `Name`, `Name (Domains)`, `Name (Keywords)` để giữ ngữ nghĩa OR trong Outlook.
+  - `core/rule_splitter.py` (`split_rule_recipients`): tách riêng email và domain; split cả domain theo cùng ngưỡng `max_recipients` (`Name (Domains)` hoặc `Name (Domains) (Part N)`); `max_recipients <= 0` dùng mặc định `40`.
+  - `gui/triage_view.py`: bỏ heuristic hard-code (`"omron"`, `"automation"`, `"partner"`, `"corp"`, `"vendor"`) ở cả `_stage_create_new_rule` (dòng 716) và dialog tạo rule (dòng 872-873), luôn mặc định `"email"`.
+  - `tests/test_phase1_rules.py`: thêm test cho `split_rule_recipients` (0, 1, 40, 41, 81 email, domain dài, `max_recipients <= 0`), `WindowsOutlookClient(namespace=FakeNamespace(...))` + `SyncEngine` (chỉ có domain, rule rỗng, rule có cả email+domain+keyword, xóa hết email/domain/keyword cũ), và `TriageView` mặc định `"email"`.
+- **Lệch plan & lý do:**
+  - `split_rule_recipients` khi `emails` và `domains` đều rỗng trả về `[]` thay vì `[(rule_name, [], [])]`, giúp đồng bộ với quy tắc "chỉ tạo loại nào có dữ liệu" và tránh phát sinh sub-rule rỗng.
+  - Ngoài dòng 716 ở `gui/triage_view.py`, bỏ thêm heuristic trùng lặp ở dòng 872-873 trong dialog tạo rule của cùng file để đảm bảo mặc định luôn là `"email"` ở mọi luồng tạo rule trên Triage.
+  - Cập nhật thêm `MockOutlookClient.save_native_rules` để nhất quán chốt chặn an toàn và lưu đủ `domains`/`subject_keywords`.

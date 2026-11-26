@@ -22,6 +22,7 @@ class SyncEngine:
 
         threshold = int(self.yaml_mgr.settings.get("auto_split_threshold", 40))
         compiled_rules = []
+        skipped_empty_rules = []
 
         for rule in self.yaml_mgr.rules:
             if not rule.enabled:
@@ -29,12 +30,20 @@ class SyncEngine:
 
             emails = self.yaml_mgr.get_all_emails_for_rule(rule)
             domains = self.yaml_mgr.get_all_domains_for_rule(rule)
+            keywords = [k.strip() for k in (rule.subject_keywords or []) if k and k.strip()]
 
             # Special case for unclassified rule: include unclassified_pool
             if rule.id == "rule_unclassified" or rule.target_folder == "_Unclassified":
                 emails = sorted(list(set(emails + self.yaml_mgr.unclassified_pool)))
 
-            # Check if auto-splitting is required
+            emails = [e for e in emails if e]
+            domains = [d for d in domains if d]
+
+            if not emails and not domains and not keywords:
+                skipped_empty_rules.append(rule.name)
+                continue
+
+            # Compile each condition type separately to preserve OR semantics in Outlook
             sub_rules = split_rule_recipients(rule.name, emails, domains, max_recipients=threshold)
             for sub_name, email_chunk, domain_chunk in sub_rules:
                 compiled_rules.append({
@@ -42,11 +51,23 @@ class SyncEngine:
                     "enabled": rule.enabled,
                     "emails": email_chunk,
                     "domains": domain_chunk,
-                    "subject_keywords": rule.subject_keywords,
+                    "subject_keywords": [],
+                    "target_folder": rule.target_folder
+                })
+
+            if keywords:
+                compiled_rules.append({
+                    "name": f"{rule.name} (Keywords)",
+                    "enabled": rule.enabled,
+                    "emails": [],
+                    "domains": [],
+                    "subject_keywords": keywords,
                     "target_folder": rule.target_folder
                 })
 
         success, msg = self.outlook.save_native_rules(compiled_rules, store_path)
+        if skipped_empty_rules:
+            msg += f"\nWarning - skipped rules with no conditions: {', '.join(skipped_empty_rules)}"
         return success, msg
 
     def perform_rollover(self, new_store_name: str, new_store_path: str) -> Tuple[bool, str]:

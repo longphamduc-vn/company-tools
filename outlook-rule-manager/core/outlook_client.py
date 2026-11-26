@@ -270,33 +270,65 @@ class WindowsOutlookClient(BaseOutlookClient):
 
             created_count = 0
             updated_count = 0
+            disabled_count = 0
+            warnings: List[str] = []
 
             for r_info in rules_data:
                 r_name = r_info["name"]
                 enabled = r_info.get("enabled", True)
-                emails = r_info.get("emails", [])
+                emails = [e for e in (r_info.get("emails") or []) if e]
+                domains = [d for d in (r_info.get("domains") or []) if d]
+                keywords = [k for k in (r_info.get("subject_keywords") or []) if k]
                 target_folder_path = r_info.get("target_folder", "")
+
+                # Safety check: never create or enable a condition-less Outlook rule
+                if not emails and not domains and not keywords:
+                    existing_rule = existing_rules.get(r_name)
+                    if existing_rule is not None:
+                        existing_rule.Enabled = False
+                        disabled_count += 1
+                    warnings.append(r_name)
+                    continue
 
                 rule = existing_rules.get(r_name)
                 if not rule:
                     rule = rules_col.Create(r_name, 0)
+                    existing_rules[r_name] = rule
                     created_count += 1
                 else:
                     updated_count += 1
 
                 rule.Enabled = enabled
 
+                from_cond = rule.Conditions.From
+                while from_cond.Recipients.Count > 0:
+                    from_cond.Recipients.Remove(1)
                 if emails:
-                    from_cond = rule.Conditions.From
                     from_cond.Enabled = True
-                    while from_cond.Recipients.Count > 0:
-                        from_cond.Recipients.Remove(1)
                     for e in emails:
                         from_cond.Recipients.Add(e)
                     try:
                         from_cond.Recipients.ResolveAll()
                     except Exception:
                         pass
+                else:
+                    from_cond.Enabled = False
+
+                sender_cond = rule.Conditions.SenderAddress
+                if domains:
+                    sender_cond.Address = list(domains)
+                    sender_cond.Enabled = True
+                else:
+                    sender_cond.Enabled = False
+                    sender_cond.Address = []
+
+                subj_cond = rule.Conditions.Subject
+                if keywords:
+                    subj_cond.Text = list(keywords)
+                    subj_cond.Enabled = True
+                else:
+                    subj_cond.Enabled = False
+                    subj_cond.Text = []
 
                 if target_folder_path:
                     target_folder_obj = self.get_or_create_folder(target_store, target_folder_path)
@@ -305,7 +337,13 @@ class WindowsOutlookClient(BaseOutlookClient):
                     move_act.Folder = target_folder_obj
 
             rules_col.Save(ShowProgress=False)
-            return True, f"Successfully synced rules to Outlook (Created: {created_count}, Updated: {updated_count})"
+            msg = f"Successfully synced rules to Outlook (Created: {created_count}, Updated: {updated_count}"
+            if disabled_count:
+                msg += f", Disabled empty: {disabled_count}"
+            msg += ")"
+            if warnings:
+                msg += f"\nWarning - skipped rules with no conditions: {', '.join(warnings)}"
+            return True, msg
         except Exception as ex:
             return False, f"Failed to sync rules to Outlook: {str(ex)}"
 
@@ -500,14 +538,26 @@ class MockOutlookClient(BaseOutlookClient):
 
     def save_native_rules(self, rules_data: List[Dict[str, Any]], target_store_path: str) -> Tuple[bool, str]:
         self._rules = []
+        warnings = []
         for r in rules_data:
+            emails = [e for e in (r.get("emails") or []) if e]
+            domains = [d for d in (r.get("domains") or []) if d]
+            keywords = [k for k in (r.get("subject_keywords") or []) if k]
+            if not emails and not domains and not keywords:
+                warnings.append(r["name"])
+                continue
             self._rules.append({
                 "name": r["name"],
                 "enabled": r.get("enabled", True),
                 "target_folder": f"{target_store_path}\\{r.get('target_folder', '')}",
-                "emails": r.get("emails", [])
+                "emails": emails,
+                "domains": domains,
+                "subject_keywords": keywords,
             })
-        return True, f"Mock: Successfully synced {len(rules_data)} rules to Outlook"
+        msg = f"Mock: Successfully synced {len(self._rules)} rules to Outlook"
+        if warnings:
+            msg += f"\nWarning - skipped rules with no conditions: {', '.join(warnings)}"
+        return True, msg
 
     def rollover_rules(self, new_store_path: str) -> Tuple[bool, str]:
         for r in self._rules:

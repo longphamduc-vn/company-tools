@@ -713,7 +713,7 @@ class TriageView(ttk.Frame):
 
         sender_email = msg.sender_email
         sender_domain = f"@{sender_email.split('@')[1]}" if "@" in sender_email else ""
-        match_mode = "domain" if any(w in sender_domain for w in ["omron", "automation", "partner", "corp", "vendor"]) else "email"
+        match_mode = "email"
 
         for existing in self.staged_actions:
             if existing.message_id == msg.entry_id:
@@ -869,8 +869,6 @@ class TriageView(ttk.Frame):
                 value="domain"
             )
             rb_domain.pack(anchor=tk.W, pady=2)
-            if any(w in sender_domain for w in ["omron", "automation", "partner", "corp", "vendor"]):
-                var_scope.set("domain")
 
         # Buttons
         btn_bar = ttk.Frame(frm)
