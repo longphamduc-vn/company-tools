@@ -42,6 +42,10 @@ class RuleManagerView(ttk.Frame):
         # Mode toggle: 'visual' vs 'bulk' for conditions
         self.condition_mode: str = "visual"
 
+        # Scrollable inspector canvases + single shared mousewheel handler
+        self._scrollable_canvases: List[tk.Canvas] = []
+        self._mousewheel_bound: bool = False
+
         self._build_ui()
         self.refresh_all()
 
@@ -176,6 +180,71 @@ class RuleManagerView(ttk.Frame):
             font=("", 9), fg="#94a3b8", bg="#ffffff", justify=tk.CENTER
         ).pack(pady=4)
 
+    def _create_scrollable_section(self, parent: tk.Misc, bg: str = "#ffffff") -> Tuple[tk.Canvas, tk.Frame]:
+        """Build a vertically scrollable Canvas+Scrollbar container and return (canvas, inner_frame)."""
+        canvas = tk.Canvas(parent, bg=bg, highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        inner = tk.Frame(canvas, bg=bg)
+        window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _on_inner_configure(_event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(event):
+            canvas.itemconfigure(window_id, width=event.width)
+
+        inner.bind("<Configure>", _on_inner_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        self._scrollable_canvases.append(canvas)
+        if not self._mousewheel_bound:
+            self.bind_all("<MouseWheel>", self._on_scrollable_mousewheel, add="+")
+            self._mousewheel_bound = True
+        return canvas, inner
+
+    def _on_scrollable_mousewheel(self, event):
+        """Scroll whichever mapped inspector canvas contains the pointer."""
+        if not self.winfo_exists():
+            return
+        widget = event.widget
+        if not isinstance(widget, tk.Misc):
+            try:
+                widget = self.winfo_containing(event.x_root, event.y_root)
+            except Exception:
+                return
+        if widget is None:
+            return
+
+        target_canvas = None
+        curr = widget
+        while curr is not None:
+            if curr in self._scrollable_canvases and curr.winfo_exists() and curr.winfo_ismapped():
+                target_canvas = curr
+                break
+            curr = getattr(curr, "master", None)
+        if target_canvas is None:
+            return
+
+        if isinstance(widget, (tk.Text, tk.Listbox)):
+            try:
+                first, last = widget.yview()
+                if not (first <= 0.0 and last >= 1.0):
+                    return
+            except Exception:
+                pass
+
+        first, last = target_canvas.yview()
+        if first <= 0.0 and last >= 1.0:
+            return
+
+        step = -1 * int(event.delta / 120) if abs(event.delta) >= 120 else (-1 if event.delta > 0 else 1)
+        target_canvas.yview_scroll(step, "units")
+
     def _build_rule_inspector(self):
         # 1. Breadcrumb Path Bar (Dynamic Levels)
         self.bar_breadcrumb = tk.Frame(self.frame_rule, bg="#f1f5f9", padx=8, pady=6, highlightbackground="#e2e8f0", highlightthickness=1)
@@ -217,12 +286,40 @@ class RuleManagerView(ttk.Frame):
         )
         self.lbl_quota.pack(anchor=tk.W, pady=(6, 0))
 
-        # 3. Recipients & Conditions Notebook / Mode Switcher
+        # Pack bottom footer & tester strip BEFORE middle scrollable content so they never overflow off-screen
+        # 5. Rule Action Footer
+        btn_bar_rule = tk.Frame(self.frame_rule, bg="#ffffff")
+        btn_bar_rule.pack(fill=tk.X, side=tk.BOTTOM)
+
+        self.btn_save_rule = ttk.Button(
+            btn_bar_rule, text="Save Rule to YAML", style="Accent.TButton", command=self._save_rule_changes
+        )
+        self.btn_save_rule.pack(side=tk.LEFT, padx=2)
+
+        ttk.Button(btn_bar_rule, text="Duplicate Rule", command=self._duplicate_selected_rule).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_bar_rule, text="Delete Rule", command=self._delete_selected).pack(side=tk.RIGHT, padx=2)
+
+        # 4. Interactive Match Tester Strip
+        tester_strip = tk.Frame(
+            self.frame_rule, bg="#f8fafc", padx=6, pady=4, highlightbackground="#e2e8f0", highlightthickness=1
+        )
+        tester_strip.pack(fill=tk.X, side=tk.BOTTOM, pady=(0, 6))
+
+        tk.Label(tester_strip, text="Test Match:", bg="#f8fafc", font=("", 8, "bold"), fg="#475569").pack(side=tk.LEFT, padx=(0, 4))
+        self.ent_test_match = ttk.Entry(tester_strip, width=24)
+        self.ent_test_match.pack(side=tk.LEFT, padx=2)
+        ttk.Button(tester_strip, text="Check", command=self._test_rule_match).pack(side=tk.LEFT, padx=2)
+        self.lbl_test_result = tk.Label(tester_strip, text="", bg="#f8fafc", font=("", 8, "bold"))
+        self.lbl_test_result.pack(side=tk.LEFT, padx=6)
+
+        # 3. Recipients & Conditions Notebook / Scrollable Mode Switcher
         card_cond = tk.LabelFrame(self.frame_rule, text="Filter Conditions (Emails & Domains)", bg="#ffffff", padx=8, pady=8)
         card_cond.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
 
+        self.rule_scroll_canvas, rule_cond_body = self._create_scrollable_section(card_cond, bg="#ffffff")
+
         # Linked Groups (above Direct Emails, visible in both Visual and Bulk modes)
-        frame_linked_groups = tk.Frame(card_cond, bg="#ffffff")
+        frame_linked_groups = tk.Frame(rule_cond_body, bg="#ffffff")
         frame_linked_groups.pack(fill=tk.X, pady=(0, 6))
 
         row_grp_hdr = tk.Frame(frame_linked_groups, bg="#ffffff")
@@ -234,7 +331,7 @@ class RuleManagerView(ttk.Frame):
         self.lst_rule_groups = tk.Listbox(frame_linked_groups, font=("Consolas", 9), height=3, selectmode=tk.EXTENDED)
         self.lst_rule_groups.pack(fill=tk.X)
 
-        mode_strip = tk.Frame(card_cond, bg="#ffffff")
+        mode_strip = tk.Frame(rule_cond_body, bg="#ffffff")
         mode_strip.pack(fill=tk.X, pady=(0, 4))
 
         self.btn_mode_visual = tk.Button(
@@ -252,15 +349,15 @@ class RuleManagerView(ttk.Frame):
         ttk.Button(mode_strip, text="Import CSV/Excel...", command=self._import_addresses_to_rule).pack(side=tk.RIGHT)
 
         # Container for Visual Mode vs Bulk Mode
-        self.box_cond_container = tk.Frame(card_cond, bg="#ffffff")
-        self.box_cond_container.pack(fill=tk.BOTH, expand=True)
+        self.box_cond_container = tk.Frame(rule_cond_body, bg="#ffffff")
+        self.box_cond_container.pack(fill=tk.X)
 
         # --- A. Visual Mode Frames ---
         self.box_visual = tk.Frame(self.box_cond_container, bg="#ffffff")
 
         # Visual Emails
         frame_vis_emails = tk.Frame(self.box_visual, bg="#ffffff")
-        frame_vis_emails.pack(fill=tk.BOTH, expand=True, pady=2)
+        frame_vis_emails.pack(fill=tk.X, pady=2)
 
         row_add_email = tk.Frame(frame_vis_emails, bg="#ffffff")
         row_add_email.pack(fill=tk.X, pady=(0, 2))
@@ -272,11 +369,11 @@ class RuleManagerView(ttk.Frame):
         ttk.Button(row_add_email, text="Remove Selected", command=self._remove_email_chip).pack(side=tk.RIGHT)
 
         self.lst_emails = tk.Listbox(frame_vis_emails, font=("Consolas", 9), height=5, selectmode=tk.EXTENDED)
-        self.lst_emails.pack(fill=tk.BOTH, expand=True)
+        self.lst_emails.pack(fill=tk.X)
 
         # Visual Domains
         frame_vis_domains = tk.Frame(self.box_visual, bg="#ffffff")
-        frame_vis_domains.pack(fill=tk.BOTH, expand=True, pady=(6, 2))
+        frame_vis_domains.pack(fill=tk.X, pady=(6, 2))
 
         row_add_dom = tk.Frame(frame_vis_domains, bg="#ffffff")
         row_add_dom.pack(fill=tk.X, pady=(0, 2))
@@ -288,41 +385,20 @@ class RuleManagerView(ttk.Frame):
         ttk.Button(row_add_dom, text="Remove Selected", command=self._remove_domain_chip).pack(side=tk.RIGHT)
 
         self.lst_domains = tk.Listbox(frame_vis_domains, font=("Consolas", 9), height=3, selectmode=tk.EXTENDED)
-        self.lst_domains.pack(fill=tk.BOTH, expand=True)
+        self.lst_domains.pack(fill=tk.X)
 
         # --- B. Bulk Mode Frames ---
         self.box_bulk = tk.Frame(self.box_cond_container, bg="#ffffff")
 
         tk.Label(self.box_bulk, text="Emails (one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
         self.txt_bulk_emails = tk.Text(self.box_bulk, font=("Consolas", 9), height=6)
-        self.txt_bulk_emails.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+        self.txt_bulk_emails.pack(fill=tk.X, pady=(0, 4))
 
         tk.Label(self.box_bulk, text="Domains (e.g. @omron.com, one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
         self.txt_bulk_domains = tk.Text(self.box_bulk, font=("Consolas", 9), height=3)
         self.txt_bulk_domains.pack(fill=tk.X, pady=(0, 4))
 
         self.box_visual.pack(fill=tk.BOTH, expand=True)
-
-        # 4. Interactive Match Tester Strip
-        tester_strip = tk.Frame(self.frame_rule, bg="#f8fafc", padx=6, pady=4, highlightbackground="#e2e8f0", highlightthickness=1)
-        tester_strip.pack(fill=tk.X, pady=(0, 6))
-
-        tk.Label(tester_strip, text="Test Match:", bg="#f8fafc", font=("", 8, "bold"), fg="#475569").pack(side=tk.LEFT, padx=(0, 4))
-        self.ent_test_match = ttk.Entry(tester_strip, width=24)
-        self.ent_test_match.pack(side=tk.LEFT, padx=2)
-        ttk.Button(tester_strip, text="Check", command=self._test_rule_match).pack(side=tk.LEFT, padx=2)
-        self.lbl_test_result = tk.Label(tester_strip, text="", bg="#f8fafc", font=("", 8, "bold"))
-        self.lbl_test_result.pack(side=tk.LEFT, padx=6)
-
-        # 5. Rule Action Footer
-        btn_bar_rule = tk.Frame(self.frame_rule, bg="#ffffff")
-        btn_bar_rule.pack(fill=tk.X, side=tk.BOTTOM)
-
-        btn_save = ttk.Button(btn_bar_rule, text="Save Rule to YAML", style="Accent.TButton", command=self._save_rule_changes)
-        btn_save.pack(side=tk.LEFT, padx=2)
-
-        ttk.Button(btn_bar_rule, text="Duplicate Rule", command=self._duplicate_selected_rule).pack(side=tk.LEFT, padx=4)
-        ttk.Button(btn_bar_rule, text="Delete Rule", command=self._delete_selected).pack(side=tk.RIGHT, padx=2)
 
     def _build_folder_inspector(self):
         # Folder Header Banner (Dynamic Level Display)
@@ -406,21 +482,28 @@ class RuleManagerView(ttk.Frame):
         self.ent_group_name = ttk.Entry(row_name, width=28)
         self.ent_group_name.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Group Members
-        tk.Label(self.frame_group, text="Member Emails (one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
-        self.txt_group_emails = tk.Text(self.frame_group, font=("Consolas", 9), height=6)
-        self.txt_group_emails.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
-
-        tk.Label(self.frame_group, text="Member Domains (e.g. @omron.com, one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
-        self.txt_group_domains = tk.Text(self.frame_group, font=("Consolas", 9), height=3)
-        self.txt_group_domains.pack(fill=tk.X, pady=(0, 8))
-
-        # Action bar
+        # Action bar packed BEFORE scrollable middle content so buttons always stay visible
         btn_bar_grp = tk.Frame(self.frame_group, bg="#ffffff")
         btn_bar_grp.pack(fill=tk.X, side=tk.BOTTOM)
-        ttk.Button(btn_bar_grp, text="Save Group to YAML", style="Accent.TButton", command=self._save_group_changes).pack(side=tk.LEFT, padx=2)
+        self.btn_save_group = ttk.Button(
+            btn_bar_grp, text="Save Group to YAML", style="Accent.TButton", command=self._save_group_changes
+        )
+        self.btn_save_group.pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_bar_grp, text="Import CSV/Excel...", command=self._import_addresses_to_group).pack(side=tk.LEFT, padx=4)
         ttk.Button(btn_bar_grp, text="Delete Group", command=self._delete_selected_group).pack(side=tk.RIGHT, padx=2)
+
+        # Scrollable Group Members area
+        grp_scroll_box = tk.Frame(self.frame_group, bg="#ffffff")
+        grp_scroll_box.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+        self.group_scroll_canvas, grp_inner = self._create_scrollable_section(grp_scroll_box, bg="#ffffff")
+
+        tk.Label(grp_inner, text="Member Emails (one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
+        self.txt_group_emails = tk.Text(grp_inner, font=("Consolas", 9), height=6)
+        self.txt_group_emails.pack(fill=tk.X, pady=(0, 6))
+
+        tk.Label(grp_inner, text="Member Domains (e.g. @omron.com, one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
+        self.txt_group_domains = tk.Text(grp_inner, font=("Consolas", 9), height=3)
+        self.txt_group_domains.pack(fill=tk.X, pady=(0, 4))
 
     def _build_pool_inspector(self):
         header = tk.Frame(self.frame_pool, bg="#fef2f2", padx=10, pady=8, highlightbackground="#fecaca", highlightthickness=1)
@@ -685,6 +768,7 @@ class RuleManagerView(ttk.Frame):
 
         self.lbl_test_result.config(text="")
         self.ent_test_match.delete(0, tk.END)
+        self.rule_scroll_canvas.yview_moveto(0)
 
     def _populate_folder_inspector(self, folder_path: str):
         self.lbl_folder_title.config(text=f"Folder: {folder_path}")
@@ -726,6 +810,7 @@ class RuleManagerView(ttk.Frame):
 
         self.txt_group_domains.delete("1.0", tk.END)
         self.txt_group_domains.insert(tk.END, "\n".join(sorted(group.domains)))
+        self.group_scroll_canvas.yview_moveto(0)
 
     def _populate_pool_inspector(self):
         self.lst_pool.delete(0, tk.END)

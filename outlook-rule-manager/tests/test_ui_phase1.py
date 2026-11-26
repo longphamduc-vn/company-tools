@@ -370,6 +370,7 @@ class TestUiPhase1(unittest.TestCase):
         win = MainWindow(self.config_path, outlook_client=real_client)
         try:
             win.update()
+            self.assertIsInstance(win.lbl_sync_status, ttk.Label)
             self.assertEqual(win.lbl_sync_status.cget("text"), "Not synced this session")
             self.assertEqual(win.btn_sync.cget("style"), "Accent.TButton")
 
@@ -402,6 +403,83 @@ class TestUiPhase1(unittest.TestCase):
             self.assertEqual(win.btn_sync.cget("style"), "SyncPending.TButton")
         finally:
             win.destroy()
+
+    def test_inspector_save_button_visible_and_scrollable_at_1120x720(self):
+        win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
+        try:
+            win.geometry("1120x720")
+            win.notebook.select(win.tab_rules)
+            win.update()
+
+            # Select rule -> Save Rule button must be mapped & inside window bounds
+            win.tab_rules.tree.selection_set("rule_rule_executive")
+            win.tab_rules._on_tree_select()
+            win.update()
+
+            btn_save_rule = win.tab_rules.btn_save_rule
+            self.assertTrue(bool(btn_save_rule.winfo_ismapped()))
+            self.assertLessEqual(
+                btn_save_rule.winfo_rooty() + btn_save_rule.winfo_height(),
+                win.winfo_rooty() + win.winfo_height(),
+            )
+
+            # Verify mousewheel helper scrolls rule canvas when shrunk to cause vertical overflow
+            win.geometry("920x460")
+            win.update()
+            self.assertTrue(bool(btn_save_rule.winfo_ismapped()))
+            self.assertLessEqual(
+                btn_save_rule.winfo_rooty() + btn_save_rule.winfo_height(),
+                win.winfo_rooty() + win.winfo_height(),
+            )
+            fake_wheel = type("WheelEvent", (), {"widget": win.tab_rules.lst_rule_groups, "delta": -120})()
+            first_before, last_before = win.tab_rules.rule_scroll_canvas.yview()
+            self.assertLess(last_before, 1.0)
+            win.tab_rules._on_scrollable_mousewheel(fake_wheel)
+            self.assertGreater(win.tab_rules.rule_scroll_canvas.yview()[0], first_before)
+
+            # Select group -> Save Group button also mapped & visible inside window bounds
+            win.geometry("1120x720")
+            win.tab_rules.tree.selection_set("grp_executive")
+            win.tab_rules._on_tree_select()
+            win.update()
+
+            btn_save_group = win.tab_rules.btn_save_group
+            self.assertTrue(bool(btn_save_group.winfo_ismapped()))
+            self.assertLessEqual(
+                btn_save_group.winfo_rooty() + btn_save_group.winfo_height(),
+                win.winfo_rooty() + win.winfo_height(),
+            )
+        finally:
+            win.destroy()
+
+    def test_rollover_resets_unsynced_changes_for_real_client(self):
+        yaml_mgr = YamlConfigManager(self.config_path)
+        old_path = yaml_mgr.stores["active_archive"].file_path
+        new_path = r"D:\Outlook_Data\longp_Archive_2026.pst"
+        archive_2025 = FakeStore("Archive 2025", old_path)
+        archive_2026 = FakeStore("Archive 2026", new_path)
+        default_store = FakeStore("Primary Mailbox", "", is_data_file=False)
+        namespace = FakeNamespace(
+            stores=[default_store, archive_2025, archive_2026],
+            default_store=default_store,
+        )
+        engine = SyncEngine(yaml_mgr, WindowsOutlookClient(namespace=namespace))
+
+        yaml_mgr.save()
+        self.assertEqual(yaml_mgr.unsynced_changes, 1)
+
+        ok, _ = engine.perform_rollover("Archive 2026", new_path)
+        self.assertTrue(ok)
+        self.assertEqual(yaml_mgr.unsynced_changes, 0)
+        self.assertTrue(yaml_mgr.has_synced)
+
+        # Simulated rollover must keep unsynced_changes > 0
+        mock_engine = SyncEngine(yaml_mgr, MockOutlookClient())
+        yaml_mgr.save()
+        before_mock = yaml_mgr.unsynced_changes
+        ok_mock, _ = mock_engine.perform_rollover("longp Archive 2025", "/mock/data/longp_Archive_2025.pst")
+        self.assertTrue(ok_mock)
+        self.assertGreater(yaml_mgr.unsynced_changes, before_mock)
 
 
 if __name__ == "__main__":

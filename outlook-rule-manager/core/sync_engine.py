@@ -151,6 +151,8 @@ class SyncEngine:
             return False, msg
 
         self.yaml_mgr.save()
+        if not self.outlook.is_simulated():
+            self.yaml_mgr.mark_synced()
         return True, f"Successfully rolled over rules to '{new_store_name}' ({new_store_path}).\n{msg}"
 
     @staticmethod

@@ -80,10 +80,10 @@ class MainWindow(tk.Tk):
         btn_reload = ttk.Button(right_box, text="Reload YAML", command=self._reload_yaml)
         btn_reload.pack(side=tk.LEFT, padx=4)
 
-        self.lbl_sync_status = tk.Label(
+        self.lbl_sync_status = ttk.Label(
             right_box,
             text="Not synced this session",
-            fg="#64748b",
+            foreground="#64748b",
             font=("", 8, "bold"),
         )
         self.lbl_sync_status.pack(side=tk.LEFT, padx=(8, 4))
@@ -144,13 +144,13 @@ class MainWindow(tk.Tk):
             return
         count = self.yaml_mgr.unsynced_changes
         if count > 0:
-            self.lbl_sync_status.config(text=f"● {count} unsynced change(s)", fg="#ea580c")
+            self.lbl_sync_status.config(text=f"● {count} unsynced change(s)", foreground="#ea580c")
             self.btn_sync.config(style="SyncPending.TButton")
         elif self.yaml_mgr.has_synced:
-            self.lbl_sync_status.config(text="✓ Outlook in sync", fg="#16a34a")
+            self.lbl_sync_status.config(text="✓ Outlook in sync", foreground="#16a34a")
             self.btn_sync.config(style="Accent.TButton")
         else:
-            self.lbl_sync_status.config(text="Not synced this session", fg="#64748b")
+            self.lbl_sync_status.config(text="Not synced this session", foreground="#64748b")
             self.btn_sync.config(style="Accent.TButton")
 
     def _retry_outlook_connection(self):
