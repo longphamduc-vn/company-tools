@@ -103,7 +103,7 @@ class ConflictDetector:
 
         return conflicts
 
-    def resolve_import_to_yaml(self, conflict: RuleConflict) -> bool:
+    def resolve_import_to_yaml(self, conflict: RuleConflict, save: bool = True) -> bool:
         """Import a native Outlook rule into rules.yaml."""
         if not conflict.outlook_rule_info:
             return False
@@ -124,5 +124,6 @@ class ConflictDetector:
             target_folder=folder
         )
         self.yaml_mgr.rules.append(new_rule)
-        self.yaml_mgr.save()
+        if save:
+            self.yaml_mgr.save()
         return True

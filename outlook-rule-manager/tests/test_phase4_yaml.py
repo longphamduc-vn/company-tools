@@ -16,7 +16,7 @@ from core.outlook_client import MockOutlookClient
 from core.sync_engine import SyncEngine
 from core.yaml_manager import YamlConfigManager
 from gui.rule_manager_view import RuleManagerView
-from gui.triage_view import TriageView
+from gui.triage_view import StagedAction, TriageView
 
 
 class TestPhase4YamlIntegrityAndIds(unittest.TestCase):
@@ -326,3 +326,80 @@ class TestPhase4GuiIntegration(unittest.TestCase):
 
         omron_rules = [r for r in self.yaml_mgr.rules if r.name == "Omron"]
         self.assertEqual([r.id for r in omron_rules], ["rule_omron", "rule_omron_1"])
+
+    def test_triage_commit_35_add_to_rule_actions_creates_only_one_backup(self):
+        self.yaml_mgr.settings["backup_versions"] = 30
+        self.yaml_mgr.save()
+        before_backups = sorted(
+            glob.glob(os.path.join(self.yaml_mgr.backup_dir, "rules_*.yaml")),
+            key=os.path.basename,
+        )
+        self.assertEqual(len(before_backups), 1)
+        pre_commit_backup = before_backups[0]
+
+        view = TriageView(self.root, self.yaml_mgr, self.outlook, self.sync_engine)
+        view.staged_actions = [
+            StagedAction(
+                action_type="add_to_rule",
+                rule_name="Executive Board",
+                rule_id="rule_executive",
+                target_folder=r"Management\Executive_Board\Directors",
+                sender_email=f"exec{i}@company.com",
+                sender_domain="@company.com",
+                match_mode="email",
+                message_id=f"MSG_{i}",
+                subject=f"Subject {i}",
+            )
+            for i in range(35)
+        ]
+
+        with patch("gui.triage_view.messagebox.askyesno", return_value=True), \
+             patch("gui.triage_view.messagebox.showinfo"), \
+             patch.object(view.conflict_detector, "detect_conflicts", return_value=[]):
+            view._apply_all_staged()
+
+        after_backups = sorted(
+            glob.glob(os.path.join(self.yaml_mgr.backup_dir, "rules_*.yaml")),
+            key=os.path.basename,
+        )
+        self.assertEqual(len(after_backups), len(before_backups) + 1)
+        self.assertTrue(os.path.exists(pre_commit_backup))
+
+        exec_rule = next(r for r in self.yaml_mgr.rules if r.id == "rule_executive")
+        all_exec_emails = self.yaml_mgr.get_all_emails_for_rule(exec_rule)
+        for i in range(35):
+            self.assertIn(f"exec{i}@company.com", all_exec_emails)
+
+    def test_rule_manager_save_rule_and_group_forms_normalize_domains(self):
+        view = RuleManagerView(self.root, self.yaml_mgr, self.sync_engine)
+        view.pack()
+
+        # Select rule and enter unnormalized domains in bulk mode
+        view.tree.selection_set("rule_rule_executive")
+        view._on_tree_select()
+        view._set_condition_mode("bulk")
+        view.txt_bulk_domains.delete("1.0", tk.END)
+        view.txt_bulk_domains.insert(tk.END, "Vendor.com\n  @Omron.COM \n\n   \n")
+        view._save_rule_changes()
+
+        exec_rule = next(r for r in self.yaml_mgr.rules if r.id == "rule_executive")
+        self.assertEqual(exec_rule.domains, ["@omron.com", "@vendor.com"])
+
+        # Also check visual mode save path
+        view.tree.selection_set("rule_rule_executive")
+        view._on_tree_select()
+        view._set_condition_mode("visual")
+        view.lst_domains.delete(0, tk.END)
+        view.lst_domains.insert(tk.END, "Partner.ORG")
+        view.lst_domains.insert(tk.END, "  ")
+        view._save_rule_changes()
+        self.assertEqual(exec_rule.domains, ["@partner.org"])
+
+        # Select group and enter unnormalized domains
+        view.tree.selection_set("grp_suppliers")
+        view._on_tree_select()
+        view.txt_group_domains.delete("1.0", tk.END)
+        view.txt_group_domains.insert(tk.END, "Vendor.com\n  @Omron.COM \n\n")
+        view._save_group_changes()
+
+        self.assertEqual(self.yaml_mgr.groups["suppliers"].domains, ["@omron.com", "@vendor.com"])

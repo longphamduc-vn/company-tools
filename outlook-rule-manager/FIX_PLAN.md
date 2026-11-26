@@ -248,3 +248,12 @@ Sau mỗi phase, agent báo lại: commit hash, danh sách file đổi, output `
 - **Lệch plan & lý do:**
   - Khi `os.replace` gặp lỗi `OSError`/`PermissionError`, dọn file `.tmp` và raise `RuntimeError` kèm thông điệp chi tiết thay vì để rò rỉ exception thô hoặc file tạm.
   - Khi sinh backup có thêm chống trùng `_%d` trong trường hợp gọi liên tiếp trùng microsecond và sort theo `os.path.basename`.
+
+### Phase 4 — Review fixes
+- **Đã làm:**
+  - `core/yaml_manager.py`: thêm `normalize_domains(domains)` dùng chung; thêm tham số `save: bool = True` cho `add_sender_to_rule_or_group`.
+  - `gui/triage_view.py`: trong `_apply_all_staged`, gọi `add_sender_to_rule_or_group(..., save=False)` vì vòng lặp đã gọi `self.yaml_mgr.save()` một lần ở cuối.
+  - `core/conflict_detector.py` & `gui/conflict_dialog.py`: grep toàn bộ `gui/` phát hiện thêm vòng lặp `IMPORT` trong `ConflictDialog._execute_resolutions` gọi `resolve_import_to_yaml` mỗi lượt -> thêm `save: bool = True` cho `resolve_import_to_yaml` và chuyển sang gọi `save()` một lần sau vòng lặp khi có import.
+  - `gui/rule_manager_view.py`: chuẩn hóa domain qua `YamlConfigManager.normalize_domains` (bỏ giá trị rỗng) ở cả `_save_rule_changes` (visual + bulk) và `_save_group_changes`.
+  - `tests/test_phase4_yaml.py`: thêm 2 test cho commit 35 action `add_to_rule` (`backup_versions = 30` chỉ sinh 1 backup mới và giữ nguyên backup trước commit) và chuẩn hóa domain (`"Vendor.com"`, `"  @Omron.COM "`) khi lưu rule và group trên GUI.
+- **Lệch plan & lý do:** Không có.

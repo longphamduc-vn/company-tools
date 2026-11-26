@@ -1072,7 +1072,8 @@ class TriageView(ttk.Frame):
                 self.yaml_mgr.add_sender_to_rule_or_group(
                     action.sender_email,
                     action.rule_id,
-                    as_domain=as_domain
+                    as_domain=as_domain,
+                    save=False,
                 )
 
             # Move message in Outlook

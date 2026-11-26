@@ -153,10 +153,13 @@ class ConflictDialog(tk.Toplevel):
 
         for c in self.conflicts:
             if c.suggested_action == "IMPORT":
-                self.detector.resolve_import_to_yaml(c)
-                import_count += 1
+                if self.detector.resolve_import_to_yaml(c, save=False):
+                    import_count += 1
             elif c.suggested_action == "OVERWRITE":
                 overwrite_count += 1
+
+        if import_count > 0:
+            self.detector.yaml_mgr.save()
 
         # Push to Outlook
         success, msg = self.sync_engine.push_to_outlook()

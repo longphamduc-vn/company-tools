@@ -62,7 +62,7 @@ class YamlConfigManager:
             self.groups[g_id] = AddressGroup(
                 id=g_id,
                 name=g_data.get("name", g_id),
-                domains=[d for d in (self.normalize_domain(x) for x in raw_domains) if d],
+                domains=self.normalize_domains(raw_domains),
                 emails=[e.lower().strip() for e in (g_data.get("emails", []) or [])]
             )
 
@@ -80,7 +80,7 @@ class YamlConfigManager:
                 enabled=r_data.get("enabled", True),
                 groups=r_data.get("groups", []) or [],
                 emails=[e.lower().strip() for e in (r_data.get("emails", []) or [])],
-                domains=[d for d in (self.normalize_domain(x) for x in raw_rule_domains) if d],
+                domains=self.normalize_domains(raw_rule_domains),
                 subject_keywords=r_data.get("subject_keywords", []) or [],
                 target_store=r_data.get("target_store", "active_archive"),
                 target_folder=r_data.get("target_folder", "")
@@ -100,6 +100,11 @@ class YamlConfigManager:
         if not val:
             return ""
         return f"@{val}"
+
+    @classmethod
+    def normalize_domains(cls, domains: List[str]) -> List[str]:
+        """Normalize a list of domains and drop empty entries."""
+        return [d for d in (cls.normalize_domain(x) for x in (domains or [])) if d]
 
     def _create_backup_file(self) -> None:
         """Create a unique microsecond-timestamped backup copy and prune old backups."""
@@ -247,7 +252,13 @@ class YamlConfigManager:
         self.save()
         return True
 
-    def add_sender_to_rule_or_group(self, email: str, rule_id: str, as_domain: bool = False):
+    def add_sender_to_rule_or_group(
+        self,
+        email: str,
+        rule_id: str,
+        as_domain: bool = False,
+        save: bool = True,
+    ):
         """Add email or normalized domain to a rule or its first valid group."""
         raw = (email or "").lower().strip()
         if not raw:
@@ -275,7 +286,8 @@ class YamlConfigManager:
             if raw not in target_list:
                 target_list.append(raw)
 
-        self.save()
+        if save:
+            self.save()
 
     def get_existing_hierarchy(self) -> Tuple[List[str], List[str], List[str]]:
         """Collect all distinct Teams, Parts, and Units from current rules and custom folders."""

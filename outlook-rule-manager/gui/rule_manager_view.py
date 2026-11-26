@@ -1229,11 +1229,13 @@ class RuleManagerView(ttk.Frame):
         self.selected_rule.enabled = self.var_rule_enabled.get()
 
         if self.condition_mode == "visual":
-            emails = [self.lst_emails.get(i).strip().lower() for i in range(self.lst_emails.size())]
-            domains = [self.lst_domains.get(i).strip().lower() for i in range(self.lst_domains.size())]
+            emails = [self.lst_emails.get(i).strip().lower() for i in range(self.lst_emails.size()) if self.lst_emails.get(i).strip()]
+            raw_domains = [self.lst_domains.get(i) for i in range(self.lst_domains.size())]
         else:
             emails = [l.strip().lower() for l in self.txt_bulk_emails.get("1.0", tk.END).split("\n") if l.strip()]
-            domains = [l.strip().lower() for l in self.txt_bulk_domains.get("1.0", tk.END).split("\n") if l.strip()]
+            raw_domains = self.txt_bulk_domains.get("1.0", tk.END).split("\n")
+
+        domains = YamlConfigManager.normalize_domains(raw_domains)
 
         self.selected_rule.emails = sorted(list(set(emails)))
         self.selected_rule.domains = sorted(list(set(domains)))
@@ -1472,7 +1474,8 @@ class RuleManagerView(ttk.Frame):
             return
 
         emails = [l.strip().lower() for l in self.txt_group_emails.get("1.0", tk.END).split("\n") if l.strip()]
-        domains = [l.strip().lower() for l in self.txt_group_domains.get("1.0", tk.END).split("\n") if l.strip()]
+        raw_domains = self.txt_group_domains.get("1.0", tk.END).split("\n")
+        domains = YamlConfigManager.normalize_domains(raw_domains)
 
         self.selected_group.name = name
         self.selected_group.emails = sorted(list(set(emails)))
