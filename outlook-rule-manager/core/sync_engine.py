@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from core.yaml_manager import YamlConfigManager
 from core.rule_splitter import split_rule_recipients
 from core.outlook_client import BaseOutlookClient
-from core.models import RuleConfig
+from core.models import RuleConfig, MANAGED_PREFIX, extract_base_rule_name
 
 
 class SyncEngine:
@@ -14,26 +14,39 @@ class SyncEngine:
         self.yaml_mgr = yaml_mgr
         self.outlook = outlook_client
 
-    def push_to_outlook(self) -> Tuple[bool, str]:
-        """Compile YAML rules (with auto-split) and push directly to Outlook COM."""
+    def find_legacy_rules(self) -> List[str]:
+        """Return unprefixed Outlook rule names matching YAML rules or split parts."""
+        yaml_names = {r.name for r in self.yaml_mgr.rules}
+        legacy = []
+        for native_rule in self.outlook.get_native_rules():
+            r_name = native_rule.get("name", "")
+            if not r_name or r_name.startswith(MANAGED_PREFIX):
+                continue
+            if extract_base_rule_name(r_name) in yaml_names:
+                legacy.append(r_name)
+        return legacy
+
+    def push_to_outlook(self, remove_legacy: bool = False) -> Tuple[bool, str]:
+        """Compile YAML rules (with auto-split and [Companion] prefix) and reconcile Outlook rules."""
         active_store_key = "active_archive"
         active_store = self.yaml_mgr.stores.get(active_store_key)
         store_path = active_store.file_path if active_store else ""
 
         threshold = int(self.yaml_mgr.settings.get("auto_split_threshold", 40))
-        compiled_rules = []
-        skipped_empty_rules = []
+        email_subrules: List[Dict[str, Any]] = []
+        domain_subrules: List[Dict[str, Any]] = []
+        keyword_subrules: List[Dict[str, Any]] = []
+        unclassified_subrules: List[Dict[str, Any]] = []
+        skipped_empty_rules: List[str] = []
 
         for rule in self.yaml_mgr.rules:
-            if not rule.enabled:
-                continue
-
+            is_unclassified = self._is_unclassified_rule(rule)
             emails = self.yaml_mgr.get_all_emails_for_rule(rule)
             domains = self.yaml_mgr.get_all_domains_for_rule(rule)
             keywords = [k.strip() for k in (rule.subject_keywords or []) if k and k.strip()]
 
             # Special case for unclassified rule: include unclassified_pool
-            if rule.id == "rule_unclassified" or rule.target_folder == "_Unclassified":
+            if is_unclassified:
                 emails = sorted(list(set(emails + self.yaml_mgr.unclassified_pool)))
 
             emails = [e for e in emails if e]
@@ -46,26 +59,44 @@ class SyncEngine:
             # Compile each condition type separately to preserve OR semantics in Outlook
             sub_rules = split_rule_recipients(rule.name, emails, domains, max_recipients=threshold)
             for sub_name, email_chunk, domain_chunk in sub_rules:
-                compiled_rules.append({
-                    "name": sub_name,
+                entry = {
+                    "name": f"{MANAGED_PREFIX}{sub_name}",
                     "enabled": rule.enabled,
                     "emails": email_chunk,
                     "domains": domain_chunk,
                     "subject_keywords": [],
-                    "target_folder": rule.target_folder
-                })
+                    "target_folder": rule.target_folder,
+                }
+                if is_unclassified:
+                    unclassified_subrules.append(entry)
+                elif email_chunk:
+                    email_subrules.append(entry)
+                elif domain_chunk:
+                    domain_subrules.append(entry)
 
             if keywords:
-                compiled_rules.append({
-                    "name": f"{rule.name} (Keywords)",
+                kw_entry = {
+                    "name": f"{MANAGED_PREFIX}{rule.name} (Keywords)",
                     "enabled": rule.enabled,
                     "emails": [],
                     "domains": [],
                     "subject_keywords": keywords,
-                    "target_folder": rule.target_folder
-                })
+                    "target_folder": rule.target_folder,
+                }
+                if is_unclassified:
+                    unclassified_subrules.append(kw_entry)
+                else:
+                    keyword_subrules.append(kw_entry)
 
-        success, msg = self.outlook.save_native_rules(compiled_rules, store_path)
+        compiled_rules = email_subrules + domain_subrules + keyword_subrules + unclassified_subrules
+        legacy_base_names = [r.name for r in self.yaml_mgr.rules]
+
+        success, msg = self.outlook.save_native_rules(
+            compiled_rules,
+            store_path,
+            remove_legacy=remove_legacy,
+            legacy_base_names=legacy_base_names,
+        )
         if skipped_empty_rules:
             msg += f"\nWarning - skipped rules with no conditions: {', '.join(skipped_empty_rules)}"
         return success, msg
@@ -84,9 +115,21 @@ class SyncEngine:
         success, msg = self.outlook.rollover_rules(new_store_path)
         return success, msg
 
+    @staticmethod
+    def _is_unclassified_rule(rule: RuleConfig) -> bool:
+        """Return True if rule represents the fallback _Unclassified rule."""
+        return rule.id == "rule_unclassified" or rule.target_folder == "_Unclassified"
+
     def match_message(self, sender_email: str, subject: str) -> Tuple[Optional[RuleConfig], str]:
-        """Match an email against rules using Specificity-First hierarchy.
-        
+        """Match an email against rules in the same order as Outlook ExecutionOrder.
+
+        Evaluation order (each managed Outlook rule sets Actions.Stop.Enabled = True):
+        1. Exact email sub-rules (non-unclassified, YAML order)
+        2. Domain sub-rules (non-unclassified, YAML order)
+        3. Subject keyword sub-rules (non-unclassified, YAML order)
+        4. Unclassified fallback (unclassified_pool / rule_unclassified, last)
+        5. Untracked / Stranger
+
         Returns: (matching_rule, match_reason)
         """
         sender_email = sender_email.lower().strip()
@@ -96,7 +139,7 @@ class SyncEngine:
 
         # Level 1: Exact Email Match
         for rule in self.yaml_mgr.rules:
-            if not rule.enabled or rule.id == "rule_unclassified":
+            if not rule.enabled or self._is_unclassified_rule(rule):
                 continue
             all_emails = self.yaml_mgr.get_all_emails_for_rule(rule)
             if sender_email in all_emails:
@@ -105,7 +148,7 @@ class SyncEngine:
         # Level 2: Domain Match
         if sender_domain:
             for rule in self.yaml_mgr.rules:
-                if not rule.enabled or rule.id == "rule_unclassified":
+                if not rule.enabled or self._is_unclassified_rule(rule):
                     continue
                 all_domains = self.yaml_mgr.get_all_domains_for_rule(rule)
                 if sender_domain in all_domains:
@@ -114,7 +157,7 @@ class SyncEngine:
         # Level 3: Subject Keywords Match
         subj_lower = subject.lower()
         for rule in self.yaml_mgr.rules:
-            if not rule.enabled or rule.id == "rule_unclassified":
+            if not rule.enabled or self._is_unclassified_rule(rule):
                 continue
             for kw in rule.subject_keywords:
                 if kw.lower() in subj_lower:
@@ -123,7 +166,7 @@ class SyncEngine:
         # Level 4: Unclassified Pool Match (orphaned from deleted rules)
         if sender_email in self.yaml_mgr.unclassified_pool:
             for rule in self.yaml_mgr.rules:
-                if rule.id == "rule_unclassified":
+                if rule.enabled and self._is_unclassified_rule(rule):
                     return rule, "Unclassified Pool (Orphaned Sender)"
 
         # Level 5: No Match (Stranger / Untracked)

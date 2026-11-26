@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Tuple, Optional
 
-from core.models import RuleConfig
+from core.models import RuleConfig, MANAGED_PREFIX, extract_base_rule_name
 from core.yaml_manager import YamlConfigManager
 from core.outlook_client import BaseOutlookClient
 
@@ -30,18 +30,21 @@ class ConflictDetector:
         conflicts: List[RuleConflict] = []
         native_rules = self.outlook.get_native_rules()
 
-        # Map native rules by name
-        native_map = {r.get("name", ""): r for r in native_rules}
+        # Map native rules by exact name and normalized base name (without prefix/split suffixes)
+        native_by_base: Dict[str, List[Dict[str, Any]]] = {}
+        for r in native_rules:
+            base = extract_base_rule_name(r.get("name", ""))
+            native_by_base.setdefault(base, []).append(r)
         yaml_map = {r.name: r for r in self.yaml_mgr.rules}
 
         # 1. Check for Name Collisions and Folder Mismatches
         for r_name, r_yaml in yaml_map.items():
-            if r_name in native_map:
-                r_native = native_map[r_name]
+            matched_natives = native_by_base.get(r_name, [])
+            for r_native in matched_natives:
                 native_folder = r_native.get("target_folder", "")
                 yaml_folder = r_yaml.target_folder
 
-                # If destination folders don't match or enabled states differ
+                # If destination folders don't match
                 if native_folder and yaml_folder and (yaml_folder.lower() not in native_folder.lower()):
                     conflicts.append(RuleConflict(
                         conflict_type="NAME_COLLISION",
@@ -54,6 +57,7 @@ class ConflictDetector:
                         ),
                         suggested_action="OVERWRITE"
                     ))
+                    break
 
         # 2. Check for Senders Overlapping between Different Rules
         # Build map of email -> rule_name in YAML
@@ -65,11 +69,12 @@ class ConflictDetector:
         # Check native rules for overlapping senders
         for r_native in native_rules:
             native_name = r_native.get("name", "")
+            native_base_name = extract_base_rule_name(native_name)
             native_emails = [e.lower() for e in r_native.get("emails", [])]
             for email in native_emails:
                 if email in yaml_sender_to_rule:
                     yaml_target_rule = yaml_sender_to_rule[email]
-                    if yaml_target_rule != native_name:
+                    if yaml_target_rule != native_base_name:
                         conflicts.append(RuleConflict(
                             conflict_type="SENDER_OVERLAP",
                             rule_name=f"{email} ({yaml_target_rule} vs {native_name})",
@@ -84,8 +89,9 @@ class ConflictDetector:
                         ))
 
         # 3. Check for Untracked Legacy Outlook Rules
-        for r_name, r_native in native_map.items():
-            if r_name not in yaml_map and not r_name.startswith("[Companion]"):
+        for r_native in native_rules:
+            r_name = r_native.get("name", "")
+            if not r_name.startswith(MANAGED_PREFIX) and extract_base_rule_name(r_name) not in yaml_map:
                 conflicts.append(RuleConflict(
                     conflict_type="LEGACY_RULE",
                     rule_name=r_name,

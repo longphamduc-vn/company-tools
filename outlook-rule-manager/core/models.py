@@ -1,7 +1,19 @@
 """Data models for Outlook Rule Companion."""
+import re
 from dataclasses import dataclass, field
 from typing import List, Optional
 from datetime import datetime
+
+MANAGED_PREFIX = "[Companion] "
+_COMPILED_SUFFIX_RE = re.compile(r"(?:\s+\((?:Part \d+|Domains|Keywords)\))+$")
+
+
+def extract_base_rule_name(rule_name: str) -> str:
+    """Strip MANAGED_PREFIX and compiled sub-rule suffixes from an Outlook rule name."""
+    name = rule_name or ""
+    if name.startswith(MANAGED_PREFIX):
+        name = name[len(MANAGED_PREFIX):]
+    return _COMPILED_SUFFIX_RE.sub("", name)
 
 
 @dataclass

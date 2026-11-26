@@ -5,7 +5,7 @@ import re
 from typing import List, Dict, Tuple, Optional, Any
 from datetime import datetime
 
-from core.models import EmailMessage
+from core.models import EmailMessage, MANAGED_PREFIX, extract_base_rule_name
 from core.address_resolver import resolve_outlook_sender, normalize_email
 
 IS_WINDOWS = sys.platform == "win32"
@@ -34,7 +34,13 @@ class BaseOutlookClient:
         raise NotImplementedError
     def get_native_rules(self) -> List[Dict[str, Any]]:
         raise NotImplementedError
-    def save_native_rules(self, rules_data: List[Dict[str, Any]], target_store_path: str) -> Tuple[bool, str]:
+    def save_native_rules(
+        self,
+        rules_data: List[Dict[str, Any]],
+        target_store_path: str,
+        remove_legacy: bool = False,
+        legacy_base_names: Optional[List[str]] = None,
+    ) -> Tuple[bool, str]:
         raise NotImplementedError
     def rollover_rules(self, new_store_path: str) -> Tuple[bool, str]:
         raise NotImplementedError
@@ -255,7 +261,13 @@ class WindowsOutlookClient(BaseOutlookClient):
                 current = found
         return current
 
-    def save_native_rules(self, rules_data: List[Dict[str, Any]], target_store_path: str) -> Tuple[bool, str]:
+    def save_native_rules(
+        self,
+        rules_data: List[Dict[str, Any]],
+        target_store_path: str,
+        remove_legacy: bool = False,
+        legacy_base_names: Optional[List[str]] = None,
+    ) -> Tuple[bool, str]:
         if not self._connected:
             return False, "Outlook COM not connected"
 
@@ -264,14 +276,18 @@ class WindowsOutlookClient(BaseOutlookClient):
             target_store = self._get_store_by_path_or_name(target_store_path)
             rules_col = store.GetRules()
 
-            existing_rules = {}
+            # Snapshot existing rules before any mutation/removal (COM iter skips on Remove)
+            existing_rules: Dict[str, Any] = {}
             for r in rules_col:
                 existing_rules[r.Name] = r
 
             created_count = 0
             updated_count = 0
             disabled_count = 0
+            removed_count = 0
             warnings: List[str] = []
+            valid_rules: List[Tuple[Dict[str, Any], List[str], List[str], List[str]]] = []
+            compiled_names = set()
 
             for r_info in rules_data:
                 r_name = r_info["name"]
@@ -279,7 +295,6 @@ class WindowsOutlookClient(BaseOutlookClient):
                 emails = [e for e in (r_info.get("emails") or []) if e]
                 domains = [d for d in (r_info.get("domains") or []) if d]
                 keywords = [k for k in (r_info.get("subject_keywords") or []) if k]
-                target_folder_path = r_info.get("target_folder", "")
 
                 # Safety check: never create or enable a condition-less Outlook rule
                 if not emails and not domains and not keywords:
@@ -290,6 +305,51 @@ class WindowsOutlookClient(BaseOutlookClient):
                     warnings.append(r_name)
                     continue
 
+                compiled_names.add(r_name)
+                valid_rules.append((r_info, emails, domains, keywords))
+
+            yaml_base_names = set(legacy_base_names or [])
+            if not yaml_base_names:
+                yaml_base_names = {extract_base_rule_name(name) for name in compiled_names}
+
+            managed_to_remove: List[str] = []
+            legacy_to_clean: List[str] = []
+            legacy_to_remove: List[str] = []
+            disabled_broken_legacy: List[str] = []
+
+            for existing_name, existing_rule in list(existing_rules.items()):
+                if existing_name.startswith(MANAGED_PREFIX):
+                    if existing_name not in compiled_names:
+                        managed_to_remove.append(existing_name)
+                    continue
+
+                if existing_name in compiled_names:
+                    continue
+
+                if extract_base_rule_name(existing_name) in yaml_base_names:
+                    if self._is_conditionless_move_rule(existing_rule):
+                        was_enabled = bool(getattr(existing_rule, "Enabled", False))
+                        existing_rule.Enabled = False
+                        if was_enabled:
+                            disabled_count += 1
+                            disabled_broken_legacy.append(existing_name)
+                    if remove_legacy:
+                        legacy_to_remove.append(existing_name)
+                    else:
+                        legacy_to_clean.append(existing_name)
+
+            # Collect names first, then Remove to avoid mutating COM collection while iterating
+            for name_to_remove in managed_to_remove + legacy_to_remove:
+                rules_col.Remove(name_to_remove)
+                existing_rules.pop(name_to_remove, None)
+                removed_count += 1
+
+            managed_order = 1
+            for r_info, emails, domains, keywords in valid_rules:
+                r_name = r_info["name"]
+                enabled = r_info.get("enabled", True)
+                target_folder_path = r_info.get("target_folder", "")
+
                 rule = existing_rules.get(r_name)
                 if not rule:
                     rule = rules_col.Create(r_name, 0)
@@ -299,6 +359,8 @@ class WindowsOutlookClient(BaseOutlookClient):
                     updated_count += 1
 
                 rule.Enabled = enabled
+                if not enabled:
+                    disabled_count += 1
 
                 from_cond = rule.Conditions.From
                 while from_cond.Recipients.Count > 0:
@@ -342,16 +404,45 @@ class WindowsOutlookClient(BaseOutlookClient):
                     move_act.Enabled = True
                     move_act.Folder = target_folder_obj
 
+                if r_name.startswith(MANAGED_PREFIX):
+                    try:
+                        rule.Actions.Stop.Enabled = True
+                    except Exception:
+                        pass
+                    try:
+                        rule.ExecutionOrder = managed_order
+                    except Exception:
+                        pass
+                    managed_order += 1
+
             rules_col.Save(ShowProgress=False)
-            msg = f"Successfully synced rules to Outlook (Created: {created_count}, Updated: {updated_count}"
-            if disabled_count:
-                msg += f", Disabled empty: {disabled_count}"
-            msg += ")"
+            msg = (
+                f"Successfully synced rules to Outlook "
+                f"(Created: {created_count}, Updated: {updated_count}, "
+                f"Disabled: {disabled_count}, Removed: {removed_count})"
+            )
+            if disabled_broken_legacy:
+                msg += f"\nDisabled broken condition-less legacy rules: {', '.join(disabled_broken_legacy)}"
+            if legacy_to_clean:
+                msg += f"\nLegacy rules pending cleanup: {', '.join(legacy_to_clean)}"
             if warnings:
                 msg += f"\nWarning - skipped rules with no conditions: {', '.join(warnings)}"
             return True, msg
         except Exception as ex:
             return False, f"Failed to sync rules to Outlook: {str(ex)}"
+
+    @staticmethod
+    def _is_conditionless_move_rule(rule) -> bool:
+        """Return True if rule has no conditions enabled but MoveToFolder action is enabled."""
+        try:
+            conds = rule.Conditions
+            from_on = bool(getattr(getattr(conds, "From", None), "Enabled", False))
+            sender_on = bool(getattr(getattr(conds, "SenderAddress", None), "Enabled", False))
+            subj_on = bool(getattr(getattr(conds, "Subject", None), "Enabled", False))
+            move_on = bool(getattr(getattr(rule.Actions, "MoveToFolder", None), "Enabled", False))
+            return not (from_on or sender_on or subj_on) and move_on
+        except Exception:
+            return False
 
     def rollover_rules(self, new_store_path: str) -> Tuple[bool, str]:
         if not self._connected:
@@ -542,8 +633,37 @@ class MockOutlookClient(BaseOutlookClient):
     def get_native_rules(self) -> List[Dict[str, Any]]:
         return self._rules
 
-    def save_native_rules(self, rules_data: List[Dict[str, Any]], target_store_path: str) -> Tuple[bool, str]:
-        self._rules = []
+    def save_native_rules(
+        self,
+        rules_data: List[Dict[str, Any]],
+        target_store_path: str,
+        remove_legacy: bool = False,
+        legacy_base_names: Optional[List[str]] = None,
+    ) -> Tuple[bool, str]:
+        yaml_base_names = set(legacy_base_names or [])
+        compiled_names = {r["name"] for r in rules_data}
+        if not yaml_base_names:
+            yaml_base_names = {extract_base_rule_name(name) for name in compiled_names}
+
+        preserved_rules = []
+        legacy_to_clean = []
+        removed_count = 0
+        for old_r in self._rules:
+            old_name = old_r.get("name", "")
+            if old_name.startswith(MANAGED_PREFIX):
+                if old_name not in compiled_names:
+                    removed_count += 1
+                continue
+            if old_name in compiled_names:
+                continue
+            if extract_base_rule_name(old_name) in yaml_base_names:
+                if remove_legacy:
+                    removed_count += 1
+                    continue
+                legacy_to_clean.append(old_name)
+            preserved_rules.append(old_r)
+
+        new_rules = []
         warnings = []
         for r in rules_data:
             emails = [e for e in (r.get("emails") or []) if e]
@@ -552,7 +672,7 @@ class MockOutlookClient(BaseOutlookClient):
             if not emails and not domains and not keywords:
                 warnings.append(r["name"])
                 continue
-            self._rules.append({
+            new_rules.append({
                 "name": r["name"],
                 "enabled": r.get("enabled", True),
                 "target_folder": f"{target_store_path}\\{r.get('target_folder', '')}",
@@ -560,7 +680,10 @@ class MockOutlookClient(BaseOutlookClient):
                 "domains": domains,
                 "subject_keywords": keywords,
             })
-        msg = f"Mock: Successfully synced {len(self._rules)} rules to Outlook"
+        self._rules = new_rules + preserved_rules
+        msg = f"Mock: Successfully synced {len(new_rules)} rules to Outlook (Removed: {removed_count})"
+        if legacy_to_clean:
+            msg += f"\nLegacy rules pending cleanup: {', '.join(legacy_to_clean)}"
         if warnings:
             msg += f"\nWarning - skipped rules with no conditions: {', '.join(warnings)}"
         return True, msg

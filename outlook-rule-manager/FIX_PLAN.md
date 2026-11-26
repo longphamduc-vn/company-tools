@@ -181,3 +181,27 @@ Sau mỗi phase, agent báo lại: commit hash, danh sách file đổi, output `
   - `split_rule_recipients` khi `emails` và `domains` đều rỗng trả về `[]` thay vì `[(rule_name, [], [])]`, giúp đồng bộ với quy tắc "chỉ tạo loại nào có dữ liệu" và tránh phát sinh sub-rule rỗng.
   - Ngoài dòng 716 ở `gui/triage_view.py`, bỏ thêm heuristic trùng lặp ở dòng 872-873 trong dialog tạo rule của cùng file để đảm bảo mặc định luôn là `"email"` ở mọi luồng tạo rule trên Triage.
   - Cập nhật thêm `MockOutlookClient.save_native_rules` để nhất quán chốt chặn an toàn và lưu đủ `domains`/`subject_keywords`.
+
+### Tiền Phase 2 — Tolerance cho gán mảng rỗng (`4aef27a`)
+- **Đã làm:**
+  - `core/outlook_client.py` (`WindowsOutlookClient.save_native_rules`): giữ bắt buộc `Enabled = False` cho condition rỗng, bọc `sender_cond.Address = []` và `subj_cond.Text = []` trong `try/except` riêng để không làm hỏng cả lần sync nếu Outlook COM từ chối gán mảng rỗng.
+  - `tests/test_phase1_rules.py`: thêm test `test_empty_array_assignment_error_does_not_fail_sync` (`26 passed`).
+
+### Phase 2 — Sync quản lý vòng đời rule
+- **Đã làm:**
+  - `core/models.py`: thêm `MANAGED_PREFIX = "[Companion] "` và helper `extract_base_rule_name`.
+  - `core/sync_engine.py`:
+    - `SyncEngine.push_to_outlook(remove_legacy: bool = False)`: gắn `MANAGED_PREFIX` cho mọi rule compile; vẫn compile rule YAML có `enabled=False`; sắp xếp thứ tự sub-rule theo `email -> domain -> keyword -> _Unclassified` cuối cùng; truyền `legacy_base_names` để dọn/migration.
+    - Thêm `SyncEngine.find_legacy_rules()` để liệt kê rule cũ không prefix trùng tên rule YAML (hoặc `(Part N)`).
+    - Cập nhật `match_message` và docstring theo đúng thứ tự `ExecutionOrder` (gồm check `rule.enabled` cho `_Unclassified`).
+  - `core/outlook_client.py` (`WindowsOutlookClient.save_native_rules` & `MockOutlookClient.save_native_rules`):
+    - Reconcile rule managed: tạo/cập nhật rule trong `rules_data`, gom tên các rule `[Companion] ...` thừa trước rồi mới gọi `rules_col.Remove`, không đụng vào rule không prefix của người dùng, trả về đủ số lượng `Created / Updated / Disabled / Removed`.
+    - Set `Actions.Stop.Enabled = True` và `ExecutionOrder` tăng dần trên mọi rule managed.
+    - Migration rule không prefix trùng tên rule YAML (hoặc hậu tố split): giữ nguyên khi `remove_legacy=False` (chỉ xóa khi `remove_legacy=True`); riêng rule không prefix **không có condition nào bật** (`From`/`SenderAddress`/`Subject` đều `Enabled = False`) nhưng có `MoveToFolder` bật thì **tắt ngay (`Enabled = False`)** trong lần sync và nêu tên trong message.
+  - `core/conflict_detector.py`: dùng `extract_base_rule_name` để khớp tên YAML với tên Outlook sau khi bỏ `MANAGED_PREFIX` và hậu tố `(Part N)`/`(Domains)`/`(Keywords)`.
+  - `gui/main_window.py` (`_sync_to_outlook`): kiểm tra `find_legacy_rules()`, hỏi người dùng một lần kèm danh sách tên, rồi gọi `push_to_outlook(remove_legacy=True)` nếu đồng ý.
+  - `tests/test_phase1_rules.py`: cập nhật tên kỳ vọng có `MANAGED_PREFIX` cho 2 test gọi `SyncEngine.push_to_outlook()`.
+  - `tests/test_phase2_lifecycle.py`: thêm 8 test kiểm tra rút gọn part, xóa/đổi tên rule, rule `enabled=False`, rule người dùng tự tạo không bị đụng, `ExecutionOrder` + `Stop.Enabled`, tắt ngay rule legacy không condition + xóa qua `remove_legacy`, `ConflictDetector`, và prompt GUI `MainWindow._sync_to_outlook`.
+- **Lệch plan & lý do:**
+  - `extract_base_rule_name` xử lý đồng nhất cả `(Part N)`, `(Domains)`, `(Keywords)` khi nhận diện tên rule legacy và trong `ConflictDetector`, tránh bỏ sót sub-rule tách theo domain/keyword hoặc báo trùng lặp `SENDER_OVERLAP` ở `ConflictDetector`.
+  - Ở `gui/main_window.py`, kiểm tra danh sách rule legacy qua `find_legacy_rules()` trước khi gọi `push_to_outlook(remove_legacy=...)` để chỉ chạy sync Outlook một lần thay vì hai lần (vẫn hỏi người dùng đúng một lần kèm danh sách tên).

@@ -6,7 +6,7 @@ import tkinter as tk
 import unittest
 from datetime import datetime
 
-from core.models import EmailMessage, RuleConfig
+from core.models import EmailMessage, MANAGED_PREFIX, RuleConfig
 from core.outlook_client import MockOutlookClient, WindowsOutlookClient
 from core.rule_splitter import split_rule_recipients
 from core.sync_engine import SyncEngine
@@ -107,7 +107,7 @@ class TestSaveNativeRulesWithFakes(unittest.TestCase):
         rules = list(self.default_store.GetRules())
         self.assertEqual(len(rules), 1)
         rule = rules[0]
-        self.assertEqual(rule.Name, "Omron Domain (Domains)")
+        self.assertEqual(rule.Name, f"{MANAGED_PREFIX}Omron Domain (Domains)")
         self.assertTrue(rule.Conditions.SenderAddress.Enabled)
         self.assertEqual(rule.Conditions.SenderAddress.Address, ["@omron.com"])
         self.assertFalse(rule.Conditions.From.Enabled)
@@ -168,25 +168,29 @@ class TestSaveNativeRulesWithFakes(unittest.TestCase):
         rules = {r.Name: r for r in self.default_store.GetRules()}
         self.assertEqual(
             set(rules.keys()),
-            {"Mixed Rule", "Mixed Rule (Domains)", "Mixed Rule (Keywords)"},
+            {
+                f"{MANAGED_PREFIX}Mixed Rule",
+                f"{MANAGED_PREFIX}Mixed Rule (Domains)",
+                f"{MANAGED_PREFIX}Mixed Rule (Keywords)",
+            },
         )
 
         # Email sub-rule
-        r_email = rules["Mixed Rule"]
+        r_email = rules[f"{MANAGED_PREFIX}Mixed Rule"]
         self.assertTrue(r_email.Conditions.From.Enabled)
         self.assertEqual([rec.Address for rec in r_email.Conditions.From.Recipients], ["lead@omron.com"])
         self.assertFalse(r_email.Conditions.SenderAddress.Enabled)
         self.assertFalse(r_email.Conditions.Subject.Enabled)
 
         # Domain sub-rule
-        r_dom = rules["Mixed Rule (Domains)"]
+        r_dom = rules[f"{MANAGED_PREFIX}Mixed Rule (Domains)"]
         self.assertFalse(r_dom.Conditions.From.Enabled)
         self.assertTrue(r_dom.Conditions.SenderAddress.Enabled)
         self.assertEqual(r_dom.Conditions.SenderAddress.Address, ["@omron.com"])
         self.assertFalse(r_dom.Conditions.Subject.Enabled)
 
         # Keyword sub-rule
-        r_kw = rules["Mixed Rule (Keywords)"]
+        r_kw = rules[f"{MANAGED_PREFIX}Mixed Rule (Keywords)"]
         self.assertFalse(r_kw.Conditions.From.Enabled)
         self.assertFalse(r_kw.Conditions.SenderAddress.Enabled)
         self.assertTrue(r_kw.Conditions.Subject.Enabled)

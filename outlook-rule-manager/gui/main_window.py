@@ -131,14 +131,26 @@ class MainWindow(tk.Tk):
     def _sync_to_outlook(self):
         confirm = messagebox.askyesno(
             "Sync to Outlook",
-            "This will apply all enabled rules and groups from rules.yaml directly into Outlook native rules.\n\n"
+            "This will apply all rules and groups from rules.yaml directly into Outlook native rules.\n\n"
             "Proceed?",
             icon=messagebox.QUESTION
         )
         if not confirm:
             return
 
-        success, msg = self.sync_engine.push_to_outlook()
+        remove_legacy = False
+        legacy_rules = self.sync_engine.find_legacy_rules()
+        if legacy_rules:
+            listed = "\n".join(f"• {name}" for name in legacy_rules)
+            remove_legacy = messagebox.askyesno(
+                "Legacy Outlook Rules Found",
+                "The following legacy Outlook rules (without [Companion] prefix) match rules in rules.yaml:\n\n"
+                f"{listed}\n\n"
+                "Do you want to remove these legacy rules after syncing?",
+                icon=messagebox.QUESTION
+            )
+
+        success, msg = self.sync_engine.push_to_outlook(remove_legacy=remove_legacy)
         if success:
             messagebox.showinfo("Sync Success", msg)
         else:
