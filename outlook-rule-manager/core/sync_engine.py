@@ -42,6 +42,7 @@ class SyncEngine:
         keyword_subrules: List[Dict[str, Any]] = []
         unclassified_subrules: List[Dict[str, Any]] = []
         skipped_empty_rules: List[str] = []
+        skipped_no_folder_rules: List[str] = []
 
         for rule in self.yaml_mgr.rules:
             is_unclassified = self._is_unclassified_rule(rule)
@@ -58,6 +59,10 @@ class SyncEngine:
 
             if not emails and not domains and not keywords:
                 skipped_empty_rules.append(rule.name)
+                continue
+
+            if not (rule.target_folder or "").strip():
+                skipped_no_folder_rules.append(rule.name)
                 continue
 
             # Compile each condition type separately to preserve OR semantics in Outlook
@@ -104,6 +109,8 @@ class SyncEngine:
         )
         if skipped_empty_rules:
             msg += f"\nWarning - skipped rules with no conditions: {', '.join(skipped_empty_rules)}"
+        if skipped_no_folder_rules:
+            msg += f"\nWarning - skipped rules without target folder: {', '.join(skipped_no_folder_rules)}"
         return success, msg
 
     def perform_rollover(self, new_store_name: str, new_store_path: str) -> Tuple[bool, str]:

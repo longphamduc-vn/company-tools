@@ -283,3 +283,11 @@ Sau mỗi phase, agent báo lại: commit hash, danh sách file đổi, output `
   - `gui/conflict_dialog.py`: cảnh báo rõ các rule có `has_unsupported_conditions` được import ở trạng thái TẮT (`DISABLED`), cần xem lại rồi mới bật; chuẩn hóa câu hỏi xóa thành `"Remove the original Outlook rules for the clean imports listed below?"` và chỉ truyền `remove_legacy_names=[r.rule_name for r in clean_imports]`.
   - `tests/test_phase5_conflict_import.py`: bổ sung & cập nhật test cho `SenderAddress` hợp lệ vs chuỗi con không phải domain, `MessageHeader=15`, `From+Subject` import `enabled=False` và sau `push_to_outlook()` rule `[Companion]` vẫn disabled, và test xóa có mục tiêu (1 rule sạch + 1 rule có vấn đề + 1 rule legacy khác trùng tên YAML -> chỉ rule sạch bị xóa).
 - **Lệch plan & lý do:** Không có.
+
+### Final review fixes
+- **Đã làm:**
+  - `core/outlook_client.py` (`WindowsOutlookClient.save_native_rules`): khi snapshot `rules_col`, gom theo `name -> list[(1-based idx, rule)]`; nếu tên có prefix `[Companion] ` xuất hiện nhiều lần thì giữ bản đầu tiên để cập nhật và đưa chỉ số các bản dư vào `indices_to_remove` để xóa theo thứ tự giảm dần (tránh `Remove(name)` xóa nhầm bản đầu); không bao giờ xóa rule không prefix vì trùng tên, và đếm `unprefixed_remaining` chính xác theo từng object rule còn lại.
+  - `core/sync_engine.py` (`SyncEngine.push_to_outlook`): bỏ qua các rule YAML có `target_folder` rỗng và ghi vào cảnh báo `"skipped rules without target folder"`.
+  - `tests/test_phase2_lifecycle.py`: thêm test cho 2 rule `"[Companion] X"` (cộng 2 rule người dùng trùng tên) và test cho rule thiếu `target_folder`.
+  - Đưa `tools/outlook_probe.py` vào commit (giữ nguyên nội dung).
+- **Lệch plan & lý do:** Không có.

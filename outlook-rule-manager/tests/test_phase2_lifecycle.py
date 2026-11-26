@@ -370,3 +370,73 @@ class TestPhase2LifecycleAndReconcile(unittest.TestCase):
         mock_info.assert_called_once()
         self.assertNotIn("Executive Board", {r.Name for r in self.default_store.GetRules()})
         self.assertIn(f"{MANAGED_PREFIX}Executive Board", {r.Name for r in self.default_store.GetRules()})
+
+    def test_duplicate_managed_rules_keep_first_and_remove_extras_without_touching_duplicate_user_rules(self):
+        # Two managed rules with same name + two unprefixed user rules with same name
+        dup_m1 = FakeRule(f"{MANAGED_PREFIX}X", enabled=True)
+        dup_m1.Conditions.From.Enabled = True
+        dup_m1.Conditions.From.Recipients.Add("old1@vendor.com")
+
+        user_dup1 = FakeRule("Personal", enabled=True, execution_order=1)
+        user_dup1.Conditions.From.Enabled = True
+        user_dup1.Conditions.From.Recipients.Add("u1@gmail.com")
+
+        dup_m2 = FakeRule(f"{MANAGED_PREFIX}X", enabled=True)
+        dup_m2.Conditions.From.Enabled = True
+        dup_m2.Conditions.From.Recipients.Add("old2@vendor.com")
+
+        user_dup2 = FakeRule("Personal", enabled=True, execution_order=2)
+        user_dup2.Conditions.From.Enabled = True
+        user_dup2.Conditions.From.Recipients.Add("u2@gmail.com")
+
+        self.default_store.GetRules()._rules.extend([dup_m1, user_dup1, dup_m2, user_dup2])
+
+        self.yaml_mgr.rules = [
+            RuleConfig(
+                id="rx",
+                name="X",
+                enabled=True,
+                emails=["fresh@vendor.com"],
+                target_folder="Vendors",
+            )
+        ]
+        ok, msg = self.sync_engine.push_to_outlook()
+        self.assertTrue(ok, msg)
+
+        rules = list(self.default_store.GetRules())
+        managed_x = [r for r in rules if r.Name == f"{MANAGED_PREFIX}X"]
+        personal_rules = [r for r in rules if r.Name == "Personal"]
+
+        # Exactly 1 "[Companion] X" remains (the first one updated), both user rules untouched
+        self.assertEqual(len(managed_x), 1)
+        self.assertIs(managed_x[0], dup_m1)
+        self.assertEqual([rec.Address for rec in managed_x[0].Conditions.From.Recipients], ["fresh@vendor.com"])
+        self.assertEqual(managed_x[0].ExecutionOrder, 3)  # after 2 unprefixed user rules
+        self.assertEqual(len(personal_rules), 2)
+        self.assertIn("Removed: 1", msg)
+
+    def test_push_to_outlook_skips_rule_without_target_folder_and_warns(self):
+        self.yaml_mgr.rules = [
+            RuleConfig(
+                id="r_no_fld",
+                name="Missing Folder Rule",
+                enabled=True,
+                emails=["someone@vendor.com"],
+                target_folder="",
+            ),
+            RuleConfig(
+                id="r_ok",
+                name="Valid Rule",
+                enabled=True,
+                emails=["valid@vendor.com"],
+                target_folder="Vendors",
+            ),
+        ]
+
+        ok, msg = self.sync_engine.push_to_outlook()
+        self.assertTrue(ok, msg)
+
+        names = [r.Name for r in self.default_store.GetRules()]
+        self.assertEqual(names, [f"{MANAGED_PREFIX}Valid Rule"])
+        self.assertIn("skipped rules without target folder", msg)
+        self.assertIn("Missing Folder Rule", msg)

@@ -405,10 +405,13 @@ class WindowsOutlookClient(BaseOutlookClient):
                 return False, f"Target store not found: {target_store_path}"
             rules_col = store.GetRules()
 
-            # Snapshot existing rules before any mutation/removal (COM iter skips on Remove)
-            existing_rules: Dict[str, Any] = {}
-            for r in rules_col:
-                existing_rules[r.Name] = r
+            # Snapshot existing rules grouped by name (1-based index, rule) before any mutation
+            existing_rules_map: Dict[str, List[Tuple[int, Any]]] = {}
+            for idx, r in enumerate(rules_col, start=1):
+                existing_rules_map.setdefault(r.Name, []).append((idx, r))
+            existing_rules: Dict[str, Any] = {
+                name: entries[0][1] for name, entries in existing_rules_map.items()
+            }
 
             created_count = 0
             updated_count = 0
@@ -443,15 +446,20 @@ class WindowsOutlookClient(BaseOutlookClient):
                 yaml_base_names = {extract_base_rule_name(name) for name in compiled_names}
 
             target_legacy_names = set(remove_legacy_names) if remove_legacy_names is not None else None
-            managed_to_remove: List[str] = []
+            indices_to_remove: List[int] = []
             legacy_to_clean: List[str] = []
-            legacy_to_remove: List[str] = []
             disabled_broken_legacy: List[str] = []
 
-            for existing_name, existing_rule in list(existing_rules.items()):
+            for existing_name, entries in list(existing_rules_map.items()):
                 if existing_name.startswith(MANAGED_PREFIX):
                     if existing_name not in compiled_names:
-                        managed_to_remove.append(existing_name)
+                        for idx, _ in entries:
+                            indices_to_remove.append(idx)
+                        existing_rules.pop(existing_name, None)
+                    elif len(entries) > 1:
+                        # Keep first managed rule for update; remove duplicate copies by index
+                        for idx, _ in entries[1:]:
+                            indices_to_remove.append(idx)
                     continue
 
                 if existing_name in compiled_names:
@@ -459,27 +467,33 @@ class WindowsOutlookClient(BaseOutlookClient):
 
                 is_yaml_legacy = extract_base_rule_name(existing_name) in yaml_base_names
                 if target_legacy_names is not None and existing_name in target_legacy_names:
-                    legacy_to_remove.append(existing_name)
+                    for idx, _ in entries:
+                        indices_to_remove.append(idx)
                 elif is_yaml_legacy:
-                    if self._is_conditionless_move_rule(existing_rule):
-                        was_enabled = bool(getattr(existing_rule, "Enabled", False))
-                        existing_rule.Enabled = False
-                        if was_enabled:
-                            disabled_count += 1
-                            disabled_broken_legacy.append(existing_name)
-                    if target_legacy_names is None and remove_legacy:
-                        legacy_to_remove.append(existing_name)
-                    else:
-                        legacy_to_clean.append(existing_name)
+                    for idx, existing_rule in entries:
+                        if self._is_conditionless_move_rule(existing_rule):
+                            was_enabled = bool(getattr(existing_rule, "Enabled", False))
+                            existing_rule.Enabled = False
+                            if was_enabled:
+                                disabled_count += 1
+                                disabled_broken_legacy.append(existing_name)
+                        if target_legacy_names is None and remove_legacy:
+                            indices_to_remove.append(idx)
+                        else:
+                            legacy_to_clean.append(existing_name)
 
-            # Collect names first, then Remove to avoid mutating COM collection while iterating
-            for name_to_remove in managed_to_remove + legacy_to_remove:
-                rules_col.Remove(name_to_remove)
-                existing_rules.pop(name_to_remove, None)
+            # Remove from highest 1-based index down so earlier indices (and kept rules) stay valid
+            for idx_to_remove in sorted(indices_to_remove, reverse=True):
+                rules_col.Remove(idx_to_remove)
                 removed_count += 1
 
+            removed_index_set = set(indices_to_remove)
             unprefixed_remaining = sum(
-                1 for name in existing_rules if not name.startswith(MANAGED_PREFIX)
+                1
+                for name, entries in existing_rules_map.items()
+                if not name.startswith(MANAGED_PREFIX)
+                for idx, _ in entries
+                if idx not in removed_index_set
             )
             managed_order = 1
             for r_info, emails, domains, keywords in valid_rules:
