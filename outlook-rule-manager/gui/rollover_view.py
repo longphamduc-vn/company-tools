@@ -7,6 +7,7 @@ from typing import Dict, List, Any
 from core.yaml_manager import YamlConfigManager
 from core.outlook_client import BaseOutlookClient
 from core.sync_engine import SyncEngine
+from core.rollover_suggest import suggest_rollover_target
 
 
 class RolloverView(ttk.Frame):
@@ -18,7 +19,12 @@ class RolloverView(ttk.Frame):
         self.outlook = outlook
         self.sync_engine = sync_engine
 
+        self.var_new_name = tk.StringVar()
+        self.var_new_path = tk.StringVar()
+        self._rollover_fields_initialized: bool = False
+
         self._build_ui()
+        self.var_new_path.trace_add("write", self._update_rollover_button_state)
         self.refresh_view()
 
     def _build_ui(self):
@@ -110,25 +116,80 @@ class RolloverView(ttk.Frame):
         grid_new.pack(fill=tk.X)
 
         ttk.Label(grid_new, text="New Store Name:").grid(row=0, column=0, sticky=tk.W, pady=3)
-        self.ent_new_name = ttk.Entry(grid_new, width=32)
+        self.ent_new_name = ttk.Entry(grid_new, textvariable=self.var_new_name, width=32)
         self.ent_new_name.grid(row=0, column=1, sticky=tk.W, padx=6, pady=3)
 
         ttk.Label(grid_new, text="PST File Path:").grid(row=1, column=0, sticky=tk.W, pady=3)
         path_box = ttk.Frame(grid_new)
         path_box.grid(row=1, column=1, sticky=tk.EW, padx=6, pady=3)
 
-        self.ent_new_path = ttk.Entry(path_box, width=24)
+        self.ent_new_path = ttk.Entry(path_box, textvariable=self.var_new_path, width=24)
         self.ent_new_path.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         btn_browse = ttk.Button(path_box, text="Browse", command=self._browse_pst)
         btn_browse.pack(side=tk.LEFT, padx=2)
 
-        btn_rollover = ttk.Button(
+        ttk.Label(
             frame_new,
+            text="Tip: open the new PST in Outlook first (File > Open > Outlook Data File), then select it in the table above.",
+            foreground="#475569",
+            wraplength=380,
+            font=("", 8),
+        ).pack(anchor=tk.W, pady=(6, 2))
+
+        action_row = ttk.Frame(frame_new)
+        action_row.pack(fill=tk.X, pady=(4, 2))
+
+        self.lbl_rollover_hint = ttk.Label(
+            action_row,
+            text="",
+            foreground="#64748b",
+            wraplength=240,
+            font=("", 8),
+        )
+        self.lbl_rollover_hint.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.btn_rollover = ttk.Button(
+            action_row,
             text="Execute 1-Click Rollover",
             command=self._execute_rollover
         )
-        btn_rollover.pack(anchor=tk.E, pady=(8, 2))
+        self.btn_rollover.pack(side=tk.RIGHT)
+
+    def _update_rollover_button_state(self, *_args):
+        new_path = self.var_new_path.get().strip()
+        active = self.yaml_mgr.stores.get("active_archive")
+        cur_path = active.file_path.strip() if active and active.file_path else ""
+
+        if not new_path:
+            self.btn_rollover.config(state=tk.DISABLED)
+            self.lbl_rollover_hint.config(
+                text="Enter or select a mounted PST path to enable rollover.",
+                foreground="#64748b",
+            )
+            return
+
+        if cur_path and os.path.normcase(os.path.normpath(new_path)) == os.path.normcase(os.path.normpath(cur_path)):
+            self.btn_rollover.config(state=tk.DISABLED)
+            self.lbl_rollover_hint.config(
+                text="Disabled: selected path matches current active archive.",
+                foreground="#ea580c",
+            )
+            return
+
+        if not self.outlook.store_exists(new_path):
+            self.btn_rollover.config(state=tk.DISABLED)
+            self.lbl_rollover_hint.config(
+                text="Disabled: store is not currently open/mounted in Outlook.",
+                foreground="#dc2626",
+            )
+            return
+
+        self.btn_rollover.config(state=tk.NORMAL)
+        self.lbl_rollover_hint.config(
+            text="Ready to rollover to selected Outlook store.",
+            foreground="#16a34a",
+        )
 
     def refresh_view(self):
         # Update Active Store info
@@ -137,20 +198,31 @@ class RolloverView(ttk.Frame):
             self.lbl_cur_name.config(text=active.name)
             self.lbl_cur_path.config(text=active.file_path or "(Default Mailbox)")
 
-            if active.file_path and os.path.exists(active.file_path):
+            if not active.file_path:
+                self.lbl_cur_size.config(text="No PST file path configured", foreground="#64748b")
+            elif not os.path.exists(active.file_path):
+                self.lbl_cur_size.config(text="[MISSING] File not found on disk", foreground="#dc2626")
+            elif not self.outlook.store_exists(active.file_path):
+                self.lbl_cur_size.config(
+                    text="[NOT MOUNTED] File exists but is not open in Outlook",
+                    foreground="#ea580c",
+                )
+            else:
                 size_gb = round(os.path.getsize(active.file_path) / (1024 ** 3), 2)
                 if size_gb >= 35:
                     status = f"[CRITICAL] {size_gb} GB (Rollover Recommended)"
+                    color = "#dc2626"
                 elif size_gb >= 25:
                     status = f"[WARNING] {size_gb} GB (Large size)"
+                    color = "#ea580c"
                 else:
                     status = f"[OK] {size_gb} GB (Healthy)"
-                self.lbl_cur_size.config(text=status)
-            else:
-                self.lbl_cur_size.config(text="File managed by Outlook")
+                    color = "#16a34a"
+                self.lbl_cur_size.config(text=status, foreground=color)
         else:
             self.lbl_cur_name.config(text="None")
             self.lbl_cur_path.config(text="-")
+            self.lbl_cur_size.config(text="-", foreground="#64748b")
 
         # Scan and populate all mounted stores
         self.tree_stores.delete(*self.tree_stores.get_children())
@@ -167,15 +239,22 @@ class RolloverView(ttk.Frame):
                 values=(s["name"], size_txt, s.get("file_path", "(Primary Mailbox)"), folders_txt)
             )
 
-        # Smart Default for Rollover (Account Tagged)
-        user_clean = self.outlook.get_current_user_account().split("@")[0].replace(".", "_")
-        suggested_name = f"{user_clean}_Archive_2025"
-        self.ent_new_name.delete(0, tk.END)
-        self.ent_new_name.insert(0, suggested_name)
+        # Smart next-year suggestion: fill only on first load or when field is empty
+        suggested_name, suggested_path = suggest_rollover_target(
+            active.name if active else "",
+            active.file_path if active else "",
+        )
+        if not self._rollover_fields_initialized:
+            self.var_new_name.set(suggested_name)
+            self.var_new_path.set(suggested_path)
+            self._rollover_fields_initialized = True
+        else:
+            if not self.var_new_name.get().strip() and suggested_name:
+                self.var_new_name.set(suggested_name)
+            if not self.var_new_path.get().strip() and suggested_path:
+                self.var_new_path.set(suggested_path)
 
-        suggested_path = f"C:\\Outlook_Data\\{user_clean}_Archive_2025.pst"
-        self.ent_new_path.delete(0, tk.END)
-        self.ent_new_path.insert(0, suggested_path)
+        self._update_rollover_button_state()
 
     def _on_store_selected(self, event):
         sel = self.tree_stores.selection()
@@ -233,6 +312,7 @@ class RolloverView(ttk.Frame):
             if self.outlook.is_simulated():
                 msg = f"[SIMULATION] No changes were made to Outlook.\n\n{msg}"
             messagebox.showinfo("Rollover Complete", msg)
+            self._rollover_fields_initialized = False
             self.refresh_view()
         else:
             messagebox.showerror("Rollover Failed", msg)

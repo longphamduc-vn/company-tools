@@ -4,7 +4,7 @@ import shutil
 import glob
 import re
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 import yaml
 
 from core.models import StoreConfig, AddressGroup, RuleConfig
@@ -108,6 +108,21 @@ class YamlConfigManager:
     def normalize_domains(cls, domains: List[str]) -> List[str]:
         """Normalize a list of domains and drop empty entries."""
         return [d for d in (cls.normalize_domain(x) for x in (domains or [])) if d]
+
+    @staticmethod
+    def normalize_keywords(keywords: Iterable[str]) -> List[str]:
+        """Strip whitespace, drop empty items, and deduplicate case-insensitively keeping first spelling."""
+        seen: Set[str] = set()
+        result: List[str] = []
+        for raw in keywords or []:
+            kw = str(raw).strip()
+            if not kw:
+                continue
+            key = kw.lower()
+            if key not in seen:
+                seen.add(key)
+                result.append(kw)
+        return result
 
     def _create_backup_file(self) -> None:
         """Create a unique microsecond-timestamped backup copy and prune old backups."""

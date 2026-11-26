@@ -276,15 +276,26 @@ class RuleManagerView(ttk.Frame):
         self.chk_rule_enabled = ttk.Checkbutton(row1, text="Active in Outlook", variable=self.var_rule_enabled)
         self.chk_rule_enabled.pack(side=tk.RIGHT)
 
-        # Quota meter
+        # Quota meter (live compiled preview)
         self.lbl_quota = tk.Label(
             card_header,
-            text="Outlook Quota: 4 / 40 recipients (1 native sub-rule) - OK",
+            text="Outlook: 0 senders, 0 domains, 0 keywords → 0 native rule(s)",
             bg="#ffffff",
             fg="#16a34a",
             font=("", 8, "bold")
         )
         self.lbl_quota.pack(anchor=tk.W, pady=(6, 0))
+
+        self.lbl_quota_subrules = tk.Label(
+            card_header,
+            text="",
+            bg="#ffffff",
+            fg="#475569",
+            font=("", 8),
+            wraplength=540,
+            justify=tk.LEFT,
+        )
+        self.lbl_quota_subrules.pack(anchor=tk.W, pady=(2, 0))
 
         # Pack bottom footer & tester strip BEFORE middle scrollable content so they never overflow off-screen
         # 5. Rule Action Footer
@@ -306,14 +317,18 @@ class RuleManagerView(ttk.Frame):
         tester_strip.pack(fill=tk.X, side=tk.BOTTOM, pady=(0, 6))
 
         tk.Label(tester_strip, text="Test Match:", bg="#f8fafc", font=("", 8, "bold"), fg="#475569").pack(side=tk.LEFT, padx=(0, 4))
-        self.ent_test_match = ttk.Entry(tester_strip, width=24)
-        self.ent_test_match.pack(side=tk.LEFT, padx=2)
+        tk.Label(tester_strip, text="Email:", bg="#f8fafc", font=("", 8), fg="#475569").pack(side=tk.LEFT)
+        self.ent_test_match = ttk.Entry(tester_strip, width=18)
+        self.ent_test_match.pack(side=tk.LEFT, padx=(2, 6))
+        tk.Label(tester_strip, text="Subject:", bg="#f8fafc", font=("", 8), fg="#475569").pack(side=tk.LEFT)
+        self.ent_test_subject = ttk.Entry(tester_strip, width=16)
+        self.ent_test_subject.pack(side=tk.LEFT, padx=(2, 4))
         ttk.Button(tester_strip, text="Check", command=self._test_rule_match).pack(side=tk.LEFT, padx=2)
         self.lbl_test_result = tk.Label(tester_strip, text="", bg="#f8fafc", font=("", 8, "bold"))
         self.lbl_test_result.pack(side=tk.LEFT, padx=6)
 
         # 3. Recipients & Conditions Notebook / Scrollable Mode Switcher
-        card_cond = tk.LabelFrame(self.frame_rule, text="Filter Conditions (Emails & Domains)", bg="#ffffff", padx=8, pady=8)
+        card_cond = tk.LabelFrame(self.frame_rule, text="Filter Conditions", bg="#ffffff", padx=8, pady=8)
         card_cond.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
 
         self.rule_scroll_canvas, rule_cond_body = self._create_scrollable_section(card_cond, bg="#ffffff")
@@ -387,6 +402,22 @@ class RuleManagerView(ttk.Frame):
         self.lst_domains = tk.Listbox(frame_vis_domains, font=("Consolas", 9), height=3, selectmode=tk.EXTENDED)
         self.lst_domains.pack(fill=tk.X)
 
+        # Visual Subject Keywords
+        frame_vis_keywords = tk.Frame(self.box_visual, bg="#ffffff")
+        frame_vis_keywords.pack(fill=tk.X, pady=(6, 2))
+
+        row_add_kw = tk.Frame(frame_vis_keywords, bg="#ffffff")
+        row_add_kw.pack(fill=tk.X, pady=(0, 2))
+        tk.Label(row_add_kw, text="Subject Keywords:", bg="#ffffff", font=("", 8, "bold"), fg="#475569").pack(side=tk.LEFT)
+        self.ent_add_keyword = ttk.Entry(row_add_kw, width=20)
+        self.ent_add_keyword.pack(side=tk.LEFT, padx=4)
+        self.ent_add_keyword.bind("<Return>", lambda e: self._add_keyword_chip())
+        ttk.Button(row_add_kw, text="+ Add Keyword", command=self._add_keyword_chip).pack(side=tk.LEFT)
+        ttk.Button(row_add_kw, text="Remove Selected", command=self._remove_keyword_chip).pack(side=tk.RIGHT)
+
+        self.lst_keywords = tk.Listbox(frame_vis_keywords, font=("Consolas", 9), height=3, selectmode=tk.EXTENDED)
+        self.lst_keywords.pack(fill=tk.X)
+
         # --- B. Bulk Mode Frames ---
         self.box_bulk = tk.Frame(self.box_cond_container, bg="#ffffff")
 
@@ -397,6 +428,10 @@ class RuleManagerView(ttk.Frame):
         tk.Label(self.box_bulk, text="Domains (e.g. @omron.com, one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
         self.txt_bulk_domains = tk.Text(self.box_bulk, font=("Consolas", 9), height=3)
         self.txt_bulk_domains.pack(fill=tk.X, pady=(0, 4))
+
+        tk.Label(self.box_bulk, text="Subject Keywords (one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
+        self.txt_bulk_keywords = tk.Text(self.box_bulk, font=("Consolas", 9), height=3)
+        self.txt_bulk_keywords.pack(fill=tk.X, pady=(0, 4))
 
         self.box_visual.pack(fill=tk.BOTH, expand=True)
 
@@ -728,27 +763,12 @@ class RuleManagerView(ttk.Frame):
         self.ent_rule_name.insert(0, rule.name)
         self.var_rule_enabled.set(rule.enabled)
 
-        # Quota Meter
-        all_emails = self.yaml_mgr.get_all_emails_for_rule(rule)
-        all_domains = self.yaml_mgr.get_all_domains_for_rule(rule)
-        total_recipients = len(all_emails) + len(all_domains)
-        threshold = int(self.yaml_mgr.settings.get("auto_split_threshold", 40))
-
-        if total_recipients <= threshold:
-            self.lbl_quota.config(
-                text=f"Outlook Quota: {total_recipients} / {threshold} senders (1 native sub-rule) - OK",
-                fg="#16a34a"
-            )
-        else:
-            num_parts = (total_recipients + threshold - 1) // threshold
-            self.lbl_quota.config(
-                text=f"Outlook Quota: {total_recipients} senders exceeds {threshold} limit -> Auto-splits into {num_parts} sub-rules",
-                fg="#ea580c"
-            )
-
         # Linked Groups
         self._editing_rule_group_ids = list(rule.groups)
         self._refresh_linked_groups_listbox()
+
+        # Quota Meter (uses live editing group IDs + SyncEngine compiler)
+        self._update_rule_quota_display()
 
         # Visual Lists
         self.lst_emails.delete(0, tk.END)
@@ -759,6 +779,11 @@ class RuleManagerView(ttk.Frame):
         for d in sorted(rule.domains):
             self.lst_domains.insert(tk.END, d)
 
+        norm_keywords = YamlConfigManager.normalize_keywords(rule.subject_keywords)
+        self.lst_keywords.delete(0, tk.END)
+        for kw in norm_keywords:
+            self.lst_keywords.insert(tk.END, kw)
+
         # Bulk Texts
         self.txt_bulk_emails.delete("1.0", tk.END)
         self.txt_bulk_emails.insert(tk.END, "\n".join(sorted(rule.emails)))
@@ -766,9 +791,45 @@ class RuleManagerView(ttk.Frame):
         self.txt_bulk_domains.delete("1.0", tk.END)
         self.txt_bulk_domains.insert(tk.END, "\n".join(sorted(rule.domains)))
 
+        self.txt_bulk_keywords.delete("1.0", tk.END)
+        self.txt_bulk_keywords.insert(tk.END, "\n".join(norm_keywords))
+
         self.lbl_test_result.config(text="")
         self.ent_test_match.delete(0, tk.END)
+        self.ent_test_subject.delete(0, tk.END)
         self.rule_scroll_canvas.yview_moveto(0)
+
+    def _update_rule_quota_display(self):
+        """Update quota banner and sub-rule preview from SyncEngine without duplicating split logic."""
+        if not self.selected_rule:
+            self.lbl_quota.config(text="", fg="#475569")
+            self.lbl_quota_subrules.config(text="")
+            return
+
+        summary = self.sync_engine.get_rule_quota_summary(
+            self.selected_rule, group_ids=self._editing_rule_group_ids
+        )
+        skip_reason = summary.get("skip_reason")
+        if skip_reason == "no_conditions":
+            self.lbl_quota.config(text="⚠ No conditions — will be skipped on sync", fg="#ea580c")
+            self.lbl_quota_subrules.config(text="")
+            return
+        if skip_reason == "no_target_folder":
+            self.lbl_quota.config(text="⚠ No target folder — will be skipped on sync", fg="#ea580c")
+            self.lbl_quota_subrules.config(text="")
+            return
+
+        names = summary["native_names"]
+        color = "#16a34a" if len(names) == 1 else "#ea580c"
+        self.lbl_quota.config(
+            text=(
+                f"Outlook: {summary['email_count']} senders, "
+                f"{summary['domain_count']} domains, "
+                f"{summary['keyword_count']} keywords → {len(names)} native rule(s)"
+            ),
+            fg=color,
+        )
+        self.lbl_quota_subrules.config(text=f"Sub-rules: {', '.join(names)}")
 
     def _populate_folder_inspector(self, folder_path: str):
         self.lbl_folder_title.config(text=f"Folder: {folder_path}")
@@ -1334,15 +1395,19 @@ class RuleManagerView(ttk.Frame):
         if self.condition_mode == "visual":
             emails = [self.lst_emails.get(i).strip().lower() for i in range(self.lst_emails.size()) if self.lst_emails.get(i).strip()]
             raw_domains = [self.lst_domains.get(i) for i in range(self.lst_domains.size())]
+            raw_keywords = [self.lst_keywords.get(i) for i in range(self.lst_keywords.size())]
         else:
             emails = [l.strip().lower() for l in self.txt_bulk_emails.get("1.0", tk.END).split("\n") if l.strip()]
             raw_domains = self.txt_bulk_domains.get("1.0", tk.END).split("\n")
+            raw_keywords = self.txt_bulk_keywords.get("1.0", tk.END).split("\n")
 
         domains = YamlConfigManager.normalize_domains(raw_domains)
+        keywords = YamlConfigManager.normalize_keywords(raw_keywords)
 
         self.selected_rule.groups = list(self._editing_rule_group_ids)
         self.selected_rule.emails = sorted(list(set(emails)))
         self.selected_rule.domains = sorted(list(set(domains)))
+        self.selected_rule.subject_keywords = keywords
 
         self.yaml_mgr.save()
         self._show_toast(f"Saved rule '{name}' to rules.yaml")
@@ -1450,6 +1515,7 @@ class RuleManagerView(ttk.Frame):
                 if g_id not in self._editing_rule_group_ids:
                     self._editing_rule_group_ids.append(g_id)
             self._refresh_linked_groups_listbox()
+            self._update_rule_quota_display()
             dlg.destroy()
 
         btn_bar = ttk.Frame(dlg, padding=8)
@@ -1465,6 +1531,7 @@ class RuleManagerView(ttk.Frame):
             if 0 <= idx < len(self._editing_rule_group_ids):
                 self._editing_rule_group_ids.pop(idx)
         self._refresh_linked_groups_listbox()
+        self._update_rule_quota_display()
 
     def _set_condition_mode(self, mode: str):
         self.condition_mode = mode
@@ -1474,12 +1541,18 @@ class RuleManagerView(ttk.Frame):
             # Sync bulk text into visual lists
             emails = [l.strip().lower() for l in self.txt_bulk_emails.get("1.0", tk.END).split("\n") if l.strip()]
             domains = [l.strip().lower() for l in self.txt_bulk_domains.get("1.0", tk.END).split("\n") if l.strip()]
+            keywords = YamlConfigManager.normalize_keywords(
+                self.txt_bulk_keywords.get("1.0", tk.END).split("\n")
+            )
             self.lst_emails.delete(0, tk.END)
             for e in sorted(list(set(emails))):
                 self.lst_emails.insert(tk.END, e)
             self.lst_domains.delete(0, tk.END)
             for d in sorted(list(set(domains))):
                 self.lst_domains.insert(tk.END, d)
+            self.lst_keywords.delete(0, tk.END)
+            for kw in keywords:
+                self.lst_keywords.insert(tk.END, kw)
             self.box_bulk.pack_forget()
             self.box_visual.pack(fill=tk.BOTH, expand=True)
         else:
@@ -1488,12 +1561,21 @@ class RuleManagerView(ttk.Frame):
             # Sync visual lists into bulk text
             emails = [self.lst_emails.get(i) for i in range(self.lst_emails.size())]
             domains = [self.lst_domains.get(i) for i in range(self.lst_domains.size())]
+            keywords = [self.lst_keywords.get(i) for i in range(self.lst_keywords.size())]
             self.txt_bulk_emails.delete("1.0", tk.END)
             self.txt_bulk_emails.insert(tk.END, "\n".join(emails))
             self.txt_bulk_domains.delete("1.0", tk.END)
             self.txt_bulk_domains.insert(tk.END, "\n".join(domains))
+            self.txt_bulk_keywords.delete("1.0", tk.END)
+            self.txt_bulk_keywords.insert(tk.END, "\n".join(keywords))
             self.box_visual.pack_forget()
             self.box_bulk.pack(fill=tk.BOTH, expand=True)
+
+    @staticmethod
+    def _remove_selected_from_listbox(listbox: tk.Listbox):
+        sel = list(listbox.curselection())
+        for idx in reversed(sel):
+            listbox.delete(idx)
 
     def _add_email_chip(self):
         val = self.ent_add_email.get().strip().lower()
@@ -1505,9 +1587,7 @@ class RuleManagerView(ttk.Frame):
         self.ent_add_email.delete(0, tk.END)
 
     def _remove_email_chip(self):
-        sel = list(self.lst_emails.curselection())
-        for idx in reversed(sel):
-            self.lst_emails.delete(idx)
+        self._remove_selected_from_listbox(self.lst_emails)
 
     def _add_domain_chip(self):
         val = self.ent_add_domain.get().strip().lower()
@@ -1521,23 +1601,40 @@ class RuleManagerView(ttk.Frame):
         self.ent_add_domain.delete(0, tk.END)
 
     def _remove_domain_chip(self):
-        sel = list(self.lst_domains.curselection())
-        for idx in reversed(sel):
-            self.lst_domains.delete(idx)
+        self._remove_selected_from_listbox(self.lst_domains)
+
+    def _add_keyword_chip(self):
+        val = self.ent_add_keyword.get().strip()
+        if not val:
+            return
+        existing_lower = {self.lst_keywords.get(i).strip().lower() for i in range(self.lst_keywords.size())}
+        if val.lower() not in existing_lower:
+            self.lst_keywords.insert(tk.END, val)
+        self.ent_add_keyword.delete(0, tk.END)
+
+    def _remove_keyword_chip(self):
+        self._remove_selected_from_listbox(self.lst_keywords)
 
     def _test_rule_match(self):
         query = self.ent_test_match.get().strip().lower()
-        if not query or not self.selected_rule:
+        subj_query = self.ent_test_subject.get().strip()
+        if (not query and not subj_query) or not self.selected_rule:
             return
         all_emails = self.yaml_mgr.get_all_emails_for_rule(self.selected_rule)
         all_domains = self.yaml_mgr.get_all_domains_for_rule(self.selected_rule)
+        keywords = YamlConfigManager.normalize_keywords(self.selected_rule.subject_keywords)
 
-        if query in all_emails:
+        if query and query in all_emails:
             self.lbl_test_result.config(text="MATCH! (Exact Email)", fg="#16a34a")
-        elif any(query.endswith(d) or d.lstrip("@") in query for d in all_domains):
+        elif query and any(query.endswith(d) or d.lstrip("@") in query for d in all_domains):
             self.lbl_test_result.config(text="MATCH! (Domain Rule)", fg="#16a34a")
         else:
-            self.lbl_test_result.config(text="NO MATCH", fg="#dc2626")
+            subj_lower = subj_query.lower()
+            matched_kw = next((kw for kw in keywords if kw.lower() in subj_lower), None) if subj_lower else None
+            if matched_kw:
+                self.lbl_test_result.config(text=f"MATCH! (Subject: '{matched_kw}')", fg="#16a34a")
+            else:
+                self.lbl_test_result.config(text="NO MATCH", fg="#dc2626")
 
     # -----------------------------------------------------------------
     # FOLDER PICKER MODAL DIALOG (DYNAMIC ARBITRARY LEVELS)

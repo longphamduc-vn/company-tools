@@ -26,6 +26,93 @@ class SyncEngine:
                 legacy.append(r_name)
         return legacy
 
+    def _effective_rule(self, rule: RuleConfig, group_ids: Optional[List[str]] = None) -> RuleConfig:
+        """Return rule or a shallow view using overridden linked group IDs."""
+        if group_ids is None:
+            return rule
+        return RuleConfig(
+            id=rule.id,
+            name=rule.name,
+            enabled=rule.enabled,
+            groups=list(group_ids),
+            emails=rule.emails,
+            domains=rule.domains,
+            subject_keywords=rule.subject_keywords,
+            target_store=rule.target_store,
+            target_folder=rule.target_folder,
+        )
+
+    def _resolve_rule_conditions(self, rule: RuleConfig) -> Tuple[List[str], List[str], List[str]]:
+        """Collect resolved (emails, domains, subject_keywords) for a rule."""
+        is_unclassified = self._is_unclassified_rule(rule)
+        emails = self.yaml_mgr.get_all_emails_for_rule(rule)
+        domains = self.yaml_mgr.get_all_domains_for_rule(rule)
+        keywords = [k.strip() for k in (rule.subject_keywords or []) if k and k.strip()]
+
+        if is_unclassified:
+            emails = sorted(list(set(emails + self.yaml_mgr.unclassified_pool)))
+
+        return [e for e in emails if e], [d for d in domains if d], keywords
+
+    def _compile_single_rule(
+        self,
+        rule: RuleConfig,
+        threshold: Optional[int] = None,
+    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """Compile one YAML rule into Outlook sub-rule dicts (or return skip reason)."""
+        if threshold is None:
+            threshold = int(self.yaml_mgr.settings.get("auto_split_threshold", 40))
+
+        emails, domains, keywords = self._resolve_rule_conditions(rule)
+        if not emails and not domains and not keywords:
+            return [], "no_conditions"
+
+        if not (rule.target_folder or "").strip():
+            return [], "no_target_folder"
+
+        entries: List[Dict[str, Any]] = []
+        sub_rules = split_rule_recipients(rule.name, emails, domains, max_recipients=threshold)
+        for sub_name, email_chunk, domain_chunk in sub_rules:
+            entries.append({
+                "name": f"{MANAGED_PREFIX}{sub_name}",
+                "enabled": rule.enabled,
+                "emails": email_chunk,
+                "domains": domain_chunk,
+                "subject_keywords": [],
+                "target_folder": rule.target_folder,
+            })
+
+        if keywords:
+            entries.append({
+                "name": f"{MANAGED_PREFIX}{rule.name} (Keywords)",
+                "enabled": rule.enabled,
+                "emails": [],
+                "domains": [],
+                "subject_keywords": keywords,
+                "target_folder": rule.target_folder,
+            })
+
+        return entries, None
+
+    def preview_compiled_rules(self, rule: RuleConfig, group_ids: Optional[List[str]] = None) -> List[str]:
+        """Return ordered native Outlook rule names that push_to_outlook will create for rule."""
+        effective = self._effective_rule(rule, group_ids)
+        entries, _ = self._compile_single_rule(effective)
+        return [entry["name"] for entry in entries]
+
+    def get_rule_quota_summary(self, rule: RuleConfig, group_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Return condition counts and compiled Outlook sub-rule preview for a rule."""
+        effective = self._effective_rule(rule, group_ids)
+        emails, domains, keywords = self._resolve_rule_conditions(effective)
+        entries, skip_reason = self._compile_single_rule(effective)
+        return {
+            "email_count": len(emails),
+            "domain_count": len(domains),
+            "keyword_count": len(keywords),
+            "native_names": [entry["name"] for entry in entries],
+            "skip_reason": skip_reason,
+        }
+
     def push_to_outlook(
         self,
         remove_legacy: bool = False,
@@ -45,57 +132,24 @@ class SyncEngine:
         skipped_no_folder_rules: List[str] = []
 
         for rule in self.yaml_mgr.rules:
-            is_unclassified = self._is_unclassified_rule(rule)
-            emails = self.yaml_mgr.get_all_emails_for_rule(rule)
-            domains = self.yaml_mgr.get_all_domains_for_rule(rule)
-            keywords = [k.strip() for k in (rule.subject_keywords or []) if k and k.strip()]
-
-            # Special case for unclassified rule: include unclassified_pool
-            if is_unclassified:
-                emails = sorted(list(set(emails + self.yaml_mgr.unclassified_pool)))
-
-            emails = [e for e in emails if e]
-            domains = [d for d in domains if d]
-
-            if not emails and not domains and not keywords:
+            entries, skip_reason = self._compile_single_rule(rule, threshold=threshold)
+            if skip_reason == "no_conditions":
                 skipped_empty_rules.append(rule.name)
                 continue
-
-            if not (rule.target_folder or "").strip():
+            if skip_reason == "no_target_folder":
                 skipped_no_folder_rules.append(rule.name)
                 continue
 
-            # Compile each condition type separately to preserve OR semantics in Outlook
-            sub_rules = split_rule_recipients(rule.name, emails, domains, max_recipients=threshold)
-            for sub_name, email_chunk, domain_chunk in sub_rules:
-                entry = {
-                    "name": f"{MANAGED_PREFIX}{sub_name}",
-                    "enabled": rule.enabled,
-                    "emails": email_chunk,
-                    "domains": domain_chunk,
-                    "subject_keywords": [],
-                    "target_folder": rule.target_folder,
-                }
+            is_unclassified = self._is_unclassified_rule(rule)
+            for entry in entries:
                 if is_unclassified:
                     unclassified_subrules.append(entry)
-                elif email_chunk:
+                elif entry["emails"]:
                     email_subrules.append(entry)
-                elif domain_chunk:
+                elif entry["domains"]:
                     domain_subrules.append(entry)
-
-            if keywords:
-                kw_entry = {
-                    "name": f"{MANAGED_PREFIX}{rule.name} (Keywords)",
-                    "enabled": rule.enabled,
-                    "emails": [],
-                    "domains": [],
-                    "subject_keywords": keywords,
-                    "target_folder": rule.target_folder,
-                }
-                if is_unclassified:
-                    unclassified_subrules.append(kw_entry)
                 else:
-                    keyword_subrules.append(kw_entry)
+                    keyword_subrules.append(entry)
 
         compiled_rules = email_subrules + domain_subrules + keyword_subrules + unclassified_subrules
         legacy_base_names = [r.name for r in self.yaml_mgr.rules]

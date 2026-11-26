@@ -30,12 +30,13 @@ class MainWindow(tk.Tk):
         self._apply_style()
         self._build_header()
         self._build_simulation_banner()
-        self._build_notebook()
         self._build_footer()
+        self._build_notebook()
 
-        self.yaml_mgr.add_change_listener(self._update_sync_status)
+        self.yaml_mgr.add_change_listener(self._on_yaml_state_changed)
         self._update_simulation_banner()
         self._update_sync_status()
+        self._refresh_footer()
 
     def _apply_style(self):
         style = ttk.Style(self)
@@ -153,6 +154,10 @@ class MainWindow(tk.Tk):
             self.lbl_sync_status.config(text="Not synced this session", foreground="#64748b")
             self.btn_sync.config(style="Accent.TButton")
 
+    def _on_yaml_state_changed(self):
+        self._update_sync_status()
+        self._refresh_footer()
+
     def _retry_outlook_connection(self):
         new_client = get_outlook_client()
         if not new_client.is_simulated() and new_client.is_connected():
@@ -164,6 +169,7 @@ class MainWindow(tk.Tk):
             self.tab_dryrun.outlook = new_client
 
             self._update_simulation_banner()
+            self._refresh_footer()
             self.tab_triage.refresh_inbox()
             self.tab_rollover.lbl_acc_badge.config(
                 text=f"Active Account: {new_client.get_current_user_account()}"
@@ -200,18 +206,30 @@ class MainWindow(tk.Tk):
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_change)
 
     def _build_footer(self):
-        ttk.Separator(self, orient=tk.HORIZONTAL).pack(fill=tk.X)
-        footer = ttk.Frame(self, padding=(8, 4))
-        footer.pack(fill=tk.X, side=tk.BOTTOM)
+        self.footer = ttk.Frame(self, padding=(8, 4))
+        self.footer.pack(fill=tk.X, side=tk.BOTTOM)
+        ttk.Separator(self, orient=tk.HORIZONTAL).pack(fill=tk.X, side=tk.BOTTOM)
 
-        active = self.yaml_mgr.stores.get("active_archive")
-        store_txt = f"{active.name} ({active.file_path})" if active else "None"
         self.lbl_footer = ttk.Label(
-            footer,
-            text=f"Active Target Archive: {store_txt} | Config: rules.yaml",
+            self.footer,
+            text="",
             font=("", 8)
         )
         self.lbl_footer.pack(side=tk.LEFT)
+        self._refresh_footer()
+
+    def _refresh_footer(self):
+        if not self.winfo_exists():
+            return
+        active = self.yaml_mgr.stores.get("active_archive")
+        if active:
+            store_id = active.file_path or active.name
+            exists = self.outlook.store_exists(store_id) if store_id else False
+            status = "found in Outlook" if exists else "NOT found in Outlook"
+            text = f"Active archive: {active.name} ({active.file_path}) — {status} | Config: rules.yaml"
+        else:
+            text = "Active archive: None — NOT found in Outlook | Config: rules.yaml"
+        self.lbl_footer.config(text=text)
 
     def _on_tab_change(self, event):
         current_idx = self.notebook.index("current")
@@ -226,6 +244,7 @@ class MainWindow(tk.Tk):
 
     def _reload_yaml(self):
         self.yaml_mgr.load()
+        self._refresh_footer()
         self.tab_triage.refresh_inbox()
         self.tab_rules.refresh_all()
         self.tab_rollover.refresh_view()
