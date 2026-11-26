@@ -151,7 +151,7 @@ class FakeRules:
         self.last_show_progress = ShowProgress
 
     def __iter__(self):
-        return iter(list(self._rules))
+        return iter(self._rules)
 
     def __len__(self) -> int:
         return len(self._rules)
@@ -165,6 +165,8 @@ class FakeFolderCollection:
         self._folders: List["FakeFolder"] = []
 
     def Add(self, name: str) -> "FakeFolder":
+        if any(f.Name.lower() == name.lower() for f in self._folders):
+            raise ValueError(f"Folder already exists: {name}")
         folder_path = f"{self._parent_path}\\{name}" if self._parent_path else name
         folder = FakeFolder(Name=name, FolderPath=folder_path)
         self._folders.append(folder)
