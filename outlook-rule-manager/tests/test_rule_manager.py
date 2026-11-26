@@ -6,7 +6,7 @@ import tempfile
 import tkinter as tk
 
 from core.yaml_manager import YamlConfigManager
-from core.outlook_client import get_outlook_client
+from core.outlook_client import MockOutlookClient
 from core.sync_engine import SyncEngine
 from gui.rule_manager_view import RuleManagerView
 
@@ -15,11 +15,11 @@ class TestRuleManagerAndFolderOperations(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         self.config_path = os.path.join(self.temp_dir, "rules.yaml")
-        sample_config = os.path.join(os.path.dirname(__file__), "..", "config", "rules.yaml")
+        sample_config = os.path.join(os.path.dirname(__file__), "fixtures", "rules_sample.yaml")
         shutil.copy2(sample_config, self.config_path)
 
         self.yaml_mgr = YamlConfigManager(self.config_path)
-        self.outlook = get_outlook_client()
+        self.outlook = MockOutlookClient()
         self.sync_engine = SyncEngine(self.yaml_mgr, self.outlook)
 
         self.root = tk.Tk()

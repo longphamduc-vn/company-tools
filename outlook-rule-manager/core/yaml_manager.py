@@ -4,7 +4,7 @@ import shutil
 import glob
 import re
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 import yaml
 
 from core.models import StoreConfig, AddressGroup, RuleConfig

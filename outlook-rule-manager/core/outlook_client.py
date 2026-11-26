@@ -45,12 +45,13 @@ class BaseOutlookClient:
 class WindowsOutlookClient(BaseOutlookClient):
     """Native Windows Outlook Classic COM Client."""
 
-    def __init__(self):
+    def __init__(self, namespace=None):
         self.app = None
-        self.namespace = None
-        self._connected = False
+        self.namespace = namespace
+        self._connected = namespace is not None
         self._cached_account = ""
-        self._init_com()
+        if namespace is None:
+            self._init_com()
 
     def _init_com(self):
         try:
