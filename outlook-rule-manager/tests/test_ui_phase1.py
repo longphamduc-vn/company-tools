@@ -206,8 +206,14 @@ class TestUiPhase1(unittest.TestCase):
             self.assertIs(win.sync_engine.outlook, real_client)
             self.assertIs(win.tab_triage.outlook, real_client)
             self.assertIs(win.tab_triage.conflict_detector.outlook, real_client)
-            self.assertIs(win.tab_rollover.outlook, real_client)
-            self.assertIs(win.tab_dryrun.outlook, real_client)
+            self.assertFalse(hasattr(win, "tab_rollover"))
+            self.assertFalse(hasattr(win, "tab_dryrun"))
+            roll_dlg, roll_view = win._build_rollover_dialog()
+            try:
+                self.assertIs(roll_view.outlook, real_client)
+            finally:
+                if roll_dlg.winfo_exists():
+                    roll_dlg.destroy()
         finally:
             win.destroy()
 
@@ -273,17 +279,21 @@ class TestUiPhase1(unittest.TestCase):
             self.assertTrue(stage_msg.startswith("[SIMULATION] No changes were made to Outlook."))
 
             # 4. RolloverView._execute_rollover (must point to an existing mock store path)
-            rollover = win.tab_rollover
-            rollover.ent_new_name.delete(0, tk.END)
-            rollover.ent_new_name.insert(0, "longp Archive 2025")
-            rollover.ent_new_path.delete(0, tk.END)
-            rollover.ent_new_path.insert(0, "/mock/data/longp_Archive_2025.pst")
-            with patch("gui.rollover_view.messagebox") as mock_roll_mb:
-                mock_roll_mb.askyesno.return_value = True
-                rollover._execute_rollover()
-            self.assertTrue(mock_roll_mb.showinfo.called)
-            roll_msg = mock_roll_mb.showinfo.call_args[0][1]
-            self.assertTrue(roll_msg.startswith("[SIMULATION] No changes were made to Outlook."))
+            roll_dlg, rollover = win._build_rollover_dialog()
+            try:
+                rollover.ent_new_name.delete(0, tk.END)
+                rollover.ent_new_name.insert(0, "longp Archive 2025")
+                rollover.ent_new_path.delete(0, tk.END)
+                rollover.ent_new_path.insert(0, "/mock/data/longp_Archive_2025.pst")
+                with patch("gui.rollover_view.messagebox") as mock_roll_mb:
+                    mock_roll_mb.askyesno.return_value = True
+                    rollover._execute_rollover()
+                self.assertTrue(mock_roll_mb.showinfo.called)
+                roll_msg = mock_roll_mb.showinfo.call_args[0][1]
+                self.assertTrue(roll_msg.startswith("[SIMULATION] No changes were made to Outlook."))
+            finally:
+                if roll_dlg.winfo_exists():
+                    roll_dlg.destroy()
 
             # 5. ConflictDialog._execute_resolutions
             detector = ConflictDetector(win.yaml_mgr, win.outlook)

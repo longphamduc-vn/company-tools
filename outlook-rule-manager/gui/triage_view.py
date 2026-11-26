@@ -144,17 +144,15 @@ class TriageView(ttk.Frame):
         inbox_container = ttk.Frame(self.frame_left)
         inbox_container.pack(fill=tk.BOTH, expand=True)
 
-        cols = ("Sender", "Subject", "WillGoTo", "Status")
+        cols = ("Sender", "Subject", "WillGoTo")
         self.tree_inbox = ttk.Treeview(inbox_container, columns=cols, show="headings", selectmode="browse")
         self.tree_inbox.heading("Sender", text="From")
         self.tree_inbox.heading("Subject", text="Subject")
         self.tree_inbox.heading("WillGoTo", text="Will go to")
-        self.tree_inbox.heading("Status", text="Status")
 
-        self.tree_inbox.column("Sender", width=165)
-        self.tree_inbox.column("Subject", width=210)
-        self.tree_inbox.column("WillGoTo", width=165)
-        self.tree_inbox.column("Status", width=115)
+        self.tree_inbox.column("Sender", width=140, minwidth=85, stretch=True)
+        self.tree_inbox.column("Subject", width=190, minwidth=110, stretch=True)
+        self.tree_inbox.column("WillGoTo", width=135, minwidth=90, stretch=True)
 
         inbox_scroll = ttk.Scrollbar(inbox_container, orient=tk.VERTICAL, command=self.tree_inbox.yview)
         self.tree_inbox.configure(yscrollcommand=inbox_scroll.set)
@@ -395,23 +393,20 @@ class TriageView(ttk.Frame):
             if self.active_filter == "STAGED" and not is_staged:
                 continue
 
-            # "Will go to" destination preview & Status
+            # "Will go to" destination preview
             if is_staged:
                 action = staged_map[msg.entry_id]
                 will_go_to = f"* {action.target_folder or 'Inbox'}"
-                status_disp = f"★ Staged → {action.rule_name}"
             elif matched_rule:
                 will_go_to = matched_rule.target_folder or "Inbox (no rule)"
-                status_disp = matched_rule.name
             else:
                 will_go_to = "Inbox (no rule)"
-                status_disp = "Needs Rule"
 
             sender_disp = f"{msg.sender_name} <{msg.sender_email}>" if msg.sender_name else msg.sender_email
 
             self.tree_inbox.insert(
                 "", tk.END, iid=msg.entry_id,
-                values=(sender_disp, msg.subject, will_go_to, status_disp)
+                values=(sender_disp, msg.subject, will_go_to)
             )
 
         # Update Filter Buttons
@@ -810,7 +805,7 @@ class TriageView(ttk.Frame):
     def _update_pending_bar(self):
         count = len(self.staged_actions)
         if count > 0:
-            self.lbl_pending_status.config(text=f"{pluralize_count(count, 'pending change')} —")
+            self.lbl_pending_status.config(text=pluralize_count(count, "pending change"))
             if not self.pending_bar.winfo_manager():
                 self.pending_bar.pack(fill=tk.X, side=tk.BOTTOM, before=self.paned, padx=6, pady=(0, 4))
         else:

@@ -60,9 +60,6 @@ class RuleManagerView(ttk.Frame):
         self.folder_nodes_map: Dict[str, str] = {}
         self.rule_nodes_map: Dict[str, str] = {}  # iid -> rule_id
 
-        # Mode toggle: 'visual' vs 'bulk' for conditions
-        self.condition_mode: str = "visual"
-
         # Scrollable inspector canvases + single shared mousewheel handler
         self._scrollable_canvases: List[tk.Canvas] = []
         self._mousewheel_bound: bool = False
@@ -85,16 +82,20 @@ class RuleManagerView(ttk.Frame):
         toolbar = tk.Frame(self, bg="#ffffff", highlightbackground="#e2e8f0", highlightthickness=1, padx=10, pady=6)
         toolbar.pack(fill=tk.X, side=tk.TOP)
 
-        # Quick action buttons (Dynamic arbitrary levels)
-        ttk.Button(toolbar, text="+ Top-level Folder", command=self._add_root_folder).pack(side=tk.LEFT, padx=(0, 4))
-        ttk.Button(toolbar, text="+ Subfolder", command=self._add_subfolder).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="+ New Rule", command=self._add_rule_in_selected_folder).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="+ New Group", command=self._add_group).pack(side=tk.LEFT, padx=4)
+        # Merged creation menu + tree controls
+        self.mb_new = ttk.Menubutton(toolbar, text="New")
+        self.menu_new = tk.Menu(self.mb_new, tearoff=0)
+        self.menu_new.add_command(label="Rule", command=self._add_rule_in_selected_folder)
+        self.menu_new.add_command(label="Folder", command=self._add_root_folder)
+        self.menu_new.add_command(label="Subfolder", command=self._add_subfolder)
+        self.menu_new.add_command(label="Group", command=self._add_group)
+        self.mb_new.config(menu=self.menu_new)
+        self.mb_new.pack(side=tk.LEFT, padx=(0, 6))
 
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8, pady=2)
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6, pady=2)
 
-        ttk.Button(toolbar, text="Expand All", command=self._expand_all).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="Collapse All", command=self._collapse_all).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="Expand", command=self._expand_all).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="Collapse", command=self._collapse_all).pack(side=tk.LEFT, padx=2)
 
         # Search filter entry
         self.ent_search = ttk.Entry(toolbar, width=22)
@@ -180,7 +181,7 @@ class RuleManagerView(ttk.Frame):
         paned.add(self.frame_right, weight=6)
 
         self.inspector_container = tk.Frame(self.frame_right, bg="#ffffff")
-        self.inspector_container.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        self.inspector_container.pack(fill=tk.BOTH, expand=True, padx=8, pady=5)
 
         # Sub-inspectors
         self.frame_empty = tk.Frame(self.inspector_container, bg="#ffffff")
@@ -279,8 +280,8 @@ class RuleManagerView(ttk.Frame):
 
     def _build_rule_inspector(self):
         # 1. Breadcrumb Path Bar (Dynamic Levels)
-        self.bar_breadcrumb = tk.Frame(self.frame_rule, bg="#f1f5f9", padx=8, pady=6, highlightbackground="#e2e8f0", highlightthickness=1)
-        self.bar_breadcrumb.pack(fill=tk.X, pady=(0, 6))
+        self.bar_breadcrumb = tk.Frame(self.frame_rule, bg="#f1f5f9", padx=8, pady=4, highlightbackground="#e2e8f0", highlightthickness=1)
+        self.bar_breadcrumb.pack(fill=tk.X, pady=(0, 4))
 
         self.lbl_breadcrumb = tk.Label(
             self.bar_breadcrumb,
@@ -294,8 +295,8 @@ class RuleManagerView(ttk.Frame):
         ttk.Button(self.bar_breadcrumb, text="Change Folder...", command=self._open_folder_picker_dialog).pack(side=tk.RIGHT, padx=2)
 
         # 2. Rule Name & Active Status Card
-        card_header = tk.Frame(self.frame_rule, bg="#ffffff", highlightbackground="#e2e8f0", highlightthickness=1, padx=8, pady=8)
-        card_header.pack(fill=tk.X, pady=(0, 6))
+        card_header = tk.Frame(self.frame_rule, bg="#ffffff", highlightbackground="#e2e8f0", highlightthickness=1, padx=8, pady=5)
+        card_header.pack(fill=tk.X, pady=(0, 4))
 
         row1 = tk.Frame(card_header, bg="#ffffff")
         row1.pack(fill=tk.X)
@@ -324,7 +325,7 @@ class RuleManagerView(ttk.Frame):
             fg="#16a34a",
             font=("", 8, "bold")
         )
-        self.lbl_quota.pack(anchor=tk.W, pady=(6, 0))
+        self.lbl_quota.pack(anchor=tk.W, pady=(4, 0))
 
         self.lbl_quota_subrules = tk.Label(
             card_header,
@@ -335,7 +336,7 @@ class RuleManagerView(ttk.Frame):
             wraplength=540,
             justify=tk.LEFT,
         )
-        self.lbl_quota_subrules.pack(anchor=tk.W, pady=(2, 0))
+        self.lbl_quota_subrules.pack(anchor=tk.W, pady=(1, 0))
 
         # Pack bottom footer & tester strip BEFORE middle scrollable content so they never overflow off-screen
         # 5. Rule Action Footer
@@ -354,7 +355,7 @@ class RuleManagerView(ttk.Frame):
         tester_strip = tk.Frame(
             self.frame_rule, bg="#f8fafc", padx=6, pady=4, highlightbackground="#e2e8f0", highlightthickness=1
         )
-        tester_strip.pack(fill=tk.X, side=tk.BOTTOM, pady=(0, 6))
+        tester_strip.pack(fill=tk.X, side=tk.BOTTOM, pady=(0, 4))
 
         tk.Label(tester_strip, text="Test Match:", bg="#f8fafc", font=("", 8, "bold"), fg="#475569").pack(side=tk.LEFT, padx=(0, 4))
         tk.Label(tester_strip, text="Email:", bg="#f8fafc", font=("", 8), fg="#475569").pack(side=tk.LEFT)
@@ -367,15 +368,15 @@ class RuleManagerView(ttk.Frame):
         self.lbl_test_result = tk.Label(tester_strip, text="", bg="#f8fafc", font=("", 8, "bold"))
         self.lbl_test_result.pack(side=tk.LEFT, padx=6)
 
-        # 3. Recipients & Conditions Notebook / Scrollable Mode Switcher
-        card_cond = tk.LabelFrame(self.frame_rule, text="Filter Conditions", bg="#ffffff", padx=8, pady=8)
-        card_cond.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+        # 3. Recipients & Conditions (single text mode inside scrollable body)
+        card_cond = tk.LabelFrame(self.frame_rule, text="Filter Conditions", bg="#ffffff", padx=8, pady=4)
+        card_cond.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
 
         self.rule_scroll_canvas, rule_cond_body = self._create_scrollable_section(card_cond, bg="#ffffff")
 
-        # Linked Groups (above Direct Emails, visible in both Visual and Bulk modes)
+        # Linked Groups (above Emails)
         frame_linked_groups = tk.Frame(rule_cond_body, bg="#ffffff")
-        frame_linked_groups.pack(fill=tk.X, pady=(0, 6))
+        frame_linked_groups.pack(fill=tk.X, pady=(0, 4))
 
         row_grp_hdr = tk.Frame(frame_linked_groups, bg="#ffffff")
         row_grp_hdr.pack(fill=tk.X, pady=(0, 2))
@@ -383,103 +384,42 @@ class RuleManagerView(ttk.Frame):
         ttk.Button(row_grp_hdr, text="Link Group...", command=self._link_group_to_rule).pack(side=tk.LEFT, padx=(6, 2))
         ttk.Button(row_grp_hdr, text="Unlink", command=self._unlink_group_from_rule).pack(side=tk.LEFT, padx=2)
 
-        self.lst_rule_groups = tk.Listbox(frame_linked_groups, font=("Consolas", 9), height=3, selectmode=tk.EXTENDED)
+        self.lst_rule_groups = tk.Listbox(frame_linked_groups, font=("Consolas", 9), height=2, selectmode=tk.EXTENDED)
         self.lst_rule_groups.pack(fill=tk.X)
 
-        mode_strip = tk.Frame(rule_cond_body, bg="#ffffff")
-        mode_strip.pack(fill=tk.X, pady=(0, 4))
-
-        self.btn_mode_visual = tk.Button(
-            mode_strip, text="Visual Chips", relief="flat", bg="#0284c7", fg="#ffffff",
-            font=("", 8, "bold"), padx=8, pady=2, command=lambda: self._set_condition_mode("visual")
+        # Emails (one per line) + Import button
+        row_emails_hdr = tk.Frame(rule_cond_body, bg="#ffffff")
+        row_emails_hdr.pack(fill=tk.X, pady=(0, 2))
+        self.lbl_rule_emails_hdr = tk.Label(
+            row_emails_hdr, text="Emails (0)", bg="#ffffff", font=("", 8, "bold"), fg="#475569"
         )
-        self.btn_mode_visual.pack(side=tk.LEFT, padx=(0, 2))
+        self.lbl_rule_emails_hdr.pack(side=tk.LEFT)
+        ttk.Button(row_emails_hdr, text="Import CSV/Excel...", command=self._import_addresses_to_rule).pack(side=tk.RIGHT)
 
-        self.btn_mode_bulk = tk.Button(
-            mode_strip, text="Bulk Text Editor", relief="flat", bg="#e2e8f0", fg="#475569",
-            font=("", 8, "bold"), padx=8, pady=2, command=lambda: self._set_condition_mode("bulk")
+        self.txt_emails = tk.Text(rule_cond_body, font=("Consolas", 9), height=6)
+        self.txt_emails.pack(fill=tk.X, pady=(0, 6))
+        self.txt_emails.bind("<KeyRelease>", self._on_rule_text_changed)
+        self.txt_emails.bind("<FocusOut>", self._on_rule_text_changed)
+
+        # Domains (one per line)
+        self.lbl_rule_domains_hdr = tk.Label(
+            rule_cond_body, text="Domains (0)", bg="#ffffff", font=("", 8, "bold"), fg="#475569"
         )
-        self.btn_mode_bulk.pack(side=tk.LEFT, padx=2)
+        self.lbl_rule_domains_hdr.pack(anchor=tk.W, pady=(0, 2))
+        self.txt_domains = tk.Text(rule_cond_body, font=("Consolas", 9), height=3)
+        self.txt_domains.pack(fill=tk.X, pady=(0, 6))
+        self.txt_domains.bind("<KeyRelease>", self._on_rule_text_changed)
+        self.txt_domains.bind("<FocusOut>", self._on_rule_text_changed)
 
-        ttk.Button(mode_strip, text="Import CSV/Excel...", command=self._import_addresses_to_rule).pack(side=tk.RIGHT)
-
-        # Container for Visual Mode vs Bulk Mode
-        self.box_cond_container = tk.Frame(rule_cond_body, bg="#ffffff")
-        self.box_cond_container.pack(fill=tk.X)
-
-        # --- A. Visual Mode Frames ---
-        self.box_visual = tk.Frame(self.box_cond_container, bg="#ffffff")
-
-        # Visual Emails
-        frame_vis_emails = tk.Frame(self.box_visual, bg="#ffffff")
-        frame_vis_emails.pack(fill=tk.X, pady=2)
-
-        row_add_email = tk.Frame(frame_vis_emails, bg="#ffffff")
-        row_add_email.pack(fill=tk.X, pady=(0, 2))
-        tk.Label(row_add_email, text="Direct Emails:", bg="#ffffff", font=("", 8, "bold"), fg="#475569").pack(side=tk.LEFT)
-        self.ent_add_email = ttk.Entry(row_add_email, width=26)
-        self.ent_add_email.pack(side=tk.LEFT, padx=4)
-        self.ent_add_email.bind("<Return>", lambda e: self._add_email_chip())
-        ttk.Button(row_add_email, text="+ Add", command=self._add_email_chip).pack(side=tk.LEFT)
-        ttk.Button(row_add_email, text="Remove Selected", command=self._remove_email_chip).pack(side=tk.RIGHT)
-
-        self.lst_emails = tk.Listbox(frame_vis_emails, font=("Consolas", 9), height=5, selectmode=tk.EXTENDED)
-        self.lst_emails.pack(fill=tk.X)
-
-        # Visual Domains
-        frame_vis_domains = tk.Frame(self.box_visual, bg="#ffffff")
-        frame_vis_domains.pack(fill=tk.X, pady=(6, 2))
-
-        row_add_dom = tk.Frame(frame_vis_domains, bg="#ffffff")
-        row_add_dom.pack(fill=tk.X, pady=(0, 2))
-        tk.Label(row_add_dom, text="Domains (e.g. @company.com):", bg="#ffffff", font=("", 8, "bold"), fg="#475569").pack(side=tk.LEFT)
-        self.ent_add_domain = ttk.Entry(row_add_dom, width=20)
-        self.ent_add_domain.pack(side=tk.LEFT, padx=4)
-        self.ent_add_domain.bind("<Return>", lambda e: self._add_domain_chip())
-        ttk.Button(row_add_dom, text="+ Add Domain", command=self._add_domain_chip).pack(side=tk.LEFT)
-        ttk.Button(row_add_dom, text="Remove Selected", command=self._remove_domain_chip).pack(side=tk.RIGHT)
-
-        self.lst_domains = tk.Listbox(frame_vis_domains, font=("Consolas", 9), height=3, selectmode=tk.EXTENDED)
-        self.lst_domains.pack(fill=tk.X)
-
-        # Visual Subject Keywords
-        frame_vis_keywords = tk.Frame(self.box_visual, bg="#ffffff")
-        frame_vis_keywords.pack(fill=tk.X, pady=(6, 2))
-
-        row_add_kw = tk.Frame(frame_vis_keywords, bg="#ffffff")
-        row_add_kw.pack(fill=tk.X, pady=(0, 2))
-        tk.Label(row_add_kw, text="Subject Keywords:", bg="#ffffff", font=("", 8, "bold"), fg="#475569").pack(side=tk.LEFT)
-        self.ent_add_keyword = ttk.Entry(row_add_kw, width=20)
-        self.ent_add_keyword.pack(side=tk.LEFT, padx=4)
-        self.ent_add_keyword.bind("<Return>", lambda e: self._add_keyword_chip())
-        ttk.Button(row_add_kw, text="+ Add Keyword", command=self._add_keyword_chip).pack(side=tk.LEFT)
-        ttk.Button(row_add_kw, text="Remove Selected", command=self._remove_keyword_chip).pack(side=tk.RIGHT)
-
-        self.lst_keywords = tk.Listbox(frame_vis_keywords, font=("Consolas", 9), height=3, selectmode=tk.EXTENDED)
-        self.lst_keywords.pack(fill=tk.X)
-
-        # --- B. Bulk Mode Frames ---
-        self.box_bulk = tk.Frame(self.box_cond_container, bg="#ffffff")
-
-        tk.Label(self.box_bulk, text="Emails (one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
-        self.txt_bulk_emails = tk.Text(self.box_bulk, font=("Consolas", 9), height=6)
-        self.txt_bulk_emails.pack(fill=tk.X, pady=(0, 4))
-        self.txt_bulk_emails.bind("<KeyRelease>", lambda _e: self._refresh_dirty_state())
-        self.txt_bulk_emails.bind("<FocusOut>", lambda _e: self._refresh_dirty_state())
-
-        tk.Label(self.box_bulk, text="Domains (e.g. @omron.com, one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
-        self.txt_bulk_domains = tk.Text(self.box_bulk, font=("Consolas", 9), height=3)
-        self.txt_bulk_domains.pack(fill=tk.X, pady=(0, 4))
-        self.txt_bulk_domains.bind("<KeyRelease>", lambda _e: self._refresh_dirty_state())
-        self.txt_bulk_domains.bind("<FocusOut>", lambda _e: self._refresh_dirty_state())
-
-        tk.Label(self.box_bulk, text="Subject Keywords (one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
-        self.txt_bulk_keywords = tk.Text(self.box_bulk, font=("Consolas", 9), height=3)
-        self.txt_bulk_keywords.pack(fill=tk.X, pady=(0, 4))
-        self.txt_bulk_keywords.bind("<KeyRelease>", lambda _e: self._refresh_dirty_state())
-        self.txt_bulk_keywords.bind("<FocusOut>", lambda _e: self._refresh_dirty_state())
-
-        self.box_visual.pack(fill=tk.BOTH, expand=True)
+        # Subject Keywords (one per line)
+        self.lbl_rule_keywords_hdr = tk.Label(
+            rule_cond_body, text="Subject Keywords (0)", bg="#ffffff", font=("", 8, "bold"), fg="#475569"
+        )
+        self.lbl_rule_keywords_hdr.pack(anchor=tk.W, pady=(0, 2))
+        self.txt_keywords = tk.Text(rule_cond_body, font=("Consolas", 9), height=3)
+        self.txt_keywords.pack(fill=tk.X, pady=(0, 4))
+        self.txt_keywords.bind("<KeyRelease>", self._on_rule_text_changed)
+        self.txt_keywords.bind("<FocusOut>", self._on_rule_text_changed)
 
     def _build_folder_inspector(self):
         # Folder Header Banner (Dynamic Level Display)
@@ -765,14 +705,9 @@ class RuleManagerView(ttk.Frame):
         name = self.var_rule_name.get().strip()
         enabled = bool(self.var_rule_enabled.get())
         groups = list(self._editing_rule_group_ids)
-        if self.condition_mode == "visual":
-            emails = [self.lst_emails.get(i).strip().lower() for i in range(self.lst_emails.size()) if self.lst_emails.get(i).strip()]
-            raw_domains = [self.lst_domains.get(i) for i in range(self.lst_domains.size())]
-            raw_keywords = [self.lst_keywords.get(i) for i in range(self.lst_keywords.size())]
-        else:
-            emails = [l.strip().lower() for l in self.txt_bulk_emails.get("1.0", tk.END).split("\n") if l.strip()]
-            raw_domains = self.txt_bulk_domains.get("1.0", tk.END).split("\n")
-            raw_keywords = self.txt_bulk_keywords.get("1.0", tk.END).split("\n")
+        emails = [l.strip().lower() for l in self.txt_emails.get("1.0", tk.END).split("\n") if l.strip()]
+        raw_domains = self.txt_domains.get("1.0", tk.END).split("\n")
+        raw_keywords = self.txt_keywords.get("1.0", tk.END).split("\n")
         return (
             name,
             enabled,
@@ -781,6 +716,16 @@ class RuleManagerView(ttk.Frame):
             sorted(list(set(YamlConfigManager.normalize_domains(raw_domains)))),
             YamlConfigManager.normalize_keywords(raw_keywords),
         )
+
+    def _update_rule_count_labels(self):
+        _, _, _, emails, domains, keywords = self._get_current_rule_form_values()
+        self.lbl_rule_emails_hdr.config(text=f"Emails ({len(emails)})")
+        self.lbl_rule_domains_hdr.config(text=f"Domains ({len(domains)})")
+        self.lbl_rule_keywords_hdr.config(text=f"Subject Keywords ({len(keywords)})")
+
+    def _on_rule_text_changed(self, _event=None):
+        self._update_rule_count_labels()
+        self._refresh_dirty_state()
 
     def is_rule_dirty(self) -> bool:
         if not self.selected_rule or not self.frame_rule.winfo_manager():
@@ -994,29 +939,18 @@ class RuleManagerView(ttk.Frame):
             # Quota Meter (uses live editing group IDs + SyncEngine compiler)
             self._update_rule_quota_display()
 
-            # Visual Lists
-            self.lst_emails.delete(0, tk.END)
-            for e in sorted(rule.emails):
-                self.lst_emails.insert(tk.END, e)
+            # Condition text fields (one entry per line)
+            self.txt_emails.delete("1.0", tk.END)
+            self.txt_emails.insert(tk.END, "\n".join(sorted(rule.emails)))
 
-            self.lst_domains.delete(0, tk.END)
-            for d in sorted(rule.domains):
-                self.lst_domains.insert(tk.END, d)
+            self.txt_domains.delete("1.0", tk.END)
+            self.txt_domains.insert(tk.END, "\n".join(sorted(rule.domains)))
 
             norm_keywords = YamlConfigManager.normalize_keywords(rule.subject_keywords)
-            self.lst_keywords.delete(0, tk.END)
-            for kw in norm_keywords:
-                self.lst_keywords.insert(tk.END, kw)
+            self.txt_keywords.delete("1.0", tk.END)
+            self.txt_keywords.insert(tk.END, "\n".join(norm_keywords))
 
-            # Bulk Texts
-            self.txt_bulk_emails.delete("1.0", tk.END)
-            self.txt_bulk_emails.insert(tk.END, "\n".join(sorted(rule.emails)))
-
-            self.txt_bulk_domains.delete("1.0", tk.END)
-            self.txt_bulk_domains.insert(tk.END, "\n".join(sorted(rule.domains)))
-
-            self.txt_bulk_keywords.delete("1.0", tk.END)
-            self.txt_bulk_keywords.insert(tk.END, "\n".join(norm_keywords))
+            self._update_rule_count_labels()
 
             self.lbl_test_result.config(text="")
             self.ent_test_match.delete(0, tk.END)
@@ -1802,95 +1736,6 @@ class RuleManagerView(ttk.Frame):
         self._update_rule_quota_display()
         self._refresh_dirty_state()
 
-    def _set_condition_mode(self, mode: str):
-        self.condition_mode = mode
-        if mode == "visual":
-            self.btn_mode_visual.config(bg="#0284c7", fg="#ffffff")
-            self.btn_mode_bulk.config(bg="#e2e8f0", fg="#475569")
-            # Sync bulk text into visual lists
-            emails = [l.strip().lower() for l in self.txt_bulk_emails.get("1.0", tk.END).split("\n") if l.strip()]
-            domains = [l.strip().lower() for l in self.txt_bulk_domains.get("1.0", tk.END).split("\n") if l.strip()]
-            keywords = YamlConfigManager.normalize_keywords(
-                self.txt_bulk_keywords.get("1.0", tk.END).split("\n")
-            )
-            self.lst_emails.delete(0, tk.END)
-            for e in sorted(list(set(emails))):
-                self.lst_emails.insert(tk.END, e)
-            self.lst_domains.delete(0, tk.END)
-            for d in sorted(list(set(domains))):
-                self.lst_domains.insert(tk.END, d)
-            self.lst_keywords.delete(0, tk.END)
-            for kw in keywords:
-                self.lst_keywords.insert(tk.END, kw)
-            self.box_bulk.pack_forget()
-            self.box_visual.pack(fill=tk.BOTH, expand=True)
-        else:
-            self.btn_mode_visual.config(bg="#e2e8f0", fg="#475569")
-            self.btn_mode_bulk.config(bg="#0284c7", fg="#ffffff")
-            # Sync visual lists into bulk text
-            emails = [self.lst_emails.get(i) for i in range(self.lst_emails.size())]
-            domains = [self.lst_domains.get(i) for i in range(self.lst_domains.size())]
-            keywords = [self.lst_keywords.get(i) for i in range(self.lst_keywords.size())]
-            self.txt_bulk_emails.delete("1.0", tk.END)
-            self.txt_bulk_emails.insert(tk.END, "\n".join(emails))
-            self.txt_bulk_domains.delete("1.0", tk.END)
-            self.txt_bulk_domains.insert(tk.END, "\n".join(domains))
-            self.txt_bulk_keywords.delete("1.0", tk.END)
-            self.txt_bulk_keywords.insert(tk.END, "\n".join(keywords))
-            self.box_visual.pack_forget()
-            self.box_bulk.pack(fill=tk.BOTH, expand=True)
-        self._refresh_dirty_state()
-
-    @staticmethod
-    def _remove_selected_from_listbox(listbox: tk.Listbox):
-        sel = list(listbox.curselection())
-        for idx in reversed(sel):
-            listbox.delete(idx)
-
-    def _add_email_chip(self):
-        val = self.ent_add_email.get().strip().lower()
-        if not val or "@" not in val:
-            return
-        existing = [self.lst_emails.get(i) for i in range(self.lst_emails.size())]
-        if val not in existing:
-            self.lst_emails.insert(tk.END, val)
-        self.ent_add_email.delete(0, tk.END)
-        self._refresh_dirty_state()
-
-    def _remove_email_chip(self):
-        self._remove_selected_from_listbox(self.lst_emails)
-        self._refresh_dirty_state()
-
-    def _add_domain_chip(self):
-        val = self.ent_add_domain.get().strip().lower()
-        if not val:
-            return
-        if not val.startswith("@"):
-            val = "@" + val
-        existing = [self.lst_domains.get(i) for i in range(self.lst_domains.size())]
-        if val not in existing:
-            self.lst_domains.insert(tk.END, val)
-        self.ent_add_domain.delete(0, tk.END)
-        self._refresh_dirty_state()
-
-    def _remove_domain_chip(self):
-        self._remove_selected_from_listbox(self.lst_domains)
-        self._refresh_dirty_state()
-
-    def _add_keyword_chip(self):
-        val = self.ent_add_keyword.get().strip()
-        if not val:
-            return
-        existing_lower = {self.lst_keywords.get(i).strip().lower() for i in range(self.lst_keywords.size())}
-        if val.lower() not in existing_lower:
-            self.lst_keywords.insert(tk.END, val)
-        self.ent_add_keyword.delete(0, tk.END)
-        self._refresh_dirty_state()
-
-    def _remove_keyword_chip(self):
-        self._remove_selected_from_listbox(self.lst_keywords)
-        self._refresh_dirty_state()
-
     def _test_rule_match(self):
         query = self.ent_test_match.get().strip().lower()
         subj_query = self.ent_test_subject.get().strip()
@@ -2117,16 +1962,11 @@ class RuleManagerView(ttk.Frame):
         emails = self._read_addresses_from_file()
         if not emails:
             return
-        if self.condition_mode == "visual":
-            existing = [self.lst_emails.get(i) for i in range(self.lst_emails.size())]
-            for e in emails:
-                if e not in existing:
-                    self.lst_emails.insert(tk.END, e)
-        else:
-            current = [l.strip().lower() for l in self.txt_bulk_emails.get("1.0", tk.END).split("\n") if l.strip()]
-            combined = sorted(list(set(current + emails)))
-            self.txt_bulk_emails.delete("1.0", tk.END)
-            self.txt_bulk_emails.insert(tk.END, "\n".join(combined))
+        current = [l.strip().lower() for l in self.txt_emails.get("1.0", tk.END).split("\n") if l.strip()]
+        combined = sorted(list(set(current + emails)))
+        self.txt_emails.delete("1.0", tk.END)
+        self.txt_emails.insert(tk.END, "\n".join(combined))
+        self._update_rule_count_labels()
         self._refresh_dirty_state()
         messagebox.showinfo("Imported", f"Successfully imported {len(emails)} email addresses.")
 

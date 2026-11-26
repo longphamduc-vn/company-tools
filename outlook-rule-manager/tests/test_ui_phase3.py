@@ -143,13 +143,17 @@ class TestUiPhase3(unittest.TestCase):
             self.assertEqual(pluralize_count(0, "domain"), "0 domains")
             self.assertEqual(win.tab_rules.tree.item("rule_rule_unclassified", "values")[0], "1 sender")
 
-            # Panel title is "Navigator" (no duplicate "Folders & Rules" panel header); clean folder buttons
+            # Panel title is "Navigator" (no duplicate "Folders & Rules" panel header); merged New menubutton
             left_lbls = [l.cget("text") for l in _find_widgets(win.tab_rules.frame_left, tk.Label)]
             self.assertIn("Navigator", left_lbls)
             self.assertNotIn("Folders & Rules", left_lbls)
             rules_toolbar_btns = [b.cget("text") for b in _find_widgets(win.tab_rules, ttk.Button)]
-            self.assertIn("+ Top-level Folder", rules_toolbar_btns)
-            self.assertIn("+ Subfolder", rules_toolbar_btns)
+            self.assertEqual(win.tab_rules.mb_new.cget("text"), "New")
+            new_menu_labels = [
+                win.tab_rules.menu_new.entrycget(i, "label")
+                for i in range(win.tab_rules.menu_new.index("end") + 1)
+            ]
+            self.assertEqual(new_menu_labels, ["Rule", "Folder", "Subfolder", "Group"])
             self.assertNotIn("+ Root Folder (L1)", rules_toolbar_btns)
             self.assertNotIn("+ Subfolder (L+1)", rules_toolbar_btns)
 
@@ -306,8 +310,8 @@ class TestUiPhase3(unittest.TestCase):
             view._unlink_group_from_rule()
             self.assertFalse(view.has_unsaved_changes())
 
-            view.ent_add_keyword.insert(0, "Urgent")
-            view._add_keyword_chip()
+            view.txt_keywords.insert(tk.END, "Urgent\n")
+            view._on_rule_text_changed()
             self.assertTrue(view.has_unsaved_changes())
             self.assertEqual(view.btn_save_rule.cget("text"), "Save Changes ●")
 
@@ -321,8 +325,8 @@ class TestUiPhase3(unittest.TestCase):
             self.assertEqual(view.btn_save_rule.cget("text"), "Save Rule to YAML")
 
             # Case 1: Edit domain on rule_executive, select rule_engineering, Cancel (None) -> stay on old rule
-            view.ent_add_domain.insert(0, "@canceldom.com")
-            view._add_domain_chip()
+            view.txt_domains.insert(tk.END, "@canceldom.com\n")
+            view._on_rule_text_changed()
             self.assertTrue(view.has_unsaved_changes())
 
             with patch("gui.rule_manager_view.messagebox.askyesnocancel", return_value=None) as mock_ask:
@@ -350,8 +354,8 @@ class TestUiPhase3(unittest.TestCase):
             )
 
             # Case 3: Edit domain on rule_engineering, switch to rule_suppliers, answer Yes (True) -> saved!
-            view.ent_add_domain.insert(0, "@saveddom.com")
-            view._add_domain_chip()
+            view.txt_domains.insert(tk.END, "@saveddom.com\n")
+            view._on_rule_text_changed()
             with patch("gui.rule_manager_view.messagebox.askyesnocancel", return_value=True) as mock_ask, patch.object(
                 view, "_show_toast"
             ):

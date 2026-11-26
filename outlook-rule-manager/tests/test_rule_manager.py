@@ -108,21 +108,24 @@ class TestRuleManagerAndFolderOperations(unittest.TestCase):
         self.assertIn("former.contractor@vendor.com", self.yaml_mgr.get_all_emails_for_rule(exec_rule))
         self.assertNotIn("former.contractor@vendor.com", self.yaml_mgr.unclassified_pool)
 
-    def test_gui_condition_mode_switching(self):
+    def test_gui_single_mode_inspector_widgets(self):
         view = RuleManagerView(self.root, self.yaml_mgr, self.sync_engine)
         view.pack()
 
-        # Select a rule
+        # Select a rule and verify single-mode condition text widgets are active
         view.tree.selection_set("rule_rule_executive")
         view._on_tree_select()
 
-        # Switch to bulk mode
-        view._set_condition_mode("bulk")
-        self.assertEqual(view.condition_mode, "bulk")
+        self.assertFalse(hasattr(view, "_set_condition_mode"))
+        self.assertFalse(hasattr(view, "condition_mode"))
+        self.assertEqual(view.lbl_rule_emails_hdr.cget("text"), "Emails (0)")
+        self.assertEqual(view.lbl_rule_domains_hdr.cget("text"), "Domains (0)")
+        self.assertEqual(view.lbl_rule_keywords_hdr.cget("text"), "Subject Keywords (0)")
+        self.assertIn("Executive Board", view.lst_rule_groups.get(0))
 
-        # Switch to visual mode
-        view._set_condition_mode("visual")
-        self.assertEqual(view.condition_mode, "visual")
+        view.txt_emails.insert(tk.END, "direct@company.com\n")
+        view._on_rule_text_changed()
+        self.assertEqual(view.lbl_rule_emails_hdr.cget("text"), "Emails (1)")
 
     def test_dynamic_arbitrary_level_shifts(self):
         # 1. Level 3 to Level 1 (Promote to Root)

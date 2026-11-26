@@ -2,7 +2,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import os
-from typing import Dict, List, Any
+from typing import Any, Callable, Dict, List, Optional
 
 from core.yaml_manager import YamlConfigManager
 from core.outlook_client import BaseOutlookClient
@@ -13,11 +13,19 @@ from core.rollover_suggest import suggest_rollover_target
 class RolloverView(ttk.Frame):
     """PST Year Rollover Wizard, Multi-Store Scanner & Account-Tagged Naming."""
 
-    def __init__(self, parent, yaml_mgr: YamlConfigManager, outlook: BaseOutlookClient, sync_engine: SyncEngine):
+    def __init__(
+        self,
+        parent,
+        yaml_mgr: YamlConfigManager,
+        outlook: BaseOutlookClient,
+        sync_engine: SyncEngine,
+        on_rollover_complete: Optional[Callable[[], Any]] = None,
+    ):
         super().__init__(parent)
         self.yaml_mgr = yaml_mgr
         self.outlook = outlook
         self.sync_engine = sync_engine
+        self.on_rollover_complete = on_rollover_complete
 
         self.var_new_name = tk.StringVar()
         self.var_new_path = tk.StringVar()
@@ -314,5 +322,7 @@ class RolloverView(ttk.Frame):
             messagebox.showinfo("Rollover Complete", msg)
             self._rollover_fields_initialized = False
             self.refresh_view()
+            if self.on_rollover_complete:
+                self.on_rollover_complete()
         else:
             messagebox.showerror("Rollover Failed", msg)

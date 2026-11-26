@@ -1,7 +1,7 @@
 """Main Application Window for Outlook Rule Companion."""
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Optional
+from typing import Optional, Tuple
 
 from core.yaml_manager import YamlConfigManager
 from core.outlook_client import BaseOutlookClient, get_outlook_client
@@ -10,7 +10,6 @@ from core.sync_engine import SyncEngine
 from gui.triage_view import TriageView
 from gui.rule_manager_view import RuleManagerView
 from gui.rollover_view import RolloverView
-from gui.dryrun_view import DryRunView
 
 
 class MainWindow(tk.Tk):
@@ -91,6 +90,13 @@ class MainWindow(tk.Tk):
             command=self._open_conflict_inspector,
         )
         self.btn_conflicts.pack(side=tk.LEFT, padx=4)
+
+        self.btn_rollover = ttk.Button(
+            right_box,
+            text="Yearly Rollover...",
+            command=self._open_rollover_dialog,
+        )
+        self.btn_rollover.pack(side=tk.LEFT, padx=4)
 
         self.lbl_sync_status = ttk.Label(
             right_box,
@@ -176,17 +182,10 @@ class MainWindow(tk.Tk):
             self.sync_engine.outlook = new_client
             self.tab_triage.outlook = new_client
             self.tab_triage.conflict_detector.outlook = new_client
-            self.tab_rollover.outlook = new_client
-            self.tab_dryrun.outlook = new_client
 
             self._update_simulation_banner()
             self._refresh_footer()
             self.tab_triage.refresh_inbox()
-            self.tab_rollover.lbl_acc_badge.config(
-                text=f"Active Account: {new_client.get_current_user_account()}"
-            )
-            self.tab_rollover.refresh_view()
-            self.tab_dryrun.refresh_simulation()
             messagebox.showinfo("Connected", f"Connected to {new_client.get_mode_name()}.")
         else:
             messagebox.showerror(
@@ -198,21 +197,13 @@ class MainWindow(tk.Tk):
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        # Tab 1: Inbox Triage (Drag & Drop)
+        # Tab 1: Inbox Triage
         self.tab_triage = TriageView(self.notebook, self.yaml_mgr, self.outlook, self.sync_engine)
         self.notebook.add(self.tab_triage, text=" Inbox Triage ")
 
         # Tab 2: Rules & Address Groups
         self.tab_rules = RuleManagerView(self.notebook, self.yaml_mgr, self.sync_engine)
         self.notebook.add(self.tab_rules, text=" Rules & Groups ")
-
-        # Tab 3: PST Rollover
-        self.tab_rollover = RolloverView(self.notebook, self.yaml_mgr, self.outlook, self.sync_engine)
-        self.notebook.add(self.tab_rollover, text=" PST Rollover ")
-
-        # Tab 4: Dry-Run Simulation
-        self.tab_dryrun = DryRunView(self.notebook, self.yaml_mgr, self.outlook, self.sync_engine)
-        self.notebook.add(self.tab_dryrun, text=" Dry-Run Simulation ")
 
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_change)
 
@@ -281,16 +272,45 @@ class MainWindow(tk.Tk):
             self.tab_triage.refresh_inbox()
         elif current_idx == 1:
             self.tab_rules.refresh_all()
-        elif current_idx == 2:
-            self.tab_rollover.refresh_view()
-        elif current_idx == 3:
-            self.tab_dryrun.refresh_simulation()
 
     def _open_conflict_inspector(self):
         if not self.tab_rules.confirm_pending_changes(reset_if_discard=True):
             return
         self.tab_triage._open_conflict_inspector()
         self.tab_rules.refresh_all()
+
+    def _build_rollover_dialog(self) -> Tuple[tk.Toplevel, RolloverView]:
+        """Construct the modal Yearly Rollover dialog using the current Outlook client."""
+        dlg = tk.Toplevel(self)
+        dlg.title("Yearly PST Rollover")
+        dlg.geometry("920x580")
+        dlg.minsize(780, 480)
+        dlg.transient(self)
+        dlg.grab_set()
+
+        def _on_complete():
+            if dlg.winfo_exists():
+                dlg.destroy()
+            self._refresh_footer()
+            self._update_sync_status()
+
+        view = RolloverView(
+            dlg,
+            self.yaml_mgr,
+            self.outlook,
+            self.sync_engine,
+            on_rollover_complete=_on_complete,
+        )
+        view.pack(fill=tk.BOTH, expand=True)
+        return dlg, view
+
+    def _open_rollover_dialog(self):
+        if not self.tab_rules.confirm_pending_changes(reset_if_discard=True):
+            return
+        dlg, _view = self._build_rollover_dialog()
+        self.wait_window(dlg)
+        self._refresh_footer()
+        self._update_sync_status()
 
     def _on_close_window(self):
         if not self.tab_rules.confirm_pending_changes(reset_if_discard=False):
@@ -304,7 +324,6 @@ class MainWindow(tk.Tk):
         self._refresh_footer()
         self.tab_triage.refresh_inbox()
         self.tab_rules.refresh_all()
-        self.tab_rollover.refresh_view()
         messagebox.showinfo("Reloaded", "Successfully reloaded configuration from rules.yaml.")
 
     def _sync_to_outlook(self):

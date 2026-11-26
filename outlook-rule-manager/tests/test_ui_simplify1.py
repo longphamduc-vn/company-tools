@@ -152,7 +152,7 @@ class TestUiSimplifyPhaseS1(unittest.TestCase):
             self.assertEqual(get_result()[0].id, "rule_executive")
             self.assertEqual(get_result()[1], "domain")
 
-            # 2. Full _menu_add_to_rule -> 1 action staged -> pending bar shows "1 pending change —"
+            # 2. Full _menu_add_to_rule -> 1 action staged -> pending bar shows "1 pending change"
             exec_rule = next(r for r in win.yaml_mgr.rules if r.id == "rule_executive")
             with patch.object(triage, "_prompt_rule_selection", return_value=(exec_rule, "domain")):
                 triage._menu_add_to_rule()
@@ -161,7 +161,7 @@ class TestUiSimplifyPhaseS1(unittest.TestCase):
             self.assertEqual(len(triage.staged_actions), 1)
             self.assertEqual(triage.staged_actions[0].match_mode, "domain")
             self.assertTrue(bool(triage.pending_bar.winfo_ismapped()))
-            self.assertIn("1 pending change —", triage.lbl_pending_status.cget("text"))
+            self.assertEqual(triage.lbl_pending_status.cget("text"), "1 pending change")
 
             # 3. Review dialog lists staged action & allows removing row
             rev_dlg, rev_tree = triage._build_review_staged_dialog()
@@ -209,7 +209,7 @@ class TestUiSimplifyPhaseS1(unittest.TestCase):
             triage._stage_add_to_existing_rule(triage.messages[0], "rule_engineering")
             triage._stage_add_to_existing_rule(triage.messages[1], "rule_suppliers")
             win.update()
-            self.assertIn("2 pending changes —", triage.lbl_pending_status.cget("text"))
+            self.assertEqual(triage.lbl_pending_status.cget("text"), "2 pending changes")
             triage.btn_pending_clear.invoke()
             win.update()
             self.assertEqual(len(triage.staged_actions), 0)

@@ -69,19 +69,17 @@ class TestUiPhase2(unittest.TestCase):
             win.update()
 
             # Subject Keywords widgets sit inside scrollable canvas container (rule_scroll_canvas)
-            self.assertTrue(_is_descendant(view.lst_keywords, view.rule_scroll_canvas))
-            self.assertTrue(_is_descendant(view.txt_bulk_keywords, view.rule_scroll_canvas))
-            card_cond = view.lst_keywords.master
+            self.assertTrue(_is_descendant(view.txt_keywords, view.rule_scroll_canvas))
+            card_cond = view.txt_keywords.master
             while card_cond is not None and not isinstance(card_cond, tk.LabelFrame):
                 card_cond = card_cond.master
             self.assertIsNotNone(card_cond)
             self.assertEqual(card_cond.cget("text"), "Filter Conditions")
 
-            # Add keywords in Visual mode: duplicates & blanks dropped, first spelling kept
-            for kw in ["SCADA", " scada ", "  ", "Alarm"]:
-                view.ent_add_keyword.delete(0, tk.END)
-                view.ent_add_keyword.insert(0, kw)
-                view._add_keyword_chip()
+            # Add keywords in single-mode inspector: duplicates & blanks dropped, first spelling kept
+            view.txt_keywords.delete("1.0", tk.END)
+            view.txt_keywords.insert(tk.END, "SCADA\n scada \n  \nAlarm\n")
+            view._on_rule_text_changed()
 
             with patch.object(view, "_show_toast"):
                 view._save_rule_changes()
@@ -103,11 +101,11 @@ class TestUiPhase2(unittest.TestCase):
             view._test_rule_match()
             self.assertEqual(view.lbl_test_result.cget("text"), "NO MATCH")
 
-            # Bulk Text Editor roundtrip & deduplication
-            view._set_condition_mode("bulk")
-            self.assertIn("SCADA", view.txt_bulk_keywords.get("1.0", tk.END))
-            view.txt_bulk_keywords.delete("1.0", tk.END)
-            view.txt_bulk_keywords.insert(tk.END, "  PLC  \n\nplc\nBreaker\n")
+            # Replace keywords & verify roundtrip deduplication
+            self.assertIn("SCADA", view.txt_keywords.get("1.0", tk.END))
+            view.txt_keywords.delete("1.0", tk.END)
+            view.txt_keywords.insert(tk.END, "  PLC  \n\nplc\nBreaker\n")
+            view._on_rule_text_changed()
             with patch.object(view, "_show_toast"):
                 view._save_rule_changes()
 
@@ -154,14 +152,19 @@ class TestUiPhase2(unittest.TestCase):
 
             self.assertEqual(win.lbl_footer_status.cget("text"), "found in Outlook")
 
-            # Successful rollover refreshes footer to new store
-            win.tab_rollover.ent_new_name.delete(0, tk.END)
-            win.tab_rollover.ent_new_name.insert(0, "Archive 2026")
-            win.tab_rollover.ent_new_path.delete(0, tk.END)
-            win.tab_rollover.ent_new_path.insert(0, r"D:\Outlook_Data\longp_Archive_2026.pst")
-            with patch("gui.rollover_view.messagebox") as mock_mb:
-                mock_mb.askyesno.return_value = True
-                win.tab_rollover._execute_rollover()
+            # Successful rollover via dialog refreshes footer to new store and closes dialog
+            roll_dlg, roll_view = win._build_rollover_dialog()
+            try:
+                roll_view.ent_new_name.delete(0, tk.END)
+                roll_view.ent_new_name.insert(0, "Archive 2026")
+                roll_view.ent_new_path.delete(0, tk.END)
+                roll_view.ent_new_path.insert(0, r"D:\Outlook_Data\longp_Archive_2026.pst")
+                with patch("gui.rollover_view.messagebox") as mock_mb:
+                    mock_mb.askyesno.return_value = True
+                    roll_view._execute_rollover()
+            finally:
+                if roll_dlg.winfo_exists():
+                    roll_dlg.destroy()
             win.update_idletasks()
             self.assertIn("Active archive: Archive 2026", win.lbl_footer.cget("text"))
             self.assertEqual(win.lbl_footer_status.cget("text"), "found in Outlook")
@@ -204,8 +207,9 @@ class TestUiPhase2(unittest.TestCase):
         yaml_mgr.save()
 
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
+        roll_dlg = None
         try:
-            roll = win.tab_rollover
+            roll_dlg, roll = win._build_rollover_dialog()
             # Missing on disk -> [MISSING] and no hardcoded C:\Outlook_Data or _Archive_2025
             self.assertIn("[MISSING]", roll.lbl_cur_size.cget("text"))
             self.assertNotIn("File managed by Outlook", roll.lbl_cur_size.cget("text"))
@@ -242,6 +246,8 @@ class TestUiPhase2(unittest.TestCase):
             roll.ent_new_path.insert(0, mock_active_path)
             self.assertIn("disabled", roll.btn_rollover.state())
         finally:
+            if roll_dlg is not None and roll_dlg.winfo_exists():
+                roll_dlg.destroy()
             win.destroy()
 
     # ------------------------------------------------------------------
@@ -316,8 +322,8 @@ class TestUiPhase2(unittest.TestCase):
             self.assertIn("41 senders, 1 domain, 1 keyword → 4 native rules", view.lbl_quota.cget("text"))
 
             # Remove keyword and Save -> drops to 0 keywords and 3 native rules
-            view.lst_keywords.selection_set(0)
-            view._remove_keyword_chip()
+            view.txt_keywords.delete("1.0", tk.END)
+            view._on_rule_text_changed()
             with patch.object(view, "_show_toast"):
                 view._save_rule_changes()
             self.assertIn("41 senders, 1 domain, 0 keywords → 3 native rules", view.lbl_quota.cget("text"))

@@ -374,24 +374,21 @@ class TestPhase4GuiIntegration(unittest.TestCase):
         view = RuleManagerView(self.root, self.yaml_mgr, self.sync_engine)
         view.pack()
 
-        # Select rule and enter unnormalized domains in bulk mode
+        # Select rule and enter unnormalized domains in single-mode inspector
         view.tree.selection_set("rule_rule_executive")
         view._on_tree_select()
-        view._set_condition_mode("bulk")
-        view.txt_bulk_domains.delete("1.0", tk.END)
-        view.txt_bulk_domains.insert(tk.END, "Vendor.com\n  @Omron.COM \n\n   \n")
+        view.txt_domains.delete("1.0", tk.END)
+        view.txt_domains.insert(tk.END, "Vendor.com\n  @Omron.COM \n\n   \n")
         view._save_rule_changes()
 
         exec_rule = next(r for r in self.yaml_mgr.rules if r.id == "rule_executive")
         self.assertEqual(exec_rule.domains, ["@omron.com", "@vendor.com"])
 
-        # Also check visual mode save path
+        # Save a second set of unnormalized domains via the same single-mode box
         view.tree.selection_set("rule_rule_executive")
         view._on_tree_select()
-        view._set_condition_mode("visual")
-        view.lst_domains.delete(0, tk.END)
-        view.lst_domains.insert(tk.END, "Partner.ORG")
-        view.lst_domains.insert(tk.END, "  ")
+        view.txt_domains.delete("1.0", tk.END)
+        view.txt_domains.insert(tk.END, "Partner.ORG\n  \n")
         view._save_rule_changes()
         self.assertEqual(exec_rule.domains, ["@partner.org"])
 
