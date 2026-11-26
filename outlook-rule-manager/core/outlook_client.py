@@ -320,7 +320,10 @@ class WindowsOutlookClient(BaseOutlookClient):
                     sender_cond.Enabled = True
                 else:
                     sender_cond.Enabled = False
-                    sender_cond.Address = []
+                    try:
+                        sender_cond.Address = []
+                    except Exception:
+                        pass
 
                 subj_cond = rule.Conditions.Subject
                 if keywords:
@@ -328,7 +331,10 @@ class WindowsOutlookClient(BaseOutlookClient):
                     subj_cond.Enabled = True
                 else:
                     subj_cond.Enabled = False
-                    subj_cond.Text = []
+                    try:
+                        subj_cond.Text = []
+                    except Exception:
+                        pass
 
                 if target_folder_path:
                     target_folder_obj = self.get_or_create_folder(target_store, target_folder_path)

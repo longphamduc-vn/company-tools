@@ -242,6 +242,60 @@ class TestSaveNativeRulesWithFakes(unittest.TestCase):
         self.assertTrue(existing.Conditions.From.Enabled)
         self.assertEqual([r.Address for r in existing.Conditions.From.Recipients], ["new@vendor.com"])
 
+    def test_empty_array_assignment_error_does_not_fail_sync(self):
+        class StrictEmptySenderAddress:
+            def __init__(self):
+                self.Enabled = True
+                self._address = ["@old.com"]
+
+            @property
+            def Address(self):
+                return self._address
+
+            @Address.setter
+            def Address(self, value):
+                if value == []:
+                    raise RuntimeError("COM does not accept empty array")
+                self._address = value
+
+        class StrictEmptySubject:
+            def __init__(self):
+                self.Enabled = True
+                self._text = ["OLD"]
+
+            @property
+            def Text(self):
+                return self._text
+
+            @Text.setter
+            def Text(self, value):
+                if value == []:
+                    raise RuntimeError("COM does not accept empty array")
+                self._text = value
+
+        existing = FakeRule("StrictComRule", enabled=True)
+        existing.Conditions.SenderAddress = StrictEmptySenderAddress()
+        existing.Conditions.Subject = StrictEmptySubject()
+        self.default_store.GetRules()._rules.append(existing)
+
+        ok, msg = self.outlook.save_native_rules(
+            [
+                {
+                    "name": "StrictComRule",
+                    "enabled": True,
+                    "emails": ["only@vendor.com"],
+                    "domains": [],
+                    "subject_keywords": [],
+                    "target_folder": "Vendors",
+                }
+            ],
+            self.store_path,
+        )
+        self.assertTrue(ok, msg)
+        self.assertFalse(existing.Conditions.SenderAddress.Enabled)
+        self.assertFalse(existing.Conditions.Subject.Enabled)
+        self.assertTrue(existing.Conditions.From.Enabled)
+
 
 class TestTriageDefaultMatchMode(unittest.TestCase):
     """Ensure TriageView defaults new rule match_mode to 'email' without domain heuristics."""
