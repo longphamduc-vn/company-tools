@@ -232,3 +232,19 @@ Sau mỗi phase, agent báo lại: commit hash, danh sách file đổi, output `
   - `core/outlook_client.py` (`MockOutlookClient`): bỏ kiểm tra store chặt trong `save_native_rules` và `move_message` để Mock mode vẫn chạy được với `config/rules.yaml` thật (`C:\Outlook_Data\...`), giữ nguyên `MockOutlookClient.store_exists` chặt và toàn bộ kiểm tra chặt của `WindowsOutlookClient`.
   - `tests/test_phase3_rollover.py`: thêm test dùng `MockOutlookClient` với bản copy `config/rules.yaml` trong thư mục tạm -> `push_to_outlook()` và `move_message()` đều trả `True`.
 - **Lệch plan & lý do:** Không có.
+
+### Phase 4 — Dữ liệu YAML & ID
+- **Đã làm:**
+  - `core/yaml_manager.py`:
+    - Backup & ghi atomic: đổi tên backup sang `rules_%Y%m%d_%H%M%S_%f.yaml` (có chống trùng nếu gọi trong cùng microsecond), sort `_prune_backups` theo `os.path.basename` (tương thích lẫn định dạng cũ không có `_%f`), ghi ra `rules.yaml.tmp` -> `flush()` + `os.fsync()` -> `os.replace()`, dọn `.tmp` và raise `RuntimeError` rõ ràng nếu `os.replace` lỗi, đồng thời lưu `store_id` trong `stores` khi khác rỗng.
+    - Xóa folder một lượt: tách `_remove_rule_no_save(rule_id)` dùng chung cho `remove_rule_and_repool` và `delete_folder_hierarchy` để `delete_folder_hierarchy` chỉ gọi `save()` đúng một lần.
+    - ID duy nhất: thêm `generate_rule_id(base)` (chữ thường, ký tự ngoài `[a-z0-9_]` thành `_`, gộp `_` liên tiếp, luôn bắt đầu bằng `rule_`, rỗng thành `rule_new`, thêm `_1`, `_2`... khi trùng) và áp dụng cho `duplicate_rule`.
+    - Xóa group & fallback: thêm `delete_group(g_id, repool_emails=False)` gỡ `g_id` khỏi mọi rule và tùy chọn repool email; sửa `add_sender_to_rule_or_group` tìm group hợp lệ đầu tiên trong `rule.groups` hoặc ghi thẳng vào rule nếu không còn group hợp lệ.
+    - Chuẩn hóa domain: thêm `normalize_domain` (`lower().strip()`, thêm `@` nếu thiếu, bỏ giá trị rỗng) và áp dụng khi `load()` (cả `groups` và `rules`) và trong `add_sender_to_rule_or_group` (không đổi email).
+  - `core/conflict_detector.py` (`resolve_import_to_yaml`): dùng `self.yaml_mgr.generate_rule_id(r_name)`.
+  - `gui/rule_manager_view.py`: `_add_rule_in_selected_folder` dùng `generate_rule_id`; `_delete_selected_group` gọi `messagebox.askyesnocancel` (Yes = xóa & repool, No = xóa không repool, Cancel = hủy) rồi gọi `yaml_mgr.delete_group`.
+  - `gui/triage_view.py`: bỏ sinh `rule_id` lúc stage (`rule_id=""`), chuyển sang gọi `self.yaml_mgr.generate_rule_id(action.rule_name)` lúc commit trong `_apply_all_staged`.
+  - `tests/test_phase4_yaml.py`: thêm 10 test cho nhiều lần save trong 1 giây, prune lẫn format cũ/mới, giả lập `os.replace` raise `PermissionError`, giữ `store_id` và không ghi khi rỗng, `delete_folder_hierarchy` 5 rule tạo đúng 1 backup, `generate_rule_id` trên cả 4 nơi (gồm `TriageView` commit 2 action trùng tên), `delete_group` + `add_sender_to_rule_or_group` khi mất group + `askyesnocancel` Yes/No/Cancel, và chuẩn hóa `@Vendor.com` khớp `x@vendor.com`.
+- **Lệch plan & lý do:**
+  - Khi `os.replace` gặp lỗi `OSError`/`PermissionError`, dọn file `.tmp` và raise `RuntimeError` kèm thông điệp chi tiết thay vì để rò rỉ exception thô hoặc file tạm.
+  - Khi sinh backup có thêm chống trùng `_%d` trong trường hợp gọi liên tiếp trùng microsecond và sort theo `os.path.basename`.

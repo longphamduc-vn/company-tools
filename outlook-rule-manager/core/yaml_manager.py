@@ -58,10 +58,11 @@ class YamlConfigManager:
         self.groups = {}
         raw_groups = data.get("groups", {})
         for g_id, g_data in raw_groups.items():
+            raw_domains = g_data.get("domains", []) or []
             self.groups[g_id] = AddressGroup(
                 id=g_id,
                 name=g_data.get("name", g_id),
-                domains=g_data.get("domains", []) or [],
+                domains=[d for d in (self.normalize_domain(x) for x in raw_domains) if d],
                 emails=[e.lower().strip() for e in (g_data.get("emails", []) or [])]
             )
 
@@ -72,13 +73,14 @@ class YamlConfigManager:
         self.rules = []
         raw_rules = data.get("rules", [])
         for r_data in raw_rules:
+            raw_rule_domains = r_data.get("domains", []) or []
             self.rules.append(RuleConfig(
                 id=r_data.get("id", ""),
                 name=r_data.get("name", ""),
                 enabled=r_data.get("enabled", True),
                 groups=r_data.get("groups", []) or [],
                 emails=[e.lower().strip() for e in (r_data.get("emails", []) or [])],
-                domains=r_data.get("domains", []) or [],
+                domains=[d for d in (self.normalize_domain(x) for x in raw_rule_domains) if d],
                 subject_keywords=r_data.get("subject_keywords", []) or [],
                 target_store=r_data.get("target_store", "active_archive"),
                 target_folder=r_data.get("target_folder", "")
@@ -86,14 +88,37 @@ class YamlConfigManager:
 
         return True
 
+    @staticmethod
+    def normalize_domain(domain_str: str) -> str:
+        """Normalize a domain to lowercase stripped '@domain' format; return '' if empty."""
+        val = (domain_str or "").lower().strip()
+        if not val:
+            return ""
+        if "@" in val:
+            val = val.split("@", 1)[1].strip()
+        val = val.lstrip("@").strip()
+        if not val:
+            return ""
+        return f"@{val}"
+
+    def _create_backup_file(self) -> None:
+        """Create a unique microsecond-timestamped backup copy and prune old backups."""
+        if not os.path.exists(self.config_path):
+            return
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        backup_file = os.path.join(self.backup_dir, f"rules_{timestamp}.yaml")
+        if os.path.exists(backup_file):
+            counter = 1
+            while os.path.exists(backup_file):
+                backup_file = os.path.join(self.backup_dir, f"rules_{timestamp}_{counter}.yaml")
+                counter += 1
+        shutil.copy2(self.config_path, backup_file)
+        self._prune_backups()
+
     def save(self) -> bool:
-        """Create versioned backup and write updated configuration to YAML."""
+        """Create versioned backup and write updated configuration to YAML atomically."""
         # 1. Create timestamped backup
-        if os.path.exists(self.config_path):
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_file = os.path.join(self.backup_dir, f"rules_{timestamp}.yaml")
-            shutil.copy2(self.config_path, backup_file)
-            self._prune_backups()
+        self._create_backup_file()
 
         # 2. Serialize objects to dict
         data = {
@@ -103,6 +128,7 @@ class YamlConfigManager:
                 s_id: {
                     "name": s.name,
                     "file_path": s.file_path,
+                    **({"store_id": s.store_id} if s.store_id else {}),
                 }
                 for s_id, s in self.stores.items()
             },
@@ -131,17 +157,34 @@ class YamlConfigManager:
             ]
         }
 
-        # 3. Write YAML
-        with open(self.config_path, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        # 3. Atomic write: temp file -> flush + fsync -> os.replace
+        tmp_path = f"{self.config_path}.tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.config_path)
+        except OSError as exc:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            raise RuntimeError(
+                f"Failed to save configuration atomically to '{self.config_path}': {exc}"
+            ) from exc
 
         return True
 
     def _prune_backups(self):
-        """Keep only the latest N backup files."""
+        """Keep only the latest N backup files sorted chronologically by filename."""
         max_backups = int(self.settings.get("backup_versions", 30))
-        backups = sorted(glob.glob(os.path.join(self.backup_dir, "rules_*.yaml")))
-        if len(backups) > max_backups:
+        backups = sorted(
+            glob.glob(os.path.join(self.backup_dir, "rules_*.yaml")),
+            key=os.path.basename,
+        )
+        if max_backups > 0 and len(backups) > max_backups:
             for b_file in backups[:-max_backups]:
                 try:
                     os.remove(b_file)
@@ -164,16 +207,11 @@ class YamlConfigManager:
                 domains.update(self.groups[g_id].domains)
         return sorted(list(domains))
 
-    def remove_rule_and_repool(self, rule_id: str):
-        """Remove a rule and automatically add its addresses to unclassified_pool."""
-        rule_to_remove = None
-        for r in self.rules:
-            if r.id == rule_id:
-                rule_to_remove = r
-                break
-
+    def _remove_rule_no_save(self, rule_id: str) -> bool:
+        """Remove a rule and move its emails to unclassified_pool without saving."""
+        rule_to_remove = next((r for r in self.rules if r.id == rule_id), None)
         if not rule_to_remove:
-            return
+            return False
 
         # Collect direct emails and group emails
         emails_to_repool = self.get_all_emails_for_rule(rule_to_remove)
@@ -183,39 +221,61 @@ class YamlConfigManager:
 
         # Remove the rule
         self.rules = [r for r in self.rules if r.id != rule_id]
+        return True
+
+    def remove_rule_and_repool(self, rule_id: str):
+        """Remove a rule and automatically add its addresses to unclassified_pool."""
+        if self._remove_rule_no_save(rule_id):
+            self.save()
+
+    def delete_group(self, g_id: str, repool_emails: bool = False) -> bool:
+        """Delete an address group, detach it from all rules, and optionally repool its emails."""
+        if g_id not in self.groups:
+            return False
+
+        group = self.groups.pop(g_id)
+        for rule in self.rules:
+            if g_id in rule.groups:
+                rule.groups = [gid for gid in rule.groups if gid != g_id]
+
+        if repool_emails:
+            for email in group.emails:
+                norm_email = email.lower().strip()
+                if norm_email and norm_email not in self.unclassified_pool:
+                    self.unclassified_pool.append(norm_email)
+
         self.save()
+        return True
 
     def add_sender_to_rule_or_group(self, email: str, rule_id: str, as_domain: bool = False):
-        """Add email or domain to a rule or its first group."""
-        email = email.lower().strip()
-        if not email:
+        """Add email or normalized domain to a rule or its first valid group."""
+        raw = (email or "").lower().strip()
+        if not raw:
             return
 
         # Remove from unclassified_pool if present
-        if email in self.unclassified_pool:
-            self.unclassified_pool.remove(email)
+        if raw in self.unclassified_pool:
+            self.unclassified_pool.remove(raw)
 
-        for rule in self.rules:
-            if rule.id == rule_id:
-                if as_domain and "@" in email:
-                    domain = "@" + email.split("@", 1)[1]
-                    if rule.groups:
-                        g_id = rule.groups[0]
-                        if domain not in self.groups[g_id].domains:
-                            self.groups[g_id].domains.append(domain)
-                    else:
-                        if domain not in rule.domains:
-                            rule.domains.append(domain)
-                else:
-                    if rule.groups:
-                        g_id = rule.groups[0]
-                        if email not in self.groups[g_id].emails:
-                            self.groups[g_id].emails.append(email)
-                    else:
-                        if email not in rule.emails:
-                            rule.emails.append(email)
-                self.save()
-                break
+        rule = next((r for r in self.rules if r.id == rule_id), None)
+        if not rule:
+            return
+
+        target_group = next((self.groups[g_id] for g_id in rule.groups if g_id in self.groups), None)
+
+        if as_domain:
+            domain = self.normalize_domain(raw)
+            if not domain:
+                return
+            target_list = target_group.domains if target_group is not None else rule.domains
+            if domain not in target_list:
+                target_list.append(domain)
+        else:
+            target_list = target_group.emails if target_group is not None else rule.emails
+            if raw not in target_list:
+                target_list.append(raw)
+
+        self.save()
 
     def get_existing_hierarchy(self) -> Tuple[List[str], List[str], List[str]]:
         """Collect all distinct Teams, Parts, and Units from current rules and custom folders."""
@@ -376,7 +436,7 @@ class YamlConfigManager:
     def delete_folder_hierarchy(self, folder_path: str, repool_addresses: bool = True) -> int:
         """
         Delete a folder and either repool its addresses or move its rules to _Unclassified.
-        Returns the number of affected rules.
+        Returns the number of affected rules. Saves once.
         """
         folder_path = "\\".join([s.strip() for s in re.split(r'[\\/]', folder_path) if s.strip()])
         affected_rules = [
@@ -388,8 +448,7 @@ class YamlConfigManager:
 
         for r in affected_rules:
             if repool_addresses:
-                # Remove rule and repool
-                self.remove_rule_and_repool(r.id)
+                self._remove_rule_no_save(r.id)
             else:
                 # Re-route to _Unclassified
                 r.target_folder = unclassified_fld
@@ -404,16 +463,37 @@ class YamlConfigManager:
         self.save()
         return len(affected_rules)
 
+    def generate_rule_id(self, base: str) -> str:
+        """Generate a unique slugified rule ID starting with 'rule_'."""
+        slug = re.sub(r"[^a-z0-9_]", "_", (base or "").lower())
+        slug = re.sub(r"_+", "_", slug).lstrip("_")
+        if slug.startswith("rule_"):
+            slug = slug[len("rule_"):]
+        slug = slug.strip("_")
+        if not slug:
+            slug = "new"
+        candidate_base = f"rule_{slug}"
+
+        existing_ids = {r.id for r in self.rules}
+        if candidate_base not in existing_ids:
+            return candidate_base
+
+        suffix = 1
+        while f"{candidate_base}_{suffix}" in existing_ids:
+            suffix += 1
+        return f"{candidate_base}_{suffix}"
+
     def duplicate_rule(self, rule_id: str) -> Optional[RuleConfig]:
-        """Duplicate an existing rule with an incremented ID and 'Copy of' name."""
+        """Duplicate an existing rule with a unique ID and 'Copy of' name."""
         rule = next((r for r in self.rules if r.id == rule_id), None)
         if not rule:
             return None
 
-        new_id = f"rule_{len(self.rules) + 1}"
+        new_name = f"Copy of {rule.name}"
+        new_id = self.generate_rule_id(new_name)
         new_rule = RuleConfig(
             id=new_id,
-            name=f"Copy of {rule.name}",
+            name=new_name,
             enabled=rule.enabled,
             groups=list(rule.groups),
             emails=list(rule.emails),

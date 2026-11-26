@@ -113,8 +113,8 @@ class ConflictDetector:
         folder = r_info.get("target_folder", "").split("\\")[-1] or "Inbox"
         emails = r_info.get("emails", [])
 
-        # Clean ID
-        clean_id = f"rule_{r_name.lower().replace(' ', '_')}"
+        # Clean unique ID
+        clean_id = self.yaml_mgr.generate_rule_id(r_name)
         new_rule = RuleConfig(
             id=clean_id,
             name=r_name,

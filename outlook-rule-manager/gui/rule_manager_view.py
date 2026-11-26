@@ -1197,10 +1197,11 @@ class RuleManagerView(ttk.Frame):
                 folders = self.yaml_mgr.get_all_folders()
                 dest_folder = folders[0] if folders else "General"
 
-        new_id = f"rule_{len(self.yaml_mgr.rules) + 1}"
+        rule_name = f"New Rule {len(self.yaml_mgr.rules) + 1}"
+        new_id = self.yaml_mgr.generate_rule_id(rule_name)
         new_rule = RuleConfig(
             id=new_id,
-            name=f"New Rule {len(self.yaml_mgr.rules) + 1}",
+            name=rule_name,
             enabled=True,
             target_store="active_archive",
             target_folder=dest_folder
@@ -1493,16 +1494,24 @@ class RuleManagerView(ttk.Frame):
     def _delete_selected_group(self):
         if not self.selected_group:
             return
-        confirm = messagebox.askyesno("Confirm Delete", f"Delete group '{self.selected_group.name}'?", icon=messagebox.WARNING)
-        if confirm:
-            g_id = self.selected_group.id
-            if g_id in self.yaml_mgr.groups:
-                del self.yaml_mgr.groups[g_id]
-                self.yaml_mgr.save()
-                self._show_toast("Deleted group")
-                self.selected_group = None
-                self.refresh_all()
-                self._show_inspector(self.frame_empty)
+        g_id = self.selected_group.id
+        g_name = self.selected_group.name
+        choice = messagebox.askyesnocancel(
+            "Delete Group",
+            f"Delete group '{g_name}'?\n\n"
+            f"Yes: Delete group and move its emails to Unclassified Pool\n"
+            f"No: Delete group without repooling emails\n"
+            f"Cancel: Keep group",
+            icon=messagebox.WARNING
+        )
+        if choice is None:
+            return
+
+        if self.yaml_mgr.delete_group(g_id, repool_emails=bool(choice)):
+            self._show_toast("Deleted group")
+            self.selected_group = None
+            self.refresh_all()
+            self._show_inspector(self.frame_empty)
 
     def _assign_pool_to_rule(self):
         sel_indices = self.lst_pool.curselection()

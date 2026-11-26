@@ -723,7 +723,7 @@ class TriageView(ttk.Frame):
         action = StagedAction(
             action_type="create_rule",
             rule_name=suggested_name,
-            rule_id=f"rule_{re.sub(r'[^a-zA-Z0-9_]', '_', suggested_name.lower())}",
+            rule_id="",
             target_folder=target_folder,
             sender_email=sender_email,
             sender_domain=sender_domain,
@@ -896,7 +896,7 @@ class TriageView(ttk.Frame):
             action = StagedAction(
                 action_type="create_rule",
                 rule_name=r_name,
-                rule_id=f"rule_{re.sub(r'[^a-zA-Z0-9_]', '_', r_name.lower())}",
+                rule_id="",
                 target_folder=norm_path,
                 sender_email=sender_email,
                 sender_domain=sender_domain,
@@ -1046,11 +1046,7 @@ class TriageView(ttk.Frame):
         # 1. Update YAML
         for action in self.staged_actions:
             if action.action_type == "create_rule":
-                new_id = action.rule_id
-                c = 1
-                while any(r.id == new_id for r in self.yaml_mgr.rules):
-                    new_id = f"{action.rule_id}_{c}"
-                    c += 1
+                new_id = self.yaml_mgr.generate_rule_id(action.rule_name)
 
                 emails = [action.sender_email] if action.match_mode == "email" else []
                 domains = [action.sender_domain] if action.match_mode == "domain" else []
