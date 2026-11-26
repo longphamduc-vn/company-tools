@@ -141,7 +141,7 @@ class TestUiPhase2(unittest.TestCase):
                 win.winfo_rooty() + win.winfo_height(),
             )
             self.assertIn("Active archive: Archive 2025", win.lbl_footer.cget("text"))
-            self.assertIn("NOT found in Outlook", win.lbl_footer.cget("text"))
+            self.assertEqual(win.lbl_footer_status.cget("text"), "NOT found in Outlook")
 
             # Connecting real Outlook store updates footer status -> found in Outlook
             extra_2026 = FakeStore("Archive 2026", r"D:\Outlook_Data\longp_Archive_2026.pst")
@@ -152,8 +152,7 @@ class TestUiPhase2(unittest.TestCase):
                 win._retry_outlook_connection()
                 win.update()
 
-            self.assertIn("found in Outlook", win.lbl_footer.cget("text"))
-            self.assertNotIn("NOT found in Outlook", win.lbl_footer.cget("text"))
+            self.assertEqual(win.lbl_footer_status.cget("text"), "found in Outlook")
 
             # Successful rollover refreshes footer to new store
             win.tab_rollover.ent_new_name.delete(0, tk.END)
@@ -165,7 +164,7 @@ class TestUiPhase2(unittest.TestCase):
                 win.tab_rollover._execute_rollover()
             win.update_idletasks()
             self.assertIn("Active archive: Archive 2026", win.lbl_footer.cget("text"))
-            self.assertIn("found in Outlook", win.lbl_footer.cget("text"))
+            self.assertEqual(win.lbl_footer_status.cget("text"), "found in Outlook")
 
             # Reload YAML updates footer from disk
             ext_mgr = YamlConfigManager(self.config_path)
@@ -176,7 +175,7 @@ class TestUiPhase2(unittest.TestCase):
             with patch("gui.main_window.messagebox.showinfo"):
                 win._reload_yaml()
             self.assertIn("Active archive: Reloaded Store", win.lbl_footer.cget("text"))
-            self.assertIn("NOT found in Outlook", win.lbl_footer.cget("text"))
+            self.assertEqual(win.lbl_footer_status.cget("text"), "NOT found in Outlook")
         finally:
             win.destroy()
 

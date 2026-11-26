@@ -25,6 +25,27 @@ class RuleManagerView(ttk.Frame):
         self.selected_group: Optional[AddressGroup] = None
         self.selected_pool_item: Optional[str] = None
 
+        # Dirty-tracking & programmatic tree refresh guards
+        self.var_rule_name = tk.StringVar()
+        self.var_rule_enabled = tk.BooleanVar(value=True)
+        self.var_group_name = tk.StringVar()
+        self._populating_inspector: bool = False
+        self._in_tree_transition: bool = False
+        self._current_selected_iid: Optional[str] = None
+
+        style = ttk.Style(self)
+        style.configure(
+            "DirtySave.TButton",
+            font=("", 9, "bold"),
+            background="#ea580c",
+            foreground="#ffffff",
+        )
+        style.map(
+            "DirtySave.TButton",
+            background=[("active", "#c2410c")],
+            foreground=[("active", "#ffffff")],
+        )
+
         # Drag-and-drop state
         self.drag_source_id: Optional[str] = None
         self.drag_start_x: int = 0
@@ -45,8 +66,13 @@ class RuleManagerView(ttk.Frame):
         # Scrollable inspector canvases + single shared mousewheel handler
         self._scrollable_canvases: List[tk.Canvas] = []
         self._mousewheel_bound: bool = False
+        self._toast_after_id: Optional[str] = None
 
         self._build_ui()
+        self.bind("<Destroy>", self._on_destroy, add="+")
+        self.var_rule_name.trace_add("write", lambda *_: self._refresh_dirty_state())
+        self.var_rule_enabled.trace_add("write", lambda *_: self._refresh_dirty_state())
+        self.var_group_name.trace_add("write", lambda *_: self._refresh_dirty_state())
         self.refresh_all()
 
     # =================================================================
@@ -70,21 +96,31 @@ class RuleManagerView(ttk.Frame):
         ttk.Button(toolbar, text="Expand All", command=self._expand_all).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="Collapse All", command=self._collapse_all).pack(side=tk.LEFT, padx=2)
 
-        # Toast notification label
-        self.lbl_toast = tk.Label(
-            toolbar,
-            text="Tip: Folders have flexible levels. Drag to Root for Level 1, or drop into any folder for Level 2, 3, 4...",
-            bg="#ffffff",
-            fg="#64748b",
-            font=("", 8, "italic")
-        )
-        self.lbl_toast.pack(side=tk.LEFT, padx=12)
-
         # Search filter entry
         self.ent_search = ttk.Entry(toolbar, width=22)
         self.ent_search.pack(side=tk.RIGHT, padx=4)
         self.ent_search.bind("<KeyRelease>", lambda e: self._on_search_change())
         tk.Label(toolbar, text="Filter:", bg="#ffffff", fg="#475569", font=("", 9, "bold")).pack(side=tk.RIGHT, padx=2)
+
+        # Bottom tip / status bar packed BEFORE paned so text is never clipped at 1120x720
+        self._default_tip_text = (
+            "Tip: Drag folders to Root for Level 1, or drop into another folder/rule to reorganize. "
+            "Right-click items for more actions."
+        )
+        tip_bar = tk.Frame(self, bg="#f8fafc", highlightbackground="#e2e8f0", highlightthickness=1, padx=8, pady=4)
+        tip_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=6, pady=(0, 6))
+        self.lbl_toast = tk.Label(
+            tip_bar,
+            text=self._default_tip_text,
+            bg="#f8fafc",
+            fg="#475569",
+            font=("", 8, "italic"),
+            anchor=tk.W,
+            justify=tk.LEFT,
+            wraplength=1080,
+        )
+        self.lbl_toast.pack(fill=tk.X)
+        tip_bar.bind("<Configure>", lambda e: self.lbl_toast.config(wraplength=max(200, e.width - 20)))
 
         # -------------------------------------------------------------
         # MAIN 2-PANE WORKSPACE: Tree (Left) + Studio Inspector (Right)
@@ -101,7 +137,7 @@ class RuleManagerView(ttk.Frame):
         tree_header.pack(fill=tk.X)
         tk.Label(
             tree_header,
-            text="DYNAMIC FOLDER HIERARCHY & RULES NAVIGATOR",
+            text="Folders & Rules",
             bg="#f1f5f9",
             fg="#334155",
             font=("", 9, "bold")
@@ -117,7 +153,9 @@ class RuleManagerView(ttk.Frame):
             show="tree headings",
             selectmode="browse"
         )
-        self.tree.heading("#0", text="Folder Hierarchy (L1 \\ L2 \\ L3 \\ L4...)")
+        self.tree.tag_configure("rule_enabled", foreground="#0f172a")
+        self.tree.tag_configure("rule_disabled", foreground="#94a3b8", font=("", 9, "italic"))
+        self.tree.heading("#0", text="Folder Hierarchy")
         self.tree.heading("Details", text="Level / Senders")
         self.tree.column("#0", width=260)
         self.tree.column("Details", width=120)
@@ -134,12 +172,6 @@ class RuleManagerView(ttk.Frame):
         self.tree.bind("<ButtonRelease-1>", self._on_drag_release)
         self.tree.bind("<Button-3>", self._show_context_menu)
         self.tree.bind("<Double-Button-1>", self._on_tree_double_click)
-
-        # Left Bottom Quick Action Bar
-        btn_bar_left = tk.Frame(self.frame_left, bg="#f8fafc", padx=4, pady=4)
-        btn_bar_left.pack(fill=tk.X, side=tk.BOTTOM)
-        ttk.Button(btn_bar_left, text="Delete Selected", command=self._delete_selected).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_bar_left, text="Duplicate Rule", command=self._duplicate_selected_rule).pack(side=tk.LEFT, padx=2)
 
         # -------------------------------------------------------------
         # Right Pane: Studio Inspector Card
@@ -269,12 +301,20 @@ class RuleManagerView(ttk.Frame):
         row1.pack(fill=tk.X)
 
         tk.Label(row1, text="Rule Name:", bg="#ffffff", font=("", 9, "bold"), fg="#334155").pack(side=tk.LEFT, padx=(0, 6))
-        self.ent_rule_name = ttk.Entry(row1, font=("", 9), width=28)
+        self.ent_rule_name = ttk.Entry(row1, font=("", 9), width=26, textvariable=self.var_rule_name)
         self.ent_rule_name.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
 
-        self.var_rule_enabled = tk.BooleanVar(value=True)
-        self.chk_rule_enabled = ttk.Checkbutton(row1, text="Active in Outlook", variable=self.var_rule_enabled)
-        self.chk_rule_enabled.pack(side=tk.RIGHT)
+        enabled_box = tk.Frame(row1, bg="#ffffff")
+        enabled_box.pack(side=tk.RIGHT)
+        self.chk_rule_enabled = ttk.Checkbutton(enabled_box, text="Enabled", variable=self.var_rule_enabled)
+        self.chk_rule_enabled.pack(side=tk.LEFT)
+        tk.Label(
+            enabled_box,
+            text="(applies to Outlook on next Sync)",
+            bg="#ffffff",
+            fg="#64748b",
+            font=("", 8),
+        ).pack(side=tk.LEFT, padx=(4, 0))
 
         # Quota meter (live compiled preview)
         self.lbl_quota = tk.Label(
@@ -424,14 +464,20 @@ class RuleManagerView(ttk.Frame):
         tk.Label(self.box_bulk, text="Emails (one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
         self.txt_bulk_emails = tk.Text(self.box_bulk, font=("Consolas", 9), height=6)
         self.txt_bulk_emails.pack(fill=tk.X, pady=(0, 4))
+        self.txt_bulk_emails.bind("<KeyRelease>", lambda _e: self._refresh_dirty_state())
+        self.txt_bulk_emails.bind("<FocusOut>", lambda _e: self._refresh_dirty_state())
 
         tk.Label(self.box_bulk, text="Domains (e.g. @omron.com, one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
         self.txt_bulk_domains = tk.Text(self.box_bulk, font=("Consolas", 9), height=3)
         self.txt_bulk_domains.pack(fill=tk.X, pady=(0, 4))
+        self.txt_bulk_domains.bind("<KeyRelease>", lambda _e: self._refresh_dirty_state())
+        self.txt_bulk_domains.bind("<FocusOut>", lambda _e: self._refresh_dirty_state())
 
         tk.Label(self.box_bulk, text="Subject Keywords (one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
         self.txt_bulk_keywords = tk.Text(self.box_bulk, font=("Consolas", 9), height=3)
         self.txt_bulk_keywords.pack(fill=tk.X, pady=(0, 4))
+        self.txt_bulk_keywords.bind("<KeyRelease>", lambda _e: self._refresh_dirty_state())
+        self.txt_bulk_keywords.bind("<FocusOut>", lambda _e: self._refresh_dirty_state())
 
         self.box_visual.pack(fill=tk.BOTH, expand=True)
 
@@ -514,7 +560,7 @@ class RuleManagerView(ttk.Frame):
         row_name = tk.Frame(self.frame_group, bg="#ffffff")
         row_name.pack(fill=tk.X, pady=(0, 8))
         tk.Label(row_name, text="Group Name:", bg="#ffffff", font=("", 9, "bold")).pack(side=tk.LEFT, padx=(0, 6))
-        self.ent_group_name = ttk.Entry(row_name, width=28)
+        self.ent_group_name = ttk.Entry(row_name, textvariable=self.var_group_name, width=28)
         self.ent_group_name.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # Action bar packed BEFORE scrollable middle content so buttons always stay visible
@@ -535,10 +581,14 @@ class RuleManagerView(ttk.Frame):
         tk.Label(grp_inner, text="Member Emails (one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
         self.txt_group_emails = tk.Text(grp_inner, font=("Consolas", 9), height=6)
         self.txt_group_emails.pack(fill=tk.X, pady=(0, 6))
+        self.txt_group_emails.bind("<KeyRelease>", lambda _e: self._refresh_dirty_state())
+        self.txt_group_emails.bind("<FocusOut>", lambda _e: self._refresh_dirty_state())
 
         tk.Label(grp_inner, text="Member Domains (e.g. @omron.com, one per line):", bg="#ffffff", font=("", 8, "bold")).pack(anchor=tk.W)
         self.txt_group_domains = tk.Text(grp_inner, font=("Consolas", 9), height=3)
         self.txt_group_domains.pack(fill=tk.X, pady=(0, 4))
+        self.txt_group_domains.bind("<KeyRelease>", lambda _e: self._refresh_dirty_state())
+        self.txt_group_domains.bind("<FocusOut>", lambda _e: self._refresh_dirty_state())
 
     def _build_pool_inspector(self):
         header = tk.Frame(self.frame_pool, bg="#fef2f2", padx=10, pady=8, highlightbackground="#fecaca", highlightthickness=1)
@@ -581,114 +631,280 @@ class RuleManagerView(ttk.Frame):
     # =================================================================
     # TREE REFRESH & DYNAMIC HIERARCHY POPULATION (ARBITRARY DEPTH)
     # =================================================================
-    def refresh_all(self):
+    def refresh_all(self, preserve_selection_iid: Optional[str] = None):
         """Rebuild the visual tree supporting arbitrary folder levels from YamlConfigManager."""
-        self.tree.delete(*self.tree.get_children())
-        self.folder_nodes_map.clear()
-        self.rule_nodes_map.clear()
+        self._in_tree_transition = True
+        try:
+            self.tree.delete(*self.tree.get_children())
+            self.folder_nodes_map.clear()
+            self.rule_nodes_map.clear()
 
-        q = self.search_query.lower()
+            q = self.search_query.lower()
 
-        # -------------------------------------------------------------
-        # Category 1: Hierarchical Folders & Rules (Arbitrary Depth)
-        # -------------------------------------------------------------
-        root_hier_id = "__HIERARCHY__"
-        self.tree.insert("", tk.END, iid=root_hier_id, text="▼ HIERARCHICAL FOLDERS & RULES", values=("Root",), open=True)
+            # ---------------------------------------------------------
+            # Category 1: Folders & Rules (Arbitrary Depth)
+            # ---------------------------------------------------------
+            root_hier_id = "__HIERARCHY__"
+            self.tree.insert("", tk.END, iid=root_hier_id, text="Folders & Rules", values=("Root",), open=True)
 
-        # Collect all folders
-        all_folders = self.yaml_mgr.get_all_folders()
+            all_folders = self.yaml_mgr.get_all_folders()
 
-        # Build folder nodes for any depth (L1, L2, L3, L4, L5...)
-        for fld in all_folders:
-            parts = [p.strip() for p in re.split(r'[\\/]', fld) if p.strip()]
-            parent_id = root_hier_id
-            accum_path = ""
-            for depth, part in enumerate(parts):
-                accum_path = f"{accum_path}\\{part}" if accum_path else part
-                fld_node_id = f"fld_{accum_path.lower().replace(' ', '_')}"
-                if fld_node_id not in self.folder_nodes_map:
-                    lbl = f"📁 [L{depth+1}] {part}"
-                    self.tree.insert(parent_id, tk.END, iid=fld_node_id, text=lbl, values=(f"Level {depth+1}",), open=True)
-                    self.folder_nodes_map[fld_node_id] = accum_path
-                parent_id = fld_node_id
-
-        # Insert rules under their respective folder nodes
-        for rule in self.yaml_mgr.rules:
-            # Check filter
-            all_emails = self.yaml_mgr.get_all_emails_for_rule(rule)
-            all_domains = self.yaml_mgr.get_all_domains_for_rule(rule)
-
-            if q:
-                match_name = q in rule.name.lower()
-                match_folder = q in (rule.target_folder or "").lower()
-                match_emails = any(q in e.lower() for e in all_emails)
-                match_domains = any(q in d.lower() for d in all_domains)
-                if not (match_name or match_folder or match_emails or match_domains):
-                    continue
-
-            # Determine parent folder node
-            raw_folder = rule.target_folder or "_Unclassified"
-            fld_node_id = f"fld_{raw_folder.lower().replace(' ', '_')}"
-
-            # If folder node doesn't exist, create it under root
-            if fld_node_id not in self.folder_nodes_map:
-                parts = [p.strip() for p in re.split(r'[\\/]', raw_folder) if p.strip()]
+            for fld in all_folders:
+                parts = [p.strip() for p in re.split(r'[\\/]', fld) if p.strip()]
                 parent_id = root_hier_id
-                accum = ""
-                for d, pt in enumerate(parts):
-                    accum = f"{accum}\\{pt}" if accum else pt
-                    curr_fid = f"fld_{accum.lower().replace(' ', '_')}"
-                    if curr_fid not in self.folder_nodes_map:
-                        self.tree.insert(parent_id, tk.END, iid=curr_fid, text=f"📁 [L{d+1}] {pt}", values=(f"Level {d+1}",), open=True)
-                        self.folder_nodes_map[curr_fid] = accum
-                    parent_id = curr_fid
-                fld_node_id = parent_id
+                accum_path = ""
+                for depth, part in enumerate(parts):
+                    accum_path = f"{accum_path}\\{part}" if accum_path else part
+                    fld_node_id = f"fld_{accum_path.lower().replace(' ', '_')}"
+                    if fld_node_id not in self.folder_nodes_map:
+                        self.tree.insert(
+                            parent_id, tk.END, iid=fld_node_id,
+                            text=f"📁 {part}", values=(f"Level {depth+1}",), open=True
+                        )
+                        self.folder_nodes_map[fld_node_id] = accum_path
+                    parent_id = fld_node_id
 
-            status_str = "[ON]" if rule.enabled else "[OFF]"
-            total_senders = len(all_emails) + len(all_domains)
-            rule_iid = f"rule_{rule.id}"
-            self.tree.insert(
-                fld_node_id, tk.END, iid=rule_iid,
-                text=f"⚡ {status_str} {rule.name}",
-                values=(f"{total_senders} senders",),
-                open=False
+            for rule in self.yaml_mgr.rules:
+                all_emails, all_domains, keywords = self.sync_engine.get_rule_conditions(rule)
+
+                if q:
+                    match_name = q in rule.name.lower()
+                    match_folder = q in (rule.target_folder or "").lower()
+                    match_emails = any(q in e.lower() for e in all_emails)
+                    match_domains = any(q in d.lower() for d in all_domains)
+                    match_kw = any(q in kw.lower() for kw in keywords)
+                    if not (match_name or match_folder or match_emails or match_domains or match_kw):
+                        continue
+
+                raw_folder = rule.target_folder or "_Unclassified"
+                fld_node_id = f"fld_{raw_folder.lower().replace(' ', '_')}"
+
+                if fld_node_id not in self.folder_nodes_map:
+                    parts = [p.strip() for p in re.split(r'[\\/]', raw_folder) if p.strip()]
+                    parent_id = root_hier_id
+                    accum = ""
+                    for d, pt in enumerate(parts):
+                        accum = f"{accum}\\{pt}" if accum else pt
+                        curr_fid = f"fld_{accum.lower().replace(' ', '_')}"
+                        if curr_fid not in self.folder_nodes_map:
+                            self.tree.insert(
+                                parent_id, tk.END, iid=curr_fid,
+                                text=f"📁 {pt}", values=(f"Level {d+1}",), open=True
+                            )
+                            self.folder_nodes_map[curr_fid] = accum
+                        parent_id = curr_fid
+                    fld_node_id = parent_id
+
+                summary = self.sync_engine.get_rule_quota_summary(rule)
+                total_senders = summary["email_count"] + summary["domain_count"]
+                rule_iid = f"rule_{rule.id}"
+                if rule.enabled:
+                    rule_label = f"⚡ {rule.name}"
+                    rule_tags = ("rule_enabled",)
+                else:
+                    rule_label = f"⏸ {rule.name} (disabled)"
+                    rule_tags = ("rule_disabled",)
+                self.tree.insert(
+                    fld_node_id, tk.END, iid=rule_iid,
+                    text=rule_label,
+                    values=(f"{total_senders} senders",),
+                    open=False,
+                    tags=rule_tags,
+                )
+                self.rule_nodes_map[rule_iid] = rule.id
+
+            # ---------------------------------------------------------
+            # Category 2: Shared Address Groups
+            # ---------------------------------------------------------
+            root_grp_id = "__GROUPS__"
+            self.tree.insert("", tk.END, iid=root_grp_id, text="Shared Address Groups", values=("Groups",), open=True)
+            for g_id, grp in self.yaml_mgr.groups.items():
+                if q and not (q in grp.name.lower() or any(q in e.lower() for e in grp.emails)):
+                    continue
+                count = len(grp.emails) + len(grp.domains)
+                grp_iid = f"grp_{g_id}"
+                self.tree.insert(root_grp_id, tk.END, iid=grp_iid, text=f"👥 {grp.name}", values=(f"{count} members",))
+
+            # ---------------------------------------------------------
+            # Category 3: Unclassified Pool
+            # ---------------------------------------------------------
+            root_pool_id = "__POOL__"
+            pool_count = len(self.yaml_mgr.unclassified_pool)
+            self.tree.insert("", tk.END, iid=root_pool_id, text=f"Unclassified Pool ({pool_count})", values=("Pool",), open=True)
+            for email in self.yaml_mgr.unclassified_pool:
+                if q and q not in email.lower():
+                    continue
+                pool_iid = f"pool_{email}"
+                self.tree.insert(root_pool_id, tk.END, iid=pool_iid, text=f"📧 {email}", values=("Orphaned",))
+
+            target_sel = preserve_selection_iid or self._current_selected_iid
+            if target_sel and self.tree.exists(target_sel):
+                self.tree.selection_set(target_sel)
+        finally:
+            self.update_idletasks()
+            self._in_tree_transition = False
+
+    def _select_tree_iid_silently(self, iid: Optional[str]):
+        """Select a tree item programmatically without firing dirty prompts."""
+        self._in_tree_transition = True
+        try:
+            if iid and self.tree.exists(iid):
+                self.tree.selection_set(iid)
+                self._current_selected_iid = iid
+            else:
+                self.tree.selection_remove(self.tree.selection())
+                self._current_selected_iid = None
+        finally:
+            self.update_idletasks()
+            self._in_tree_transition = False
+
+    def _get_current_rule_form_values(self) -> Tuple[str, bool, List[str], List[str], List[str], List[str]]:
+        name = self.var_rule_name.get().strip()
+        enabled = bool(self.var_rule_enabled.get())
+        groups = list(self._editing_rule_group_ids)
+        if self.condition_mode == "visual":
+            emails = [self.lst_emails.get(i).strip().lower() for i in range(self.lst_emails.size()) if self.lst_emails.get(i).strip()]
+            raw_domains = [self.lst_domains.get(i) for i in range(self.lst_domains.size())]
+            raw_keywords = [self.lst_keywords.get(i) for i in range(self.lst_keywords.size())]
+        else:
+            emails = [l.strip().lower() for l in self.txt_bulk_emails.get("1.0", tk.END).split("\n") if l.strip()]
+            raw_domains = self.txt_bulk_domains.get("1.0", tk.END).split("\n")
+            raw_keywords = self.txt_bulk_keywords.get("1.0", tk.END).split("\n")
+        return (
+            name,
+            enabled,
+            groups,
+            sorted(list(set(emails))),
+            sorted(list(set(YamlConfigManager.normalize_domains(raw_domains)))),
+            YamlConfigManager.normalize_keywords(raw_keywords),
+        )
+
+    def is_rule_dirty(self) -> bool:
+        if not self.selected_rule or not self.frame_rule.winfo_manager():
+            return False
+        r = self.selected_rule
+        f_name, f_enabled, f_groups, f_emails, f_domains, f_keywords = self._get_current_rule_form_values()
+        saved_emails = sorted(list(set(e.strip().lower() for e in (r.emails or []) if e.strip())))
+        saved_domains = sorted(list(set(YamlConfigManager.normalize_domains(r.domains or []))))
+        saved_keywords = YamlConfigManager.normalize_keywords(r.subject_keywords or [])
+        return (
+            f_name != (r.name or "").strip()
+            or f_enabled != bool(r.enabled)
+            or f_groups != list(r.groups or [])
+            or f_emails != saved_emails
+            or f_domains != saved_domains
+            or f_keywords != saved_keywords
+        )
+
+    def _get_current_group_form_values(self) -> Tuple[str, List[str], List[str]]:
+        name = self.var_group_name.get().strip()
+        emails = [l.strip().lower() for l in self.txt_group_emails.get("1.0", tk.END).split("\n") if l.strip()]
+        raw_domains = self.txt_group_domains.get("1.0", tk.END).split("\n")
+        return (
+            name,
+            sorted(list(set(emails))),
+            sorted(list(set(YamlConfigManager.normalize_domains(raw_domains)))),
+        )
+
+    def is_group_dirty(self) -> bool:
+        if not self.selected_group or not self.frame_group.winfo_manager():
+            return False
+        g = self.selected_group
+        f_name, f_emails, f_domains = self._get_current_group_form_values()
+        saved_emails = sorted(list(set(e.strip().lower() for e in (g.emails or []) if e.strip())))
+        saved_domains = sorted(list(set(YamlConfigManager.normalize_domains(g.domains or []))))
+        return (
+            f_name != (g.name or "").strip()
+            or f_emails != saved_emails
+            or f_domains != saved_domains
+        )
+
+    def has_unsaved_changes(self) -> bool:
+        return self.is_rule_dirty() or self.is_group_dirty()
+
+    def _refresh_dirty_state(self):
+        if self._populating_inspector:
+            return
+        if self.is_rule_dirty():
+            self.btn_save_rule.config(text="Save Changes ●", style="DirtySave.TButton")
+        else:
+            self.btn_save_rule.config(text="Save Rule to YAML", style="Accent.TButton")
+
+        if self.is_group_dirty():
+            self.btn_save_group.config(text="Save Changes ●", style="DirtySave.TButton")
+        else:
+            self.btn_save_group.config(text="Save Group to YAML", style="Accent.TButton")
+
+    def confirm_pending_changes(self, reset_if_discard: bool = True, refresh_tree: bool = True) -> bool:
+        """Prompt user if rule or group inspector has unsaved changes.
+
+        Returns True to allow navigation/close, False if user cancelled or save validation failed.
+        """
+        if self.is_rule_dirty() and self.selected_rule is not None:
+            ans = messagebox.askyesnocancel(
+                "Unsaved Changes",
+                f"Save changes to '{self.selected_rule.name}'?",
+                icon=messagebox.WARNING,
             )
-            self.rule_nodes_map[rule_iid] = rule.id
+            if ans is None:
+                return False
+            if ans:
+                return self._save_rule_changes(refresh_tree=refresh_tree, select_after=False)
+            if reset_if_discard:
+                self._populate_rule_inspector(self.selected_rule)
+            return True
 
-        # -------------------------------------------------------------
-        # Category 2: Shared Address Groups
-        # -------------------------------------------------------------
-        root_grp_id = "__GROUPS__"
-        self.tree.insert("", tk.END, iid=root_grp_id, text="▼ SHARED ADDRESS GROUPS", values=("Groups",), open=True)
-        for g_id, grp in self.yaml_mgr.groups.items():
-            if q and not (q in grp.name.lower() or any(q in e.lower() for e in grp.emails)):
-                continue
-            count = len(grp.emails) + len(grp.domains)
-            grp_iid = f"grp_{g_id}"
-            self.tree.insert(root_grp_id, tk.END, iid=grp_iid, text=f"👥 {grp.name}", values=(f"{count} members",))
+        if self.is_group_dirty() and self.selected_group is not None:
+            ans = messagebox.askyesnocancel(
+                "Unsaved Changes",
+                f"Save changes to '{self.selected_group.name}'?",
+                icon=messagebox.WARNING,
+            )
+            if ans is None:
+                return False
+            if ans:
+                return self._save_group_changes(refresh_tree=refresh_tree, select_after=False)
+            if reset_if_discard:
+                self._populate_group_inspector(self.selected_group)
+            return True
 
-        # -------------------------------------------------------------
-        # Category 3: Unclassified Pool
-        # -------------------------------------------------------------
-        root_pool_id = "__POOL__"
-        pool_count = len(self.yaml_mgr.unclassified_pool)
-        self.tree.insert("", tk.END, iid=root_pool_id, text=f"▼ UNCLASSIFIED POOL ({pool_count})", values=("Pool",), open=True)
-        for email in self.yaml_mgr.unclassified_pool:
-            if q and q not in email.lower():
-                continue
-            pool_iid = f"pool_{email}"
-            self.tree.insert(root_pool_id, tk.END, iid=pool_iid, text=f"📧 {email}", values=("Orphaned",))
+        return True
 
     # =================================================================
     # TREE SELECTION & INSPECTOR SWITCHING
     # =================================================================
     def _on_tree_select(self, event=None):
+        if self._in_tree_transition:
+            return
         sel = self.tree.selection()
         if not sel:
+            if self._current_selected_iid is not None:
+                if not self.confirm_pending_changes(reset_if_discard=False, refresh_tree=False):
+                    self._select_tree_iid_silently(self._current_selected_iid)
+                    return
+            self._current_selected_iid = None
+            self.selected_rule = None
+            self.selected_folder_path = None
+            self.selected_group = None
+            self.selected_pool_item = None
             self._show_inspector(self.frame_empty)
+            self._refresh_dirty_state()
             return
 
         iid = sel[0]
+        if iid == self._current_selected_iid:
+            return
+
+        if self._current_selected_iid is not None:
+            was_dirty = self.has_unsaved_changes()
+            if not self.confirm_pending_changes(reset_if_discard=False, refresh_tree=False):
+                self._select_tree_iid_silently(self._current_selected_iid)
+                return
+            if was_dirty and not self.has_unsaved_changes():
+                # Previous edits were saved; refresh tree counts/names and preserve target iid
+                self.refresh_all(preserve_selection_iid=iid)
+
+        self._current_selected_iid = iid
 
         # 1. Selected a Rule
         if iid.startswith("rule_"):
@@ -711,6 +927,7 @@ class RuleManagerView(ttk.Frame):
             if self.selected_folder_path:
                 self._populate_folder_inspector(self.selected_folder_path)
                 self._show_inspector(self.frame_folder)
+            self._refresh_dirty_state()
             return
 
         # 3. Selected a Group
@@ -733,10 +950,12 @@ class RuleManagerView(ttk.Frame):
             self.selected_group = None
             self._populate_pool_inspector()
             self._show_inspector(self.frame_pool)
+            self._refresh_dirty_state()
             return
 
         # Category headers
         self._show_inspector(self.frame_empty)
+        self._refresh_dirty_state()
 
     def _on_tree_double_click(self, event):
         """Toggle expand/collapse on double-click."""
@@ -752,52 +971,57 @@ class RuleManagerView(ttk.Frame):
     # POPULATING INSPECTORS (DYNAMIC LEVELS)
     # =================================================================
     def _populate_rule_inspector(self, rule: RuleConfig):
-        # Breadcrumbs with Dynamic Level tags
-        folder_path = rule.target_folder or "_Unclassified"
-        parts = [p.strip() for p in re.split(r'[\\/]', folder_path) if p.strip()]
-        breadcrumb_str = " > ".join(f"[L{i+1}] {p}" for i, p in enumerate(parts)) if parts else "(Root)"
-        self.lbl_breadcrumb.config(text=f"📁 {breadcrumb_str} (Level {len(parts)})")
+        self._populating_inspector = True
+        try:
+            # Breadcrumbs with Dynamic Level tags
+            folder_path = rule.target_folder or "_Unclassified"
+            parts = [p.strip() for p in re.split(r'[\\/]', folder_path) if p.strip()]
+            breadcrumb_str = " > ".join(f"[L{i+1}] {p}" for i, p in enumerate(parts)) if parts else "(Root)"
+            self.lbl_breadcrumb.config(text=f"📁 {breadcrumb_str} (Level {len(parts)})")
 
-        # Core properties
-        self.ent_rule_name.delete(0, tk.END)
-        self.ent_rule_name.insert(0, rule.name)
-        self.var_rule_enabled.set(rule.enabled)
+            # Core properties
+            self.ent_rule_name.delete(0, tk.END)
+            self.ent_rule_name.insert(0, rule.name)
+            self.var_rule_enabled.set(rule.enabled)
 
-        # Linked Groups
-        self._editing_rule_group_ids = list(rule.groups)
-        self._refresh_linked_groups_listbox()
+            # Linked Groups
+            self._editing_rule_group_ids = list(rule.groups)
+            self._refresh_linked_groups_listbox()
 
-        # Quota Meter (uses live editing group IDs + SyncEngine compiler)
-        self._update_rule_quota_display()
+            # Quota Meter (uses live editing group IDs + SyncEngine compiler)
+            self._update_rule_quota_display()
 
-        # Visual Lists
-        self.lst_emails.delete(0, tk.END)
-        for e in sorted(rule.emails):
-            self.lst_emails.insert(tk.END, e)
+            # Visual Lists
+            self.lst_emails.delete(0, tk.END)
+            for e in sorted(rule.emails):
+                self.lst_emails.insert(tk.END, e)
 
-        self.lst_domains.delete(0, tk.END)
-        for d in sorted(rule.domains):
-            self.lst_domains.insert(tk.END, d)
+            self.lst_domains.delete(0, tk.END)
+            for d in sorted(rule.domains):
+                self.lst_domains.insert(tk.END, d)
 
-        norm_keywords = YamlConfigManager.normalize_keywords(rule.subject_keywords)
-        self.lst_keywords.delete(0, tk.END)
-        for kw in norm_keywords:
-            self.lst_keywords.insert(tk.END, kw)
+            norm_keywords = YamlConfigManager.normalize_keywords(rule.subject_keywords)
+            self.lst_keywords.delete(0, tk.END)
+            for kw in norm_keywords:
+                self.lst_keywords.insert(tk.END, kw)
 
-        # Bulk Texts
-        self.txt_bulk_emails.delete("1.0", tk.END)
-        self.txt_bulk_emails.insert(tk.END, "\n".join(sorted(rule.emails)))
+            # Bulk Texts
+            self.txt_bulk_emails.delete("1.0", tk.END)
+            self.txt_bulk_emails.insert(tk.END, "\n".join(sorted(rule.emails)))
 
-        self.txt_bulk_domains.delete("1.0", tk.END)
-        self.txt_bulk_domains.insert(tk.END, "\n".join(sorted(rule.domains)))
+            self.txt_bulk_domains.delete("1.0", tk.END)
+            self.txt_bulk_domains.insert(tk.END, "\n".join(sorted(rule.domains)))
 
-        self.txt_bulk_keywords.delete("1.0", tk.END)
-        self.txt_bulk_keywords.insert(tk.END, "\n".join(norm_keywords))
+            self.txt_bulk_keywords.delete("1.0", tk.END)
+            self.txt_bulk_keywords.insert(tk.END, "\n".join(norm_keywords))
 
-        self.lbl_test_result.config(text="")
-        self.ent_test_match.delete(0, tk.END)
-        self.ent_test_subject.delete(0, tk.END)
-        self.rule_scroll_canvas.yview_moveto(0)
+            self.lbl_test_result.config(text="")
+            self.ent_test_match.delete(0, tk.END)
+            self.ent_test_subject.delete(0, tk.END)
+            self.rule_scroll_canvas.yview_moveto(0)
+        finally:
+            self._populating_inspector = False
+        self._refresh_dirty_state()
 
     def _update_rule_quota_display(self):
         """Update quota banner and sub-rule preview from SyncEngine without duplicating split logic."""
@@ -820,7 +1044,8 @@ class RuleManagerView(ttk.Frame):
             return
 
         names = summary["native_names"]
-        color = "#16a34a" if len(names) == 1 else "#ea580c"
+        has_threshold_split = any("(Part " in name for name in names)
+        color = "#ea580c" if has_threshold_split else "#16a34a"
         self.lbl_quota.config(
             text=(
                 f"Outlook: {summary['email_count']} senders, "
@@ -842,15 +1067,20 @@ class RuleManagerView(ttk.Frame):
 
         # Rules in folder
         folder_rules = [r for r in self.yaml_mgr.rules if r.target_folder == folder_path]
-        total_senders = sum(len(self.yaml_mgr.get_all_emails_for_rule(r)) + len(self.yaml_mgr.get_all_domains_for_rule(r)) for r in folder_rules)
+        rule_counts = {}
+        total_senders = 0
+        for r in folder_rules:
+            summary = self.sync_engine.get_rule_quota_summary(r)
+            cnt = summary["email_count"] + summary["domain_count"]
+            rule_counts[r.id] = cnt
+            total_senders += cnt
 
         self.lbl_folder_stats.config(text=f"Rules in this Folder: {len(folder_rules)}  |  Total Monitored Senders: {total_senders}")
 
         self.tree_folder_rules.delete(*self.tree_folder_rules.get_children())
         for r in folder_rules:
             st = "Active" if r.enabled else "Disabled"
-            cnt = len(self.yaml_mgr.get_all_emails_for_rule(r)) + len(self.yaml_mgr.get_all_domains_for_rule(r))
-            self.tree_folder_rules.insert("", tk.END, iid=f"frule_{r.id}", text=r.name, values=(st, f"{cnt} senders"))
+            self.tree_folder_rules.insert("", tk.END, iid=f"frule_{r.id}", text=r.name, values=(st, f"{rule_counts[r.id]} senders"))
 
         # Configure Level shifting buttons (Promote / Move Up)
         if depth > 1:
@@ -862,16 +1092,21 @@ class RuleManagerView(ttk.Frame):
             self.btn_move_up.pack_forget()
 
     def _populate_group_inspector(self, group: AddressGroup):
-        self.lbl_group_title.config(text=f"Shared Address Group: {group.name}")
-        self.ent_group_name.delete(0, tk.END)
-        self.ent_group_name.insert(0, group.name)
+        self._populating_inspector = True
+        try:
+            self.lbl_group_title.config(text=f"Shared Address Group: {group.name}")
+            self.ent_group_name.delete(0, tk.END)
+            self.ent_group_name.insert(0, group.name)
 
-        self.txt_group_emails.delete("1.0", tk.END)
-        self.txt_group_emails.insert(tk.END, "\n".join(sorted(group.emails)))
+            self.txt_group_emails.delete("1.0", tk.END)
+            self.txt_group_emails.insert(tk.END, "\n".join(sorted(group.emails)))
 
-        self.txt_group_domains.delete("1.0", tk.END)
-        self.txt_group_domains.insert(tk.END, "\n".join(sorted(group.domains)))
-        self.group_scroll_canvas.yview_moveto(0)
+            self.txt_group_domains.delete("1.0", tk.END)
+            self.txt_group_domains.insert(tk.END, "\n".join(sorted(group.domains)))
+            self.group_scroll_canvas.yview_moveto(0)
+        finally:
+            self._populating_inspector = False
+        self._refresh_dirty_state()
 
     def _populate_pool_inspector(self):
         self.lst_pool.delete(0, tk.END)
@@ -1093,10 +1328,29 @@ class RuleManagerView(ttk.Frame):
             return f"Address '{iid.replace('pool_', '')}'"
         return "Item"
 
+    def _on_destroy(self, event=None):
+        """Cancel any pending toast timer when the view is destroyed."""
+        if event is not None and event.widget is not self:
+            return
+        if self._toast_after_id:
+            try:
+                self.after_cancel(self._toast_after_id)
+            except tk.TclError:
+                pass
+            self._toast_after_id = None
+
     def _show_toast(self, message: str):
-        """Display non-blocking status notification in top bar."""
+        """Display non-blocking status notification in bottom tip bar."""
         self.lbl_toast.config(text=message, fg="#0284c7")
-        self.after(5000, lambda: self.lbl_toast.config(text="Tip: Folders have flexible levels. Drag to Root for Level 1, or drop into any folder for Level 2, 3, 4...", fg="#64748b"))
+        if self._toast_after_id:
+            try:
+                self.after_cancel(self._toast_after_id)
+            except tk.TclError:
+                pass
+        self._toast_after_id = self.after(
+            5000,
+            lambda: self.winfo_exists() and self.lbl_toast.config(text=self._default_tip_text, fg="#475569"),
+        )
 
     # =================================================================
     # CONTEXT MENUS & ACTIONS (DYNAMIC LEVEL MANAGEMENT)
@@ -1380,43 +1634,36 @@ class RuleManagerView(ttk.Frame):
             self.tree.selection_set(rule_iid)
             self._on_tree_select()
 
-    def _save_rule_changes(self):
+    def _save_rule_changes(self, refresh_tree: bool = True, select_after: bool = True) -> bool:
         if not self.selected_rule:
-            return
+            return True
 
-        name = self.ent_rule_name.get().strip()
+        name, enabled, groups, emails, domains, keywords = self._get_current_rule_form_values()
         if not name:
             messagebox.showwarning("Notice", "Rule name cannot be empty.")
-            return
+            return False
 
         self.selected_rule.name = name
-        self.selected_rule.enabled = self.var_rule_enabled.get()
-
-        if self.condition_mode == "visual":
-            emails = [self.lst_emails.get(i).strip().lower() for i in range(self.lst_emails.size()) if self.lst_emails.get(i).strip()]
-            raw_domains = [self.lst_domains.get(i) for i in range(self.lst_domains.size())]
-            raw_keywords = [self.lst_keywords.get(i) for i in range(self.lst_keywords.size())]
-        else:
-            emails = [l.strip().lower() for l in self.txt_bulk_emails.get("1.0", tk.END).split("\n") if l.strip()]
-            raw_domains = self.txt_bulk_domains.get("1.0", tk.END).split("\n")
-            raw_keywords = self.txt_bulk_keywords.get("1.0", tk.END).split("\n")
-
-        domains = YamlConfigManager.normalize_domains(raw_domains)
-        keywords = YamlConfigManager.normalize_keywords(raw_keywords)
-
-        self.selected_rule.groups = list(self._editing_rule_group_ids)
-        self.selected_rule.emails = sorted(list(set(emails)))
-        self.selected_rule.domains = sorted(list(set(domains)))
+        self.selected_rule.enabled = enabled
+        self.selected_rule.groups = groups
+        self.selected_rule.emails = emails
+        self.selected_rule.domains = domains
         self.selected_rule.subject_keywords = keywords
 
         self.yaml_mgr.save()
         self._show_toast(f"Saved rule '{name}' to rules.yaml")
-        self.refresh_all()
+        self._refresh_dirty_state()
 
-        rule_iid = f"rule_{self.selected_rule.id}"
-        if self.tree.exists(rule_iid):
-            self.tree.selection_set(rule_iid)
-            self._on_tree_select()
+        if refresh_tree:
+            self.refresh_all()
+
+        if select_after:
+            rule_iid = f"rule_{self.selected_rule.id}"
+            if self.tree.exists(rule_iid):
+                self._select_tree_iid_silently(rule_iid)
+                self._populate_rule_inspector(self.selected_rule)
+                self._show_inspector(self.frame_rule)
+        return True
 
     def _toggle_rule_enabled(self):
         if not self.selected_rule:
@@ -1425,20 +1672,26 @@ class RuleManagerView(ttk.Frame):
         self.yaml_mgr.save()
         st = "Enabled" if self.selected_rule.enabled else "Disabled"
         self._show_toast(f"Rule '{self.selected_rule.name}' {st}")
-        self.refresh_all()
+        rule_iid = f"rule_{self.selected_rule.id}"
+        self.refresh_all(preserve_selection_iid=rule_iid)
+        self._populate_rule_inspector(self.selected_rule)
 
     def _duplicate_selected_rule(self):
         if not self.selected_rule:
             messagebox.showwarning("Notice", "Select a rule to duplicate.")
             return
+        if not self.confirm_pending_changes(reset_if_discard=True):
+            return
         dup = self.yaml_mgr.duplicate_rule(self.selected_rule.id)
         if dup:
             self._show_toast(f"Duplicated: '{dup.name}'")
-            self.refresh_all()
             dup_iid = f"rule_{dup.id}"
+            self.refresh_all()
             if self.tree.exists(dup_iid):
-                self.tree.selection_set(dup_iid)
-                self._on_tree_select()
+                self._select_tree_iid_silently(dup_iid)
+                self.selected_rule = dup
+                self._populate_rule_inspector(dup)
+                self._show_inspector(self.frame_rule)
 
     def _delete_selected(self):
         """Delete currently selected rule or folder."""
@@ -1458,8 +1711,10 @@ class RuleManagerView(ttk.Frame):
                 self.yaml_mgr.remove_rule_and_repool(rule.id)
                 self._show_toast(f"Deleted rule '{rule.name}'")
                 self.selected_rule = None
+                self._current_selected_iid = None
                 self.refresh_all()
                 self._show_inspector(self.frame_empty)
+                self._refresh_dirty_state()
         elif self.selected_folder_path:
             self._delete_selected_folder()
 
@@ -1516,6 +1771,7 @@ class RuleManagerView(ttk.Frame):
                     self._editing_rule_group_ids.append(g_id)
             self._refresh_linked_groups_listbox()
             self._update_rule_quota_display()
+            self._refresh_dirty_state()
             dlg.destroy()
 
         btn_bar = ttk.Frame(dlg, padding=8)
@@ -1532,6 +1788,7 @@ class RuleManagerView(ttk.Frame):
                 self._editing_rule_group_ids.pop(idx)
         self._refresh_linked_groups_listbox()
         self._update_rule_quota_display()
+        self._refresh_dirty_state()
 
     def _set_condition_mode(self, mode: str):
         self.condition_mode = mode
@@ -1570,6 +1827,7 @@ class RuleManagerView(ttk.Frame):
             self.txt_bulk_keywords.insert(tk.END, "\n".join(keywords))
             self.box_visual.pack_forget()
             self.box_bulk.pack(fill=tk.BOTH, expand=True)
+        self._refresh_dirty_state()
 
     @staticmethod
     def _remove_selected_from_listbox(listbox: tk.Listbox):
@@ -1585,9 +1843,11 @@ class RuleManagerView(ttk.Frame):
         if val not in existing:
             self.lst_emails.insert(tk.END, val)
         self.ent_add_email.delete(0, tk.END)
+        self._refresh_dirty_state()
 
     def _remove_email_chip(self):
         self._remove_selected_from_listbox(self.lst_emails)
+        self._refresh_dirty_state()
 
     def _add_domain_chip(self):
         val = self.ent_add_domain.get().strip().lower()
@@ -1599,9 +1859,11 @@ class RuleManagerView(ttk.Frame):
         if val not in existing:
             self.lst_domains.insert(tk.END, val)
         self.ent_add_domain.delete(0, tk.END)
+        self._refresh_dirty_state()
 
     def _remove_domain_chip(self):
         self._remove_selected_from_listbox(self.lst_domains)
+        self._refresh_dirty_state()
 
     def _add_keyword_chip(self):
         val = self.ent_add_keyword.get().strip()
@@ -1611,30 +1873,19 @@ class RuleManagerView(ttk.Frame):
         if val.lower() not in existing_lower:
             self.lst_keywords.insert(tk.END, val)
         self.ent_add_keyword.delete(0, tk.END)
+        self._refresh_dirty_state()
 
     def _remove_keyword_chip(self):
         self._remove_selected_from_listbox(self.lst_keywords)
+        self._refresh_dirty_state()
 
     def _test_rule_match(self):
         query = self.ent_test_match.get().strip().lower()
         subj_query = self.ent_test_subject.get().strip()
         if (not query and not subj_query) or not self.selected_rule:
             return
-        all_emails = self.yaml_mgr.get_all_emails_for_rule(self.selected_rule)
-        all_domains = self.yaml_mgr.get_all_domains_for_rule(self.selected_rule)
-        keywords = YamlConfigManager.normalize_keywords(self.selected_rule.subject_keywords)
-
-        if query and query in all_emails:
-            self.lbl_test_result.config(text="MATCH! (Exact Email)", fg="#16a34a")
-        elif query and any(query.endswith(d) or d.lstrip("@") in query for d in all_domains):
-            self.lbl_test_result.config(text="MATCH! (Domain Rule)", fg="#16a34a")
-        else:
-            subj_lower = subj_query.lower()
-            matched_kw = next((kw for kw in keywords if kw.lower() in subj_lower), None) if subj_lower else None
-            if matched_kw:
-                self.lbl_test_result.config(text=f"MATCH! (Subject: '{matched_kw}')", fg="#16a34a")
-            else:
-                self.lbl_test_result.config(text="NO MATCH", fg="#dc2626")
+        matched, reason = self.sync_engine.test_rule_match(self.selected_rule, query, subj_query)
+        self.lbl_test_result.config(text=reason, fg="#16a34a" if matched else "#dc2626")
 
     # -----------------------------------------------------------------
     # FOLDER PICKER MODAL DIALOG (DYNAMIC ARBITRARY LEVELS)
@@ -1731,24 +1982,31 @@ class RuleManagerView(ttk.Frame):
             self.tree.selection_set(grp_iid)
             self._on_tree_select()
 
-    def _save_group_changes(self):
+    def _save_group_changes(self, refresh_tree: bool = True, select_after: bool = True) -> bool:
         if not self.selected_group:
-            return
-        name = self.ent_group_name.get().strip()
+            return True
+        name, emails, domains = self._get_current_group_form_values()
         if not name:
             messagebox.showwarning("Notice", "Group name cannot be empty.")
-            return
-
-        emails = [l.strip().lower() for l in self.txt_group_emails.get("1.0", tk.END).split("\n") if l.strip()]
-        raw_domains = self.txt_group_domains.get("1.0", tk.END).split("\n")
-        domains = YamlConfigManager.normalize_domains(raw_domains)
+            return False
 
         self.selected_group.name = name
-        self.selected_group.emails = sorted(list(set(emails)))
-        self.selected_group.domains = sorted(list(set(domains)))
+        self.selected_group.emails = emails
+        self.selected_group.domains = domains
         self.yaml_mgr.save()
         self._show_toast(f"Saved group '{name}'")
-        self.refresh_all()
+        self._refresh_dirty_state()
+
+        if refresh_tree:
+            self.refresh_all()
+
+        if select_after:
+            grp_iid = f"grp_{self.selected_group.id}"
+            if self.tree.exists(grp_iid):
+                self._select_tree_iid_silently(grp_iid)
+                self._populate_group_inspector(self.selected_group)
+                self._show_inspector(self.frame_group)
+        return True
 
     def _rename_selected_group(self):
         if not self.selected_group:
@@ -1758,7 +2016,9 @@ class RuleManagerView(ttk.Frame):
             self.selected_group.name = new_name
             self.yaml_mgr.save()
             self._show_toast(f"Renamed group to '{new_name}'")
-            self.refresh_all()
+            grp_iid = f"grp_{self.selected_group.id}"
+            self.refresh_all(preserve_selection_iid=grp_iid)
+            self._populate_group_inspector(self.selected_group)
 
     def _delete_selected_group(self):
         if not self.selected_group:
@@ -1779,8 +2039,10 @@ class RuleManagerView(ttk.Frame):
         if self.yaml_mgr.delete_group(g_id, repool_emails=bool(choice)):
             self._show_toast("Deleted group")
             self.selected_group = None
+            self._current_selected_iid = None
             self.refresh_all()
             self._show_inspector(self.frame_empty)
+            self._refresh_dirty_state()
 
     def _assign_pool_to_rule(self):
         sel_indices = self.lst_pool.curselection()
@@ -1853,6 +2115,7 @@ class RuleManagerView(ttk.Frame):
             combined = sorted(list(set(current + emails)))
             self.txt_bulk_emails.delete("1.0", tk.END)
             self.txt_bulk_emails.insert(tk.END, "\n".join(combined))
+        self._refresh_dirty_state()
         messagebox.showinfo("Imported", f"Successfully imported {len(emails)} email addresses.")
 
     def _import_addresses_to_group(self):
@@ -1863,6 +2126,7 @@ class RuleManagerView(ttk.Frame):
         combined = sorted(list(set(current + emails)))
         self.txt_group_emails.delete("1.0", tk.END)
         self.txt_group_emails.insert(tk.END, "\n".join(combined))
+        self._refresh_dirty_state()
         messagebox.showinfo("Imported", f"Successfully imported {len(emails)} email addresses.")
 
     def _read_addresses_from_file(self) -> List[str]:

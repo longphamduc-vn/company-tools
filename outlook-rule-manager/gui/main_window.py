@@ -27,6 +27,9 @@ class MainWindow(tk.Tk):
         self.outlook = outlook_client if outlook_client is not None else get_outlook_client()
         self.sync_engine = SyncEngine(self.yaml_mgr, self.outlook)
 
+        self._current_tab_index: int = 0
+        self._restoring_tab: bool = False
+
         self._apply_style()
         self._build_header()
         self._build_simulation_banner()
@@ -37,6 +40,7 @@ class MainWindow(tk.Tk):
         self._update_simulation_banner()
         self._update_sync_status()
         self._refresh_footer()
+        self.protocol("WM_DELETE_WINDOW", self._on_close_window)
 
     def _apply_style(self):
         style = ttk.Style(self)
@@ -80,6 +84,13 @@ class MainWindow(tk.Tk):
 
         btn_reload = ttk.Button(right_box, text="Reload YAML", command=self._reload_yaml)
         btn_reload.pack(side=tk.LEFT, padx=4)
+
+        self.btn_conflicts = ttk.Button(
+            right_box,
+            text="Check Rule Conflicts",
+            command=self._open_conflict_inspector,
+        )
+        self.btn_conflicts.pack(side=tk.LEFT, padx=4)
 
         self.lbl_sync_status = ttk.Label(
             right_box,
@@ -216,6 +227,20 @@ class MainWindow(tk.Tk):
             font=("", 8)
         )
         self.lbl_footer.pack(side=tk.LEFT)
+
+        self.lbl_footer_status = ttk.Label(
+            self.footer,
+            text="",
+            font=("", 8, "bold")
+        )
+        self.lbl_footer_status.pack(side=tk.LEFT)
+
+        self.lbl_footer_cfg = ttk.Label(
+            self.footer,
+            text=" | Config: rules.yaml",
+            font=("", 8)
+        )
+        self.lbl_footer_cfg.pack(side=tk.LEFT)
         self._refresh_footer()
 
     def _refresh_footer(self):
@@ -225,14 +250,33 @@ class MainWindow(tk.Tk):
         if active:
             store_id = active.file_path or active.name
             exists = self.outlook.store_exists(store_id) if store_id else False
-            status = "found in Outlook" if exists else "NOT found in Outlook"
-            text = f"Active archive: {active.name} ({active.file_path}) — {status} | Config: rules.yaml"
+            prefix = f"Active archive: {active.name} ({active.file_path}) — "
         else:
-            text = "Active archive: None — NOT found in Outlook | Config: rules.yaml"
-        self.lbl_footer.config(text=text)
+            exists = False
+            prefix = "Active archive: None — "
+
+        self.lbl_footer.config(text=prefix)
+        if exists:
+            self.lbl_footer_status.config(text="found in Outlook", foreground="#16a34a")
+        else:
+            self.lbl_footer_status.config(text="NOT found in Outlook", foreground="#dc2626")
 
     def _on_tab_change(self, event):
+        if self._restoring_tab:
+            return
         current_idx = self.notebook.index("current")
+        if self._current_tab_index == 1 and current_idx != 1:
+            if not self.tab_rules.confirm_pending_changes(reset_if_discard=True):
+                self._restoring_tab = True
+                try:
+                    self.notebook.select(1)
+                    self._current_tab_index = 1
+                finally:
+                    self.update_idletasks()
+                    self._restoring_tab = False
+                return
+
+        self._current_tab_index = current_idx
         if current_idx == 0:
             self.tab_triage.refresh_inbox()
         elif current_idx == 1:
@@ -242,7 +286,20 @@ class MainWindow(tk.Tk):
         elif current_idx == 3:
             self.tab_dryrun.refresh_simulation()
 
+    def _open_conflict_inspector(self):
+        if not self.tab_rules.confirm_pending_changes(reset_if_discard=True):
+            return
+        self.tab_triage._open_conflict_inspector()
+        self.tab_rules.refresh_all()
+
+    def _on_close_window(self):
+        if not self.tab_rules.confirm_pending_changes(reset_if_discard=False):
+            return
+        self.destroy()
+
     def _reload_yaml(self):
+        if not self.tab_rules.confirm_pending_changes(reset_if_discard=True):
+            return
         self.yaml_mgr.load()
         self._refresh_footer()
         self.tab_triage.refresh_inbox()
@@ -251,6 +308,8 @@ class MainWindow(tk.Tk):
         messagebox.showinfo("Reloaded", "Successfully reloaded configuration from rules.yaml.")
 
     def _sync_to_outlook(self):
+        if not self.tab_rules.confirm_pending_changes(reset_if_discard=True):
+            return
         confirm = messagebox.askyesno(
             "Sync to Outlook",
             "This will apply all rules and groups from rules.yaml directly into Outlook native rules.\n\n"

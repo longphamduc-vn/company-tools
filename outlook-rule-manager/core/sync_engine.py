@@ -7,6 +7,23 @@ from core.outlook_client import BaseOutlookClient
 from core.models import RuleConfig, MANAGED_PREFIX, extract_base_rule_name
 
 
+def match_email_domain(sender_email: str, domains: Iterable[str]) -> Optional[str]:
+    """Return the matching normalized '@domain' if sender_email's domain after '@' matches exactly."""
+    email = (sender_email or "").strip().lower()
+    if "@" not in email:
+        return None
+    sender_domain = "@" + email.split("@", 1)[1]
+    if not sender_domain[1:]:
+        return None
+    for dom in domains or []:
+        norm_dom = (dom or "").strip().lower()
+        if norm_dom and not norm_dom.startswith("@"):
+            norm_dom = "@" + norm_dom
+        if norm_dom and sender_domain == norm_dom:
+            return norm_dom
+    return None
+
+
 class SyncEngine:
     """Manages synchronization between YAML definition and Outlook COM native rules."""
 
@@ -93,6 +110,37 @@ class SyncEngine:
             })
 
         return entries, None
+
+    def get_rule_conditions(self, rule: RuleConfig) -> Tuple[List[str], List[str], List[str]]:
+        """Public accessor for resolved (emails, domains, subject_keywords) including _Unclassified pool."""
+        return self._resolve_rule_conditions(rule)
+
+    def test_rule_match(
+        self,
+        rule: RuleConfig,
+        sender_email: str = "",
+        subject: str = "",
+    ) -> Tuple[bool, str]:
+        """Test whether sender_email or subject matches a single rule using exact domain semantics."""
+        email = (sender_email or "").strip().lower()
+        subj = (subject or "").strip()
+        if not email and not subj:
+            return False, ""
+
+        all_emails, all_domains, keywords = self._resolve_rule_conditions(rule)
+        if email and email in all_emails:
+            return True, "MATCH! (Exact Email)"
+
+        if email and match_email_domain(email, all_domains):
+            return True, "MATCH! (Domain Rule)"
+
+        if subj:
+            subj_lower = subj.lower()
+            matched_kw = next((kw for kw in keywords if kw.lower() in subj_lower), None)
+            if matched_kw:
+                return True, f"MATCH! (Subject: '{matched_kw}')"
+
+        return False, "NO MATCH"
 
     def preview_compiled_rules(self, rule: RuleConfig, group_ids: Optional[List[str]] = None) -> List[str]:
         """Return ordered native Outlook rule names that push_to_outlook will create for rule."""
@@ -245,13 +293,13 @@ class SyncEngine:
                 return rule, f"Exact Email Match: {sender_email}"
 
         # Level 2: Domain Match
-        if sender_domain:
-            for rule in self.yaml_mgr.rules:
-                if not rule.enabled or self._is_unclassified_rule(rule):
-                    continue
-                all_domains = self.yaml_mgr.get_all_domains_for_rule(rule)
-                if sender_domain in all_domains:
-                    return rule, f"Domain Match: {sender_domain}"
+        for rule in self.yaml_mgr.rules:
+            if not rule.enabled or self._is_unclassified_rule(rule):
+                continue
+            all_domains = self.yaml_mgr.get_all_domains_for_rule(rule)
+            matched_dom = match_email_domain(sender_email, all_domains)
+            if matched_dom:
+                return rule, f"Domain Match: {matched_dom}"
 
         # Level 3: Subject Keywords Match
         subj_lower = subject.lower()

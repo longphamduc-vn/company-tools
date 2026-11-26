@@ -99,9 +99,6 @@ class TriageView(ttk.Frame):
         btn_collapse = ttk.Button(top_bar, text="Collapse Tree", command=self._collapse_all)
         btn_collapse.pack(side=tk.LEFT, padx=2)
 
-        btn_conflicts = ttk.Button(top_bar, text="Check Rule Conflicts", command=self._open_conflict_inspector)
-        btn_conflicts.pack(side=tk.LEFT, padx=8)
-
         account_name = self.outlook.get_current_user_account()
         self.lbl_account = tk.Label(
             top_bar,
@@ -139,21 +136,19 @@ class TriageView(ttk.Frame):
 
         self.lbl_drop_title = tk.Label(
             self.drop_new_zone,
-            text="[+] DROP HERE TO CREATE NEW RULE",
+            text="Drop an email here to create a new rule",
             bg="#f0fdf4",
             fg="#15803d",
-            font=("", 9, "bold")
+            font=("", 9, "bold"),
+            justify=tk.CENTER,
+            wraplength=220,
         )
-        self.lbl_drop_title.pack()
+        self.lbl_drop_title.pack(fill=tk.X)
 
-        self.lbl_drop_sub = tk.Label(
-            self.drop_new_zone,
-            text="Auto-names rule & folder. Instant staging (0ms delay).",
-            bg="#f0fdf4",
-            fg="#166534",
-            font=("", 8)
+        self.drop_new_zone.bind(
+            "<Configure>",
+            lambda e: self.lbl_drop_title.config(wraplength=max(120, e.width - 20)),
         )
-        self.lbl_drop_sub.pack(pady=(2, 0))
 
         # Rules Hierarchy Treeview
         tree_container = ttk.Frame(self.frame_left)
@@ -165,10 +160,12 @@ class TriageView(ttk.Frame):
             show="tree headings",
             selectmode="browse"
         )
+        self.tree_rules.tag_configure("rule_enabled", foreground="#0f172a")
+        self.tree_rules.tag_configure("rule_disabled", foreground="#94a3b8", font=("", 9, "italic"))
         self.tree_rules.heading("#0", text="Rules & Staged Queue")
         self.tree_rules.heading("Details", text="Target Folder")
-        self.tree_rules.column("#0", width=170)
-        self.tree_rules.column("Details", width=100)
+        self.tree_rules.column("#0", width=230)
+        self.tree_rules.column("Details", width=120)
 
         rules_scroll = ttk.Scrollbar(tree_container, orient=tk.VERTICAL, command=self.tree_rules.yview)
         self.tree_rules.configure(yscrollcommand=rules_scroll.set)
@@ -178,10 +175,10 @@ class TriageView(ttk.Frame):
         self.tree_rules.bind("<Delete>", self._on_tree_delete_staged)
 
         # =============================================================
-        # PANE 2 (CENTER 36%): HIGH PERFORMANCE INBOX LIST (INSTANT CLICK)
+        # PANE 2 (CENTER): HIGH PERFORMANCE INBOX LIST (INSTANT CLICK)
         # =============================================================
         self.frame_center = tk.Frame(paned, bg="#f8fafc", highlightbackground="#e2e8f0", highlightthickness=1, padx=6, pady=6)
-        paned.add(self.frame_center, weight=4)
+        paned.add(self.frame_center, weight=5)
 
         # Filter Strip
         filter_strip = tk.Frame(self.frame_center, bg="#f8fafc")
@@ -220,9 +217,9 @@ class TriageView(ttk.Frame):
         self.tree_inbox.heading("Subject", text="Subject")
         self.tree_inbox.heading("Status", text="Status / Staged")
 
-        self.tree_inbox.column("Sender", width=130)
-        self.tree_inbox.column("Subject", width=180)
-        self.tree_inbox.column("Status", width=110)
+        self.tree_inbox.column("Sender", width=180)
+        self.tree_inbox.column("Subject", width=250)
+        self.tree_inbox.column("Status", width=130)
 
         inbox_scroll = ttk.Scrollbar(inbox_container, orient=tk.VERTICAL, command=self.tree_inbox.yview)
         self.tree_inbox.configure(yscrollcommand=inbox_scroll.set)
@@ -246,10 +243,10 @@ class TriageView(ttk.Frame):
         self.tree_inbox.bind("<Button-3>", self._on_inbox_right_click)
 
         # =============================================================
-        # PANE 3 (RIGHT 36%): EXPANSIVE EMAIL INSPECTOR (CLEAR VIEW)
+        # PANE 3 (RIGHT): EMAIL INSPECTOR
         # =============================================================
         self.frame_right = tk.Frame(paned, bg="#ffffff", highlightbackground="#cbd5e1", highlightthickness=1, padx=12, pady=10)
-        paned.add(self.frame_right, weight=4)
+        paned.add(self.frame_right, weight=3)
 
         # Top Header of Inspector
         top_meta = tk.Frame(self.frame_right, bg="#ffffff")
@@ -315,7 +312,7 @@ class TriageView(ttk.Frame):
 
         self.mb_assign_rule = ttk.Menubutton(
             action_bar,
-            text="Assign to Rule... ▼"
+            text="Assign to Rule..."
         )
         self.menu_assign = tk.Menu(self.mb_assign_rule, tearoff=0)
         self.mb_assign_rule.config(menu=self.menu_assign)
@@ -446,7 +443,7 @@ class TriageView(ttk.Frame):
         staged_count = len(self.staged_actions)
         self.tree_rules.insert(
             "", tk.END, iid="__STAGED__",
-            text=f"★ PENDING CHANGES ({staged_count})",
+            text=f"★ Pending Changes ({staged_count})",
             values=("Click Apply below",), open=True
         )
 
@@ -461,48 +458,49 @@ class TriageView(ttk.Frame):
 
             self.tree_rules.insert("__STAGED__", tk.END, iid=item_id, text=label, values=(info,))
 
-        # Category 2: ACTIVE RULES (Hierarchical Team \ Part \ Unit Folders)
+        # Category 2: ACTIVE RULES (Hierarchical Folders)
         self.tree_rules.insert(
             "", tk.END, iid="__ACTIVE__",
-            text="▼ HIERARCHICAL FOLDERS & RULES",
+            text="Folders & Rules",
             values=("Folder Path",), open=True
         )
 
         folder_nodes_map: Dict[str, str] = {}
 
         for rule in self.yaml_mgr.rules:
-            prefix = "[ON]" if rule.enabled else "[OFF]"
             raw_folder = rule.target_folder or "_Unclassified"
-            # Split path by \ or /
             parts = [p.strip() for p in re.split(r'[\\/]', raw_folder) if p.strip()]
 
-            # Build intermediate hierarchical nodes: Team \ Part \ Unit
             parent_node = "__ACTIVE__"
             accum_path = ""
-            for depth, part in enumerate(parts):
+            for part in parts:
                 accum_path = f"{accum_path}\\{part}" if accum_path else part
                 fld_id = f"fld_{accum_path.lower().replace(' ', '_')}"
                 if fld_id not in folder_nodes_map:
-                    level_label = f"📁 [L{depth+1}] {part}"
                     self.tree_rules.insert(
                         parent_node, tk.END, iid=fld_id,
-                        text=level_label,
+                        text=f"📁 {part}",
                         values=(accum_path,),
                         open=True
                     )
                     folder_nodes_map[fld_id] = accum_path
                 parent_node = fld_id
 
-            # Attach Rule node under the deepest folder node
             rule_node = f"rule_{rule.id}"
+            if rule.enabled:
+                rule_label = f"⚡ {rule.name}"
+                rule_tags = ("rule_enabled",)
+            else:
+                rule_label = f"⏸ {rule.name} (disabled)"
+                rule_tags = ("rule_disabled",)
             self.tree_rules.insert(
                 parent_node, tk.END, iid=rule_node,
-                text=f"  ⚡ {prefix} {rule.name}",
-                values=(rule.target_folder,), open=False
+                text=rule_label,
+                values=(rule.target_folder,), open=False,
+                tags=rule_tags,
             )
 
-            all_emails = self.yaml_mgr.get_all_emails_for_rule(rule)
-            all_domains = self.yaml_mgr.get_all_domains_for_rule(rule)
+            all_emails, all_domains, _ = self.sync_engine.get_rule_conditions(rule)
 
             for d in all_domains:
                 self.tree_rules.insert(rule_node, tk.END, text=f"    domain: {d}", values=("Domain Rule",))
