@@ -239,8 +239,10 @@ class TestUiPhase1(unittest.TestCase):
             triage = win.tab_triage
             self.assertGreater(len(triage.messages), 0)
             triage.selected_message = triage.messages[0]
-            triage.tree_rules.selection_set("rule_rule_executive")
-            with patch("gui.triage_view.messagebox") as mock_triage_mb:
+            exec_rule = _rule_by_id(win.yaml_mgr, "rule_executive")
+            with patch.object(triage, "_prompt_rule_selection", return_value=(exec_rule, "email")), patch(
+                "gui.triage_view.messagebox"
+            ) as mock_triage_mb:
                 mock_triage_mb.askyesno.return_value = True
                 triage._move_selected_now()
             self.assertTrue(mock_triage_mb.showinfo.called)

@@ -77,23 +77,19 @@ class TestUiPhase3(unittest.TestCase):
             self.assertEqual(win.lbl_footer_status.cget("text"), "NOT found in Outlook")
             self.assertEqual(str(win.lbl_footer_status.cget("foreground")), "#dc2626")
 
-            # Triage paned weights (3, 5, 3) & column widths & widgets
+            # Triage 2-pane layout (Inbox list left | Reading + Actions right), Search label & single action set
             triage = win.tab_triage
             paned = next(w for w in _find_widgets(triage, ttk.PanedWindow))
-            self.assertEqual(paned.pane(triage.frame_left, "weight"), 3)
-            self.assertEqual(paned.pane(triage.frame_center, "weight"), 5)
-            self.assertEqual(paned.pane(triage.frame_right, "weight"), 3)
-            self.assertGreaterEqual(int(triage.tree_rules.column("#0", "width")), 220)
+            self.assertEqual(len(paned.panes()), 2)
+            self.assertFalse(hasattr(triage, "tree_rules"))
+            self.assertFalse(hasattr(triage, "drop_new_zone"))
+            self.assertFalse(hasattr(triage, "mb_assign_rule"))
 
-            # Drop zone wording without "Instant staging (0ms)"
-            drop_labels = _find_widgets(triage.drop_new_zone, tk.Label)
-            self.assertEqual(len(drop_labels), 1)
-            self.assertEqual(drop_labels[0].cget("text"), "Drop an email here to create a new rule")
+            action_texts = [b.cget("text") for b in _find_widgets(triage.frame_right, ttk.Button)]
+            self.assertEqual(action_texts, ["Add to Rule...", "New Rule...", "Move Now"])
 
-            # Assign button has no duplicate arrow in text; Search label mapped & left of ent_search
-            self.assertEqual(triage.mb_assign_rule.cget("text"), "Assign to Rule...")
             search_lbl = next(
-                lbl for lbl in _find_widgets(triage.frame_center, tk.Label) if lbl.cget("text") == "Search:"
+                lbl for lbl in _find_widgets(triage.frame_left, tk.Label) if lbl.cget("text") == "Search:"
             )
             self.assertTrue(bool(search_lbl.winfo_ismapped()))
             self.assertGreater(search_lbl.winfo_width(), 20)
@@ -124,10 +120,9 @@ class TestUiPhase3(unittest.TestCase):
             win.notebook.select(win.tab_rules)
             win.update()
 
-            triage_texts = _collect_tree_texts(win.tab_triage.tree_rules)
             rules_texts = _collect_tree_texts(win.tab_rules.tree)
 
-            for txt in triage_texts + rules_texts:
+            for txt in rules_texts:
                 self.assertNotIn("[L1]", txt)
                 self.assertNotIn("[L2]", txt)
                 self.assertNotIn("[ON]", txt)
@@ -135,26 +130,18 @@ class TestUiPhase3(unittest.TestCase):
                 self.assertNotIn("HIERARCHICAL", txt)
                 self.assertNotIn("NAVIGATOR", txt)
 
-            self.assertIn("Folders & Rules", triage_texts)
             self.assertIn("Folders & Rules", rules_texts)
             self.assertIn("Shared Address Groups", rules_texts)
 
-            # Disabled rule styling + suffix in both trees
+            # Disabled rule styling + suffix in Rules tree
             self.assertIn("(disabled)", win.tab_rules.tree.item("rule_rule_executive", "text"))
             self.assertIn("rule_disabled", win.tab_rules.tree.item("rule_rule_executive", "tags"))
-            self.assertIn("(disabled)", win.tab_triage.tree_rules.item("rule_rule_executive", "text"))
-            self.assertIn("rule_disabled", win.tab_triage.tree_rules.item("rule_rule_executive", "tags"))
 
             # [Unclassified] rule counts 1 singular sender; single-item group counts 1 member
             self.assertEqual(pluralize_count(1, "sender"), "1 sender")
             self.assertEqual(pluralize_count(2, "sender"), "2 senders")
             self.assertEqual(pluralize_count(0, "domain"), "0 domains")
             self.assertEqual(win.tab_rules.tree.item("rule_rule_unclassified", "values")[0], "1 sender")
-            unclass_children = [
-                win.tab_triage.tree_rules.item(c, "text").strip()
-                for c in win.tab_triage.tree_rules.get_children("rule_rule_unclassified")
-            ]
-            self.assertIn("former.contractor@vendor.com", unclass_children)
 
             # Panel title is "Navigator" (no duplicate "Folders & Rules" panel header); clean folder buttons
             left_lbls = [l.cget("text") for l in _find_widgets(win.tab_rules.frame_left, tk.Label)]
