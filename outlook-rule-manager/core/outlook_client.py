@@ -20,6 +20,25 @@ except ImportError:
     win32com = None
 
 
+def _match_store_exact(stores, identifier: str, get_path, get_name):
+    """Match a store by exact normalized FilePath, then exact DisplayName (case-insensitive)."""
+    ident = (identifier or "").strip()
+    norm_ident_path = os.path.normcase(os.path.normpath(ident))
+    ident_lower = ident.lower()
+
+    for s in stores:
+        p = (get_path(s) or "").strip()
+        if p and os.path.normcase(os.path.normpath(p)) == norm_ident_path:
+            return s
+
+    for s in stores:
+        n = (get_name(s) or "").strip()
+        if n and n.lower() == ident_lower:
+            return s
+
+    return None
+
+
 class BaseOutlookClient:
     """Interface for Outlook operations."""
     def is_connected(self) -> bool:
@@ -34,6 +53,8 @@ class BaseOutlookClient:
         raise NotImplementedError
     def get_native_rules(self) -> List[Dict[str, Any]]:
         raise NotImplementedError
+    def store_exists(self, identifier: str) -> bool:
+        raise NotImplementedError
     def save_native_rules(
         self,
         rules_data: List[Dict[str, Any]],
@@ -41,8 +62,6 @@ class BaseOutlookClient:
         remove_legacy: bool = False,
         legacy_base_names: Optional[List[str]] = None,
     ) -> Tuple[bool, str]:
-        raise NotImplementedError
-    def rollover_rules(self, new_store_path: str) -> Tuple[bool, str]:
         raise NotImplementedError
     def move_message(self, entry_id: str, target_folder_path: str, store_path: str = "") -> bool:
         raise NotImplementedError
@@ -134,17 +153,27 @@ class WindowsOutlookClient(BaseOutlookClient):
             pass
         return stores_list
 
-    def _get_store_by_path_or_name(self, identifier: str):
-        if not self._connected or not identifier:
-            return self.namespace.DefaultStore
+    def _find_store(self, identifier: str):
+        """Find store by exact normalized FilePath or exact DisplayName (case-insensitive).
 
-        norm_id = identifier.strip().lower()
-        for store in self.namespace.Stores:
-            path = getattr(store, "FilePath", "") or ""
-            name = getattr(store, "DisplayName", "") or ""
-            if norm_id in path.lower() or norm_id in name.lower():
-                return store
-        return self.namespace.DefaultStore
+        Returns DefaultStore only when identifier is empty; returns None if not found.
+        """
+        if not self._connected:
+            return None
+        if not (identifier or "").strip():
+            return self.namespace.DefaultStore
+        return _match_store_exact(
+            self.namespace.Stores,
+            identifier,
+            lambda s: getattr(s, "FilePath", ""),
+            lambda s: getattr(s, "DisplayName", ""),
+        )
+
+    def store_exists(self, identifier: str) -> bool:
+        """Return True if a non-empty store identifier resolves to a mounted Outlook store."""
+        if not self._connected or not (identifier or "").strip():
+            return False
+        return self._find_store(identifier) is not None
 
     def get_inbox_messages(self, limit: int = 50) -> List[EmailMessage]:
         if not self._connected:
@@ -273,7 +302,9 @@ class WindowsOutlookClient(BaseOutlookClient):
 
         try:
             store = self.namespace.DefaultStore
-            target_store = self._get_store_by_path_or_name(target_store_path)
+            target_store = self._find_store(target_store_path)
+            if target_store is None:
+                return False, f"Target store not found: {target_store_path}"
             rules_col = store.GetRules()
 
             # Snapshot existing rules before any mutation/removal (COM iter skips on Remove)
@@ -450,39 +481,14 @@ class WindowsOutlookClient(BaseOutlookClient):
         except Exception:
             return False
 
-    def rollover_rules(self, new_store_path: str) -> Tuple[bool, str]:
-        if not self._connected:
-            return False, "Outlook COM not connected"
-        try:
-            target_store = self._get_store_by_path_or_name(new_store_path)
-            if not target_store:
-                return False, f"Cannot open target store: {new_store_path}"
-
-            rules_col = self.namespace.DefaultStore.GetRules()
-            updated_count = 0
-
-            for rule in rules_col:
-                try:
-                    move_action = rule.Actions.MoveToFolder
-                    if move_action.Enabled and move_action.Folder:
-                        old_name = move_action.Folder.Name
-                        new_folder = self.get_or_create_folder(target_store, old_name)
-                        move_action.Folder = new_folder
-                        updated_count += 1
-                except Exception:
-                    continue
-
-            rules_col.Save(ShowProgress=False)
-            return True, f"Successfully rolled over {updated_count} rules to {target_store.DisplayName}"
-        except Exception as ex:
-            return False, f"Rollover error: {str(ex)}"
-
     def move_message(self, entry_id: str, target_folder_path: str, store_path: str = "") -> bool:
         if not self._connected:
             return False
         try:
+            target_store = self._find_store(store_path)
+            if target_store is None:
+                return False
             mail = self.namespace.GetItemFromID(entry_id)
-            target_store = self._get_store_by_path_or_name(store_path)
             folder = self.get_or_create_folder(target_store, target_folder_path)
             mail.Move(folder)
             return True
@@ -639,6 +645,21 @@ class MockOutlookClient(BaseOutlookClient):
     def get_native_rules(self) -> List[Dict[str, Any]]:
         return self._rules
 
+    def _find_store(self, identifier: str) -> Optional[Dict[str, Any]]:
+        if not (identifier or "").strip():
+            return self._stores[-1] if self._stores else None
+        return _match_store_exact(
+            self._stores,
+            identifier,
+            lambda s: s.get("file_path", ""),
+            lambda s: s.get("name", ""),
+        )
+
+    def store_exists(self, identifier: str) -> bool:
+        if not (identifier or "").strip():
+            return False
+        return self._find_store(identifier) is not None
+
     def save_native_rules(
         self,
         rules_data: List[Dict[str, Any]],
@@ -646,6 +667,10 @@ class MockOutlookClient(BaseOutlookClient):
         remove_legacy: bool = False,
         legacy_base_names: Optional[List[str]] = None,
     ) -> Tuple[bool, str]:
+        target_store = self._find_store(target_store_path)
+        if target_store is None:
+            return False, f"Target store not found: {target_store_path}"
+
         yaml_base_names = set(legacy_base_names or [])
         compiled_names = {r["name"] for r in rules_data}
         if not yaml_base_names:
@@ -694,13 +719,9 @@ class MockOutlookClient(BaseOutlookClient):
             msg += f"\nWarning - skipped rules with no conditions: {', '.join(warnings)}"
         return True, msg
 
-    def rollover_rules(self, new_store_path: str) -> Tuple[bool, str]:
-        for r in self._rules:
-            old_f = r["target_folder"].split("\\")[-1]
-            r["target_folder"] = f"{new_store_path}\\{old_f}"
-        return True, f"Mock: Rolled over rules to {new_store_path}"
-
     def move_message(self, entry_id: str, target_folder_path: str, store_path: str = "") -> bool:
+        if self._find_store(store_path) is None:
+            return False
         self._inbox = [m for m in self._inbox if m.entry_id != entry_id]
         return True
 

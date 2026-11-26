@@ -102,18 +102,42 @@ class SyncEngine:
         return success, msg
 
     def perform_rollover(self, new_store_name: str, new_store_path: str) -> Tuple[bool, str]:
-        """Perform 1-Click Rollover to new yearly PST file."""
-        if not new_store_path:
+        """Perform 1-Click Rollover to new yearly PST store safely.
+
+        Verifies target store exists first, updates active_archive in memory,
+        re-pushes managed rules via push_to_outlook(), and saves YAML only on
+        success (restoring old values in memory on failure).
+        """
+        if not (new_store_path or "").strip():
             return False, "Target store path cannot be empty"
 
-        # 1. Update YAML configuration
-        self.yaml_mgr.stores["active_archive"].name = new_store_name
-        self.yaml_mgr.stores["active_archive"].file_path = new_store_path
-        self.yaml_mgr.save()
+        active_store = self.yaml_mgr.stores.get("active_archive")
+        if active_store is None:
+            return False, "Active archive store is not configured in rules.yaml"
 
-        # 2. Re-point Outlook native rules
-        success, msg = self.outlook.rollover_rules(new_store_path)
-        return success, msg
+        if not self.outlook.store_exists(new_store_path):
+            return False, f"Target store not found in Outlook: {new_store_path}"
+
+        old_name = active_store.name
+        old_file_path = active_store.file_path
+
+        active_store.name = new_store_name
+        active_store.file_path = new_store_path
+
+        try:
+            success, msg = self.push_to_outlook()
+        except Exception as ex:
+            active_store.name = old_name
+            active_store.file_path = old_file_path
+            return False, f"Rollover failed: {ex}"
+
+        if not success:
+            active_store.name = old_name
+            active_store.file_path = old_file_path
+            return False, msg
+
+        self.yaml_mgr.save()
+        return True, f"Successfully rolled over rules to '{new_store_name}' ({new_store_path}).\n{msg}"
 
     @staticmethod
     def _is_unclassified_rule(rule: RuleConfig) -> bool:

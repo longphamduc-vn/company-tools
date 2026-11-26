@@ -214,3 +214,15 @@ Sau mỗi phase, agent báo lại: commit hash, danh sách file đổi, output `
   - `tests/fakes.py`: thêm `FakeSentToCondition`, `FakeBodyCondition` và hỗ trợ `Count` / `Item(i)` (1-based) cho `FakeConditions`.
   - `tests/test_phase2_lifecycle.py`: cập nhật test `ExecutionOrder` và thêm test cho rule người dùng đứng trước (`ExecutionOrder`), cũng như rule legacy trùng tên YAML có `SentTo` bật hoặc `Conditions` lỗi không bị tắt.
 - **Lệch plan & lý do:** Không có.
+
+### Phase 3 — Rollover an toàn
+- **Đã làm:**
+  - `core/outlook_client.py`:
+    - Thay `_get_store_by_path_or_name` bằng `_find_store(identifier)` dùng helper `_match_store_exact`: so khớp chính xác `FilePath` đã `os.path.normcase(os.path.normpath(...))`, sau đó so khớp chính xác `DisplayName` (không phân biệt hoa thường); chỉ trả `DefaultStore` khi `identifier` rỗng, không khớp trả `None` (không fallback về `DefaultStore`).
+    - Thêm `store_exists(identifier) -> bool` trên `BaseOutlookClient`, `WindowsOutlookClient`, và `MockOutlookClient` (trả `False` nếu rỗng hoặc không tìm thấy).
+    - Cập nhật `save_native_rules` và `move_message` dùng `_find_store`: `save_native_rules` kiểm tra store trước khi sửa/xóa bất kỳ rule nào hoặc tạo folder; store không tồn tại thì trả lỗi rõ ràng / `False`, không ghi vào mailbox chính. Cập nhật tương ứng `MockOutlookClient.save_native_rules` và `MockOutlookClient.move_message`.
+    - Xóa `rollover_rules` khỏi `BaseOutlookClient`, `WindowsOutlookClient`, và `MockOutlookClient` sau khi grep toàn repo xác nhận không còn nơi nào gọi.
+  - `core/sync_engine.py` (`SyncEngine.perform_rollover`): kiểm tra store mới tồn tại bằng `store_exists(new_store_path)` trước; đổi `name`/`file_path` của `active_archive` trong bộ nhớ, gọi `push_to_outlook()`, chỉ `yaml_mgr.save()` khi thành công; nếu thất bại hoặc raise lỗi thì khôi phục `name`/`file_path` cũ trong bộ nhớ, không save và trả lỗi.
+  - `tests/test_phase3_rollover.py`: thêm 6 test (dùng `WindowsOutlookClient(namespace=FakeNamespace(...))` và `MockOutlookClient`) cho so khớp chính xác `"Archive 2025"` vs `"Archive 2025 Old"`, rollover đường dẫn sai, rollback khi Outlook save lỗi, rollover giữ nguyên cây thư mục `Team\Part\Unit` và không đụng rule không prefix, `save_native_rules` với store không tồn tại, và `move_message` với store không tồn tại.
+- **Lệch plan & lý do:**
+  - Thực hiện rollover theo phương án khuyến nghị (cập nhật `active_archive` tạm trong bộ nhớ rồi gọi `push_to_outlook()`, chỉ `save()` khi thành công) và xóa `rollover_rules` khỏi cả 3 lớp client thay vì giữ lại phương thức không còn sử dụng (theo chỉ dẫn của user).
