@@ -143,31 +143,105 @@ class ConflictDialog(tk.Toplevel):
         self.tree.item(sel[0], values=(c.conflict_type, c.rule_name, c.description, action_name))
 
     def _execute_resolutions(self):
-        """Execute selected resolutions."""
+        """Execute selected resolutions respecting IGNORE, IMPORT, OVERWRITE, and MERGE."""
         if not self.conflicts:
             self.destroy()
             return
 
-        import_count = 0
+        import_results = []
         overwrite_count = 0
+        merge_count = 0
+        ignore_count = 0
 
         for c in self.conflicts:
-            if c.suggested_action == "IMPORT":
-                if self.detector.resolve_import_to_yaml(c, save=False):
-                    import_count += 1
-            elif c.suggested_action == "OVERWRITE":
+            action = c.suggested_action
+            if action == "IGNORE":
+                ignore_count += 1
+            elif action == "IMPORT":
+                res = self.detector.resolve_import_to_yaml(c, save=False)
+                if res:
+                    import_results.append(res)
+            elif action == "OVERWRITE":
                 overwrite_count += 1
+            elif action == "MERGE":
+                merge_count += 1
 
+        import_count = len(import_results)
         if import_count > 0:
             self.detector.yaml_mgr.save()
 
-        # Push to Outlook
-        success, msg = self.sync_engine.push_to_outlook()
+        needs_push = (import_count + overwrite_count + merge_count) > 0
+        if not needs_push:
+            messagebox.showinfo(
+                "Conflict Resolution Complete",
+                f"Processed {len(self.conflicts)} conflicts.\n"
+                f"• Imported to YAML: 0\n"
+                f"• Overwritten in Outlook: 0\n"
+                f"• Merged via Outlook sync: 0\n"
+                f"• Ignored / Skipped: {ignore_count}\n\n"
+                f"Outlook Sync: Skipped (all conflicts ignored)"
+            )
+            self.destroy()
+            return
+
+        remove_legacy = False
+        if import_results:
+            problematic = [r for r in import_results if r.has_warnings]
+            clean_imports = [r for r in import_results if not r.has_warnings]
+
+            if problematic and not clean_imports:
+                prob_lines = self._format_import_warning_lines(problematic)
+                messagebox.showwarning(
+                    "Imported Rules Have Limitations",
+                    "The following imported rules have unsupported conditions or unresolved recipients "
+                    "that cannot be synced to Outlook without losing conditions:\n\n"
+                    f"{prob_lines}\n\n"
+                    "Their original Outlook rules were kept (not deleted)."
+                )
+            elif problematic:
+                prob_lines = self._format_import_warning_lines(problematic)
+                clean_lines = "\n".join(f"• {r.rule_name}" for r in clean_imports)
+                remove_legacy = bool(messagebox.askyesno(
+                    "Remove Original Outlook Rules?",
+                    "Warning: Some imported rules have unsupported conditions or unresolved recipients "
+                    "and deleting their original Outlook rules will lose those conditions:\n\n"
+                    f"{prob_lines}\n\n"
+                    "Clean imported rules:\n"
+                    f"{clean_lines}\n\n"
+                    "Remove the original Outlook rules after syncing?",
+                    icon=messagebox.WARNING,
+                    default=messagebox.NO,
+                ))
+            else:
+                listed = "\n".join(f"• {r.rule_name}" for r in clean_imports)
+                remove_legacy = bool(messagebox.askyesno(
+                    "Remove Original Outlook Rules?",
+                    "The following Outlook rules were imported into rules.yaml:\n\n"
+                    f"{listed}\n\n"
+                    "Do you want to remove these original Outlook rules after syncing?",
+                    icon=messagebox.QUESTION,
+                ))
+
+        success, msg = self.sync_engine.push_to_outlook(remove_legacy=remove_legacy)
         messagebox.showinfo(
             "Conflict Resolution Complete",
             f"Resolved {len(self.conflicts)} conflicts.\n"
             f"• Imported to YAML: {import_count}\n"
-            f"• Overwritten in Outlook: {overwrite_count}\n\n"
+            f"• Overwritten in Outlook: {overwrite_count}\n"
+            f"• Merged via Outlook sync: {merge_count}\n"
+            f"• Ignored / Skipped: {ignore_count}\n\n"
             f"Outlook Sync: {msg}"
         )
         self.destroy()
+
+    @staticmethod
+    def _format_import_warning_lines(problematic_results) -> str:
+        lines = []
+        for r in problematic_results:
+            reasons = []
+            if r.has_unsupported_conditions:
+                reasons.append("unsupported conditions")
+            if r.unresolved_recipients:
+                reasons.append(f"unresolved recipients: {', '.join(r.unresolved_recipients)}")
+            lines.append(f"• {r.rule_name} ({'; '.join(reasons)})")
+        return "\n".join(lines)

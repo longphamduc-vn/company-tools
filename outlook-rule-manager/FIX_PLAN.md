@@ -257,3 +257,16 @@ Sau mỗi phase, agent báo lại: commit hash, danh sách file đổi, output `
   - `gui/rule_manager_view.py`: chuẩn hóa domain qua `YamlConfigManager.normalize_domains` (bỏ giá trị rỗng) ở cả `_save_rule_changes` (visual + bulk) và `_save_group_changes`.
   - `tests/test_phase4_yaml.py`: thêm 2 test cho commit 35 action `add_to_rule` (`backup_versions = 30` chỉ sinh 1 backup mới và giữ nguyên backup trước commit) và chuẩn hóa domain (`"Vendor.com"`, `"  @Omron.COM "`) khi lưu rule và group trên GUI.
 - **Lệch plan & lý do:** Không có.
+
+### Phase 5 — Conflict dialog & import
+- **Đã làm:**
+  - `core/outlook_client.py`:
+    - `WindowsOutlookClient.get_native_rules`: chỉ lấy địa chỉ SMTP từ `From` (fallback `recipient.AddressEntry.GetExchangeUser().PrimarySmtpAddress`, nếu vẫn không có thì bỏ qua khỏi `emails` và ghi tên vào `unresolved_recipients`); trích xuất thêm `domains` (từ `SenderAddress`), `subject_keywords` (từ `Subject`), và `has_unsupported_conditions` (duyệt `Conditions.Count`/`Item(i)` như Phase 2, đánh dấu `True` nếu có condition nào khác `From`/`SenderAddress`/`Subject` đang `Enabled`).
+    - `WindowsOutlookClient.save_native_rules`: kiểm tra kết quả `ResolveAll()` và `recipient.Resolved` của từng recipient; gom rule name và các địa chỉ không resolve được vào cảnh báo trong message trả về.
+  - `core/conflict_detector.py`:
+    - `resolve_import_to_yaml`: giữ đường dẫn folder tương đối so với root store (bỏ `\\<Store Name>\` đầu qua `_extract_relative_folder_path`), import cả `emails`, `domains` (chuẩn hóa qua `normalize_domains`), `subject_keywords`, và trả về `ImportResult` (`__bool__ == imported`) kèm `has_unsupported_conditions` và `unresolved_recipients`.
+  - `gui/conflict_dialog.py` (`ConflictDialog._execute_resolutions`): tôn trọng đủ 4 lựa chọn `IGNORE`, `IMPORT`, `OVERWRITE`, `MERGE`; chỉ gọi `push_to_outlook()` khi có ít nhất 1 mục khác `IGNORE`; khi có `IMPORT` thì hỏi xóa rule Outlook gốc một lần (`remove_legacy=True`), còn nếu có rule mang `has_unsupported_conditions` hoặc `unresolved_recipients` thì liệt kê rõ + cảnh báo mất điều kiện và mặc định `NO` (và không hỏi xóa nếu tất cả rule import đều có vấn đề); báo đúng số lượng từng loại.
+  - `tests/fakes.py`: thêm `FakeExchangeUser`, `FakeAddressEntry`, và thuộc tính `AddressEntry` cho `FakeRecipient`.
+  - `tests/test_phase5_conflict_import.py`: thêm 8 test cho `get_native_rules` (SMTP, ExchangeUser, unresolved, domains, keywords, unsupported conditions), `resolve_import_to_yaml`, cảnh báo resolve trong `save_native_rules`, và toàn bộ nhánh xử lý trong `ConflictDialog._execute_resolutions`.
+- **Lệch plan & lý do:**
+  - `resolve_import_to_yaml` trả về dataclass `ImportResult` (định nghĩa `__bool__` theo `imported`) thay vì `bool` thuần để vừa giữ tương thích ngược với kiểm tra truthy trước đó, vừa truyền được `has_unsupported_conditions` và `unresolved_recipients` cho `ConflictDialog`.

@@ -8,6 +8,33 @@ from core.outlook_client import BaseOutlookClient
 
 
 @dataclass
+class ImportResult:
+    """Result of importing an Outlook rule into rules.yaml."""
+    imported: bool
+    rule_name: str = ""
+    has_unsupported_conditions: bool = False
+    unresolved_recipients: List[str] = field(default_factory=list)
+
+    def __bool__(self) -> bool:
+        return self.imported
+
+    @property
+    def has_warnings(self) -> bool:
+        return self.has_unsupported_conditions or bool(self.unresolved_recipients)
+
+
+def _extract_relative_folder_path(raw_folder: str) -> str:
+    """Strip leading '\\\\<StoreName>\\' prefix from Outlook FolderPath and preserve subfolders."""
+    cleaned = (raw_folder or "").strip().replace("/", "\\")
+    if cleaned.startswith("\\\\"):
+        parts = [p for p in cleaned.lstrip("\\").split("\\") if p]
+        rel_parts = parts[1:] if len(parts) > 1 else []
+    else:
+        rel_parts = [p for p in cleaned.split("\\") if p]
+    return "\\".join(rel_parts) or "Inbox"
+
+
+@dataclass
 class RuleConflict:
     conflict_type: str          # 'NAME_COLLISION', 'SENDER_OVERLAP', 'LEGACY_RULE'
     rule_name: str
@@ -103,15 +130,23 @@ class ConflictDetector:
 
         return conflicts
 
-    def resolve_import_to_yaml(self, conflict: RuleConflict, save: bool = True) -> bool:
-        """Import a native Outlook rule into rules.yaml."""
+    def resolve_import_to_yaml(self, conflict: RuleConflict, save: bool = True) -> ImportResult:
+        """Import a native Outlook rule (folder hierarchy, emails, domains, keywords) into rules.yaml."""
         if not conflict.outlook_rule_info:
-            return False
+            return ImportResult(imported=False, rule_name=conflict.rule_name)
 
         r_name = conflict.rule_name
         r_info = conflict.outlook_rule_info
-        folder = r_info.get("target_folder", "").split("\\")[-1] or "Inbox"
-        emails = r_info.get("emails", [])
+        folder = _extract_relative_folder_path(r_info.get("target_folder", ""))
+        emails = [str(e).lower().strip() for e in (r_info.get("emails") or []) if e and "@" in str(e)]
+        domains = self.yaml_mgr.normalize_domains(r_info.get("domains") or [])
+        subject_keywords = [
+            str(k).strip()
+            for k in (r_info.get("subject_keywords") or [])
+            if k and str(k).strip()
+        ]
+        unresolved = list(r_info.get("unresolved_recipients") or [])
+        has_unsupported = bool(r_info.get("has_unsupported_conditions", False))
 
         # Clean unique ID
         clean_id = self.yaml_mgr.generate_rule_id(r_name)
@@ -120,10 +155,17 @@ class ConflictDetector:
             name=r_name,
             enabled=r_info.get("enabled", True),
             emails=emails,
+            domains=domains,
+            subject_keywords=subject_keywords,
             target_store="active_archive",
             target_folder=folder
         )
         self.yaml_mgr.rules.append(new_rule)
         if save:
             self.yaml_mgr.save()
-        return True
+        return ImportResult(
+            imported=True,
+            rule_name=r_name,
+            has_unsupported_conditions=has_unsupported,
+            unresolved_recipients=unresolved,
+        )

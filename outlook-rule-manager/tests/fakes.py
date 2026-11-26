@@ -4,11 +4,28 @@ from typing import List, Optional, Union
 
 
 @dataclass
+class FakeExchangeUser:
+    """Fake Outlook COM ExchangeUser."""
+    PrimarySmtpAddress: str = ""
+
+
+class FakeAddressEntry:
+    """Fake Outlook COM AddressEntry."""
+
+    def __init__(self, exchange_user: Optional[FakeExchangeUser] = None):
+        self._exchange_user = exchange_user
+
+    def GetExchangeUser(self) -> Optional[FakeExchangeUser]:
+        return self._exchange_user
+
+
+@dataclass
 class FakeRecipient:
     """Fake Outlook COM Recipient."""
     Address: str
     Name: str = ""
     Resolved: bool = True
+    AddressEntry: Optional[FakeAddressEntry] = None
 
     def __post_init__(self):
         if not self.Name:

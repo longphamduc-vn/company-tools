@@ -231,7 +231,11 @@ class WindowsOutlookClient(BaseOutlookClient):
                 name = getattr(rule, "Name", "")
                 enabled = getattr(rule, "Enabled", True)
                 target_folder = ""
-                emails = []
+                emails: List[str] = []
+                domains: List[str] = []
+                subject_keywords: List[str] = []
+                unresolved_recipients: List[str] = []
+                has_unsupported_conditions = False
 
                 # Target Folder
                 try:
@@ -241,18 +245,75 @@ class WindowsOutlookClient(BaseOutlookClient):
                 except Exception:
                     pass
 
-                # Recipients in From condition
+                # Recipients in From condition (SMTP only)
                 try:
                     from_cond = rule.Conditions.From
                     if from_cond.Enabled:
                         for recip in from_cond.Recipients:
-                            addr = getattr(recip, "Address", "")
-                            if addr and "@" in addr:
-                                emails.append(addr.lower().strip())
+                            smtp = self._extract_recipient_smtp(recip)
+                            if smtp:
+                                emails.append(smtp)
                             else:
-                                name_recip = getattr(recip, "Name", "")
-                                if name_recip:
-                                    emails.append(name_recip.lower().strip())
+                                disp = (
+                                    getattr(recip, "Name", "")
+                                    or getattr(recip, "Address", "")
+                                    or "(unknown)"
+                                ).strip()
+                                unresolved_recipients.append(disp)
+                except Exception:
+                    pass
+
+                # Domains in SenderAddress condition
+                try:
+                    sender_cond = rule.Conditions.SenderAddress
+                    if sender_cond.Enabled:
+                        raw_addr = getattr(sender_cond, "Address", None)
+                        if isinstance(raw_addr, str):
+                            raw_addr = [raw_addr]
+                        domains = [
+                            str(d).lower().strip()
+                            for d in (raw_addr or [])
+                            if d and str(d).strip()
+                        ]
+                except Exception:
+                    pass
+
+                # Keywords in Subject condition
+                try:
+                    subj_cond = rule.Conditions.Subject
+                    if subj_cond.Enabled:
+                        raw_text = getattr(subj_cond, "Text", None)
+                        if isinstance(raw_text, str):
+                            raw_text = [raw_text]
+                        subject_keywords = [
+                            str(k).strip()
+                            for k in (raw_text or [])
+                            if k and str(k).strip()
+                        ]
+                except Exception:
+                    pass
+
+                # Detect any enabled condition other than From / SenderAddress / Subject
+                try:
+                    conds = rule.Conditions
+                    supported_objs = [
+                        getattr(conds, "From", None),
+                        getattr(conds, "SenderAddress", None),
+                        getattr(conds, "Subject", None),
+                    ]
+                    supported_types = {1, 2, 15}  # olConditionFrom, olConditionSubject, olConditionSenderAddress
+                    for i in range(1, conds.Count + 1):
+                        cond = conds.Item(i)
+                        if not getattr(cond, "Enabled", False):
+                            continue
+                        cond_type = getattr(cond, "ConditionType", None)
+                        if cond_type is not None:
+                            if cond_type not in supported_types:
+                                has_unsupported_conditions = True
+                                break
+                        elif not any(cond is sup for sup in supported_objs if sup is not None):
+                            has_unsupported_conditions = True
+                            break
                 except Exception:
                     pass
 
@@ -260,11 +321,31 @@ class WindowsOutlookClient(BaseOutlookClient):
                     "name": name,
                     "enabled": enabled,
                     "target_folder": target_folder,
-                    "emails": emails
+                    "emails": emails,
+                    "domains": domains,
+                    "subject_keywords": subject_keywords,
+                    "unresolved_recipients": unresolved_recipients,
+                    "has_unsupported_conditions": has_unsupported_conditions,
                 })
         except Exception:
             pass
         return result
+
+    @staticmethod
+    def _extract_recipient_smtp(recip) -> str:
+        """Extract lowercase SMTP address from a Recipient, falling back to ExchangeUser."""
+        addr = (getattr(recip, "Address", "") or "").strip()
+        if addr and "@" in addr:
+            return addr.lower()
+        try:
+            addr_entry = getattr(recip, "AddressEntry", None)
+            ex_user = addr_entry.GetExchangeUser() if addr_entry else None
+            primary = (getattr(ex_user, "PrimarySmtpAddress", "") or "").strip() if ex_user else ""
+            if primary and "@" in primary:
+                return primary.lower()
+        except Exception:
+            pass
+        return ""
 
     def get_or_create_folder(self, root_store, folder_path: str):
         clean_path = folder_path.replace("\\", "/").strip("/")
@@ -317,6 +398,7 @@ class WindowsOutlookClient(BaseOutlookClient):
             disabled_count = 0
             removed_count = 0
             warnings: List[str] = []
+            unresolved_warnings: List[str] = []
             valid_rules: List[Tuple[Dict[str, Any], List[str], List[str], List[str]]] = []
             compiled_names = set()
 
@@ -403,10 +485,23 @@ class WindowsOutlookClient(BaseOutlookClient):
                     from_cond.Enabled = True
                     for e in emails:
                         from_cond.Recipients.Add(e)
+                    resolved_ok = True
                     try:
-                        from_cond.Recipients.ResolveAll()
+                        resolved_ok = from_cond.Recipients.ResolveAll()
+                    except Exception:
+                        resolved_ok = False
+                    bad_addrs = []
+                    try:
+                        for rec in from_cond.Recipients:
+                            if not getattr(rec, "Resolved", True):
+                                bad_addrs.append(
+                                    (getattr(rec, "Address", "") or getattr(rec, "Name", "") or "(unknown)").strip()
+                                )
                     except Exception:
                         pass
+                    if resolved_ok is False or bad_addrs:
+                        detail = ", ".join(bad_addrs) if bad_addrs else ", ".join(emails)
+                        unresolved_warnings.append(f"{r_name}: {detail}")
                 else:
                     from_cond.Enabled = False
 
@@ -461,6 +556,8 @@ class WindowsOutlookClient(BaseOutlookClient):
                 msg += f"\nLegacy rules pending cleanup: {', '.join(legacy_to_clean)}"
             if warnings:
                 msg += f"\nWarning - skipped rules with no conditions: {', '.join(warnings)}"
+            if unresolved_warnings:
+                msg += f"\nWarning - unresolved recipients: {'; '.join(unresolved_warnings)}"
             return True, msg
         except Exception as ex:
             return False, f"Failed to sync rules to Outlook: {str(ex)}"
