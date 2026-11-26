@@ -74,37 +74,50 @@ class FakeRecipients:
 
 @dataclass
 class FakeFromCondition:
-    """Fake Rule.Conditions.From."""
+    """Fake Rule.Conditions.From (olConditionFrom = 1)."""
     Enabled: bool = False
     Recipients: FakeRecipients = field(default_factory=FakeRecipients)
+    ConditionType: int = 1
 
 
 @dataclass
 class FakeSenderAddressCondition:
-    """Fake Rule.Conditions.SenderAddress."""
+    """Fake Rule.Conditions.SenderAddress (olConditionSenderAddress = 17)."""
     Enabled: bool = False
     Address: List[str] = field(default_factory=list)
+    ConditionType: int = 17
 
 
 @dataclass
 class FakeSubjectCondition:
-    """Fake Rule.Conditions.Subject."""
+    """Fake Rule.Conditions.Subject (olConditionSubject = 2)."""
     Enabled: bool = False
     Text: List[str] = field(default_factory=list)
+    ConditionType: int = 2
 
 
 @dataclass
 class FakeSentToCondition:
-    """Fake Rule.Conditions.SentTo."""
+    """Fake Rule.Conditions.SentTo (olConditionSentTo = 12)."""
     Enabled: bool = False
     Recipients: FakeRecipients = field(default_factory=FakeRecipients)
+    ConditionType: int = 12
 
 
 @dataclass
 class FakeBodyCondition:
-    """Fake Rule.Conditions.Body."""
+    """Fake Rule.Conditions.Body (olConditionBody = 13)."""
     Enabled: bool = False
     Text: List[str] = field(default_factory=list)
+    ConditionType: int = 13
+
+
+@dataclass
+class FakeMessageHeaderCondition:
+    """Fake Rule.Conditions.MessageHeader (olConditionMessageHeader = 15)."""
+    Enabled: bool = False
+    Text: List[str] = field(default_factory=list)
+    ConditionType: int = 15
 
 
 @dataclass
@@ -115,9 +128,17 @@ class FakeConditions:
     Subject: FakeSubjectCondition = field(default_factory=FakeSubjectCondition)
     SentTo: FakeSentToCondition = field(default_factory=FakeSentToCondition)
     Body: FakeBodyCondition = field(default_factory=FakeBodyCondition)
+    MessageHeader: FakeMessageHeaderCondition = field(default_factory=FakeMessageHeaderCondition)
 
     def _all_conditions(self):
-        return [self.From, self.SenderAddress, self.Subject, self.SentTo, self.Body]
+        return [
+            self.From,
+            self.SenderAddress,
+            self.Subject,
+            self.SentTo,
+            self.Body,
+            self.MessageHeader,
+        ]
 
     @property
     def Count(self) -> int:

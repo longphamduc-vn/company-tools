@@ -1,5 +1,5 @@
 """Sync Engine: Bridges YAML configuration with Outlook Native Rules."""
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple, Optional, Iterable
 
 from core.yaml_manager import YamlConfigManager
 from core.rule_splitter import split_rule_recipients
@@ -26,7 +26,11 @@ class SyncEngine:
                 legacy.append(r_name)
         return legacy
 
-    def push_to_outlook(self, remove_legacy: bool = False) -> Tuple[bool, str]:
+    def push_to_outlook(
+        self,
+        remove_legacy: bool = False,
+        remove_legacy_names: Optional[Iterable[str]] = None,
+    ) -> Tuple[bool, str]:
         """Compile YAML rules (with auto-split and [Companion] prefix) and reconcile Outlook rules."""
         active_store_key = "active_archive"
         active_store = self.yaml_mgr.stores.get(active_store_key)
@@ -96,6 +100,7 @@ class SyncEngine:
             store_path,
             remove_legacy=remove_legacy,
             legacy_base_names=legacy_base_names,
+            remove_legacy_names=remove_legacy_names,
         )
         if skipped_empty_rules:
             msg += f"\nWarning - skipped rules with no conditions: {', '.join(skipped_empty_rules)}"

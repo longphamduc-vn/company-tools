@@ -185,6 +185,7 @@ class ConflictDialog(tk.Toplevel):
             return
 
         remove_legacy = False
+        remove_legacy_names = None
         if import_results:
             problematic = [r for r in import_results if r.has_warnings]
             clean_imports = [r for r in import_results if not r.has_warnings]
@@ -192,11 +193,11 @@ class ConflictDialog(tk.Toplevel):
             if problematic and not clean_imports:
                 prob_lines = self._format_import_warning_lines(problematic)
                 messagebox.showwarning(
-                    "Imported Rules Have Limitations",
-                    "The following imported rules have unsupported conditions or unresolved recipients "
-                    "that cannot be synced to Outlook without losing conditions:\n\n"
+                    "Imported Rules Require Review",
+                    "The following imported rules have unsupported conditions or unresolved recipients.\n"
+                    "Rules with unsupported conditions were imported as DISABLED and must be reviewed before enabling.\n\n"
                     f"{prob_lines}\n\n"
-                    "Their original Outlook rules were kept (not deleted)."
+                    "Their original Outlook rules were kept (not deleted) so no conditions are lost."
                 )
             elif problematic:
                 prob_lines = self._format_import_warning_lines(problematic)
@@ -204,25 +205,31 @@ class ConflictDialog(tk.Toplevel):
                 remove_legacy = bool(messagebox.askyesno(
                     "Remove Original Outlook Rules?",
                     "Warning: Some imported rules have unsupported conditions or unresolved recipients "
-                    "and deleting their original Outlook rules will lose those conditions:\n\n"
+                    "(rules with unsupported conditions were imported as DISABLED and must be reviewed before enabling; "
+                    "their original Outlook rules will NOT be deleted):\n\n"
                     f"{prob_lines}\n\n"
-                    "Clean imported rules:\n"
-                    f"{clean_lines}\n\n"
-                    "Remove the original Outlook rules after syncing?",
+                    "Remove the original Outlook rules for the clean imports listed below?\n"
+                    f"{clean_lines}",
                     icon=messagebox.WARNING,
                     default=messagebox.NO,
                 ))
+                if remove_legacy:
+                    remove_legacy_names = [r.rule_name for r in clean_imports]
             else:
                 listed = "\n".join(f"• {r.rule_name}" for r in clean_imports)
                 remove_legacy = bool(messagebox.askyesno(
                     "Remove Original Outlook Rules?",
-                    "The following Outlook rules were imported into rules.yaml:\n\n"
-                    f"{listed}\n\n"
-                    "Do you want to remove these original Outlook rules after syncing?",
+                    "Remove the original Outlook rules for the clean imports listed below?\n\n"
+                    f"{listed}",
                     icon=messagebox.QUESTION,
                 ))
+                if remove_legacy:
+                    remove_legacy_names = [r.rule_name for r in clean_imports]
 
-        success, msg = self.sync_engine.push_to_outlook(remove_legacy=remove_legacy)
+        success, msg = self.sync_engine.push_to_outlook(
+            remove_legacy=remove_legacy,
+            remove_legacy_names=remove_legacy_names,
+        )
         messagebox.showinfo(
             "Conflict Resolution Complete",
             f"Resolved {len(self.conflicts)} conflicts.\n"
@@ -240,7 +247,7 @@ class ConflictDialog(tk.Toplevel):
         for r in problematic_results:
             reasons = []
             if r.has_unsupported_conditions:
-                reasons.append("unsupported conditions")
+                reasons.append("unsupported conditions - imported DISABLED, review before enabling")
             if r.unresolved_recipients:
                 reasons.append(f"unresolved recipients: {', '.join(r.unresolved_recipients)}")
             lines.append(f"• {r.rule_name} ({'; '.join(reasons)})")

@@ -270,3 +270,16 @@ Sau mỗi phase, agent báo lại: commit hash, danh sách file đổi, output `
   - `tests/test_phase5_conflict_import.py`: thêm 8 test cho `get_native_rules` (SMTP, ExchangeUser, unresolved, domains, keywords, unsupported conditions), `resolve_import_to_yaml`, cảnh báo resolve trong `save_native_rules`, và toàn bộ nhánh xử lý trong `ConflictDialog._execute_resolutions`.
 - **Lệch plan & lý do:**
   - `resolve_import_to_yaml` trả về dataclass `ImportResult` (định nghĩa `__bool__` theo `imported`) thay vì `bool` thuần để vừa giữ tương thích ngược với kiểm tra truthy trước đó, vừa truyền được `has_unsupported_conditions` và `unresolved_recipients` cho `ConflictDialog`.
+
+### Phase 5 — Review fixes
+- **Đã làm:**
+  - `core/outlook_client.py` (`OlRuleConditionType` & `get_native_rules`):
+    - Đối chiếu tài liệu Microsoft `OlRuleConditionType`: đặt hằng số có tên `OL_CONDITION_FROM = 1`, `OL_CONDITION_SUBJECT = 2`, `OL_CONDITION_SENDER_ADDRESS = 17` (`15` là `olConditionMessageHeader`), `SUPPORTED_CONDITION_TYPES = {1, 2, 17}`.
+    - Bỏ nhánh so sánh `is` theo object identity; nếu không đọc được `ConditionType` hoặc gặp exception thì coi `has_unsupported_conditions = True`.
+    - Đặt `has_unsupported_conditions = True` khi có từ 2 loại trở lên trong `From`/`SenderAddress`/`Subject` cùng `Enabled` (Outlook dùng AND, YAML compile thành OR), hoặc khi có giá trị `SenderAddress` không phải dạng domain (`@` + có dấu `.`).
+  - `tests/fakes.py`: thêm `ConditionType` chuẩn cho tất cả fake condition (`From=1`, `Subject=2`, `SentTo=12`, `Body=13`, `SenderAddress=17`) và thêm `FakeMessageHeaderCondition` (`ConditionType=15`).
+  - `core/conflict_detector.py` (`resolve_import_to_yaml`): rule có `has_unsupported_conditions` được import với `enabled=False`.
+  - `core/sync_engine.py` & `core/outlook_client.py` (`WindowsOutlookClient` + `MockOutlookClient`): thêm tham số `remove_legacy_names: Optional[Iterable[str]] = None` vào `push_to_outlook` và `save_native_rules`; khi được truyền thì chỉ xóa các rule không prefix nằm trong danh sách đó (giữ nguyên hành vi `remove_legacy=True` cho `main_window`).
+  - `gui/conflict_dialog.py`: cảnh báo rõ các rule có `has_unsupported_conditions` được import ở trạng thái TẮT (`DISABLED`), cần xem lại rồi mới bật; chuẩn hóa câu hỏi xóa thành `"Remove the original Outlook rules for the clean imports listed below?"` và chỉ truyền `remove_legacy_names=[r.rule_name for r in clean_imports]`.
+  - `tests/test_phase5_conflict_import.py`: bổ sung & cập nhật test cho `SenderAddress` hợp lệ vs chuỗi con không phải domain, `MessageHeader=15`, `From+Subject` import `enabled=False` và sau `push_to_outlook()` rule `[Companion]` vẫn disabled, và test xóa có mục tiêu (1 rule sạch + 1 rule có vấn đề + 1 rule legacy khác trùng tên YAML -> chỉ rule sạch bị xóa).
+- **Lệch plan & lý do:** Không có.

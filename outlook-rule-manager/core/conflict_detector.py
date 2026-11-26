@@ -147,13 +147,14 @@ class ConflictDetector:
         ]
         unresolved = list(r_info.get("unresolved_recipients") or [])
         has_unsupported = bool(r_info.get("has_unsupported_conditions", False))
+        imported_enabled = False if has_unsupported else r_info.get("enabled", True)
 
         # Clean unique ID
         clean_id = self.yaml_mgr.generate_rule_id(r_name)
         new_rule = RuleConfig(
             id=clean_id,
             name=r_name,
-            enabled=r_info.get("enabled", True),
+            enabled=imported_enabled,
             emails=emails,
             domains=domains,
             subject_keywords=subject_keywords,

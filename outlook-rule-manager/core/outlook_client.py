@@ -2,11 +2,22 @@
 import sys
 import os
 import re
-from typing import List, Dict, Tuple, Optional, Any
+from typing import List, Dict, Tuple, Optional, Any, Iterable
 from datetime import datetime
 
 from core.models import EmailMessage, MANAGED_PREFIX, extract_base_rule_name
 from core.address_resolver import resolve_outlook_sender, normalize_email
+
+# Outlook OlRuleConditionType constants (Microsoft Outlook Object Model)
+OL_CONDITION_FROM = 1
+OL_CONDITION_SUBJECT = 2
+OL_CONDITION_SENDER_ADDRESS = 17
+SUPPORTED_CONDITION_TYPES = {
+    OL_CONDITION_FROM,
+    OL_CONDITION_SUBJECT,
+    OL_CONDITION_SENDER_ADDRESS,
+}
+_DOMAIN_PATTERN_RE = re.compile(r"^@[^@\s.]+\.[^@\s]+$")
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -61,6 +72,7 @@ class BaseOutlookClient:
         target_store_path: str,
         remove_legacy: bool = False,
         legacy_base_names: Optional[List[str]] = None,
+        remove_legacy_names: Optional[Iterable[str]] = None,
     ) -> Tuple[bool, str]:
         raise NotImplementedError
     def move_message(self, entry_id: str, target_folder_path: str, store_path: str = "") -> bool:
@@ -245,10 +257,15 @@ class WindowsOutlookClient(BaseOutlookClient):
                 except Exception:
                     pass
 
+                from_enabled = False
+                sender_enabled = False
+                subject_enabled = False
+
                 # Recipients in From condition (SMTP only)
                 try:
                     from_cond = rule.Conditions.From
                     if from_cond.Enabled:
+                        from_enabled = True
                         for recip in from_cond.Recipients:
                             smtp = self._extract_recipient_smtp(recip)
                             if smtp:
@@ -267,6 +284,7 @@ class WindowsOutlookClient(BaseOutlookClient):
                 try:
                     sender_cond = rule.Conditions.SenderAddress
                     if sender_cond.Enabled:
+                        sender_enabled = True
                         raw_addr = getattr(sender_cond, "Address", None)
                         if isinstance(raw_addr, str):
                             raw_addr = [raw_addr]
@@ -275,6 +293,8 @@ class WindowsOutlookClient(BaseOutlookClient):
                             for d in (raw_addr or [])
                             if d and str(d).strip()
                         ]
+                        if not domains or any(not _DOMAIN_PATTERN_RE.match(d) for d in domains):
+                            has_unsupported_conditions = True
                 except Exception:
                     pass
 
@@ -282,6 +302,7 @@ class WindowsOutlookClient(BaseOutlookClient):
                 try:
                     subj_cond = rule.Conditions.Subject
                     if subj_cond.Enabled:
+                        subject_enabled = True
                         raw_text = getattr(subj_cond, "Text", None)
                         if isinstance(raw_text, str):
                             raw_text = [raw_text]
@@ -293,29 +314,24 @@ class WindowsOutlookClient(BaseOutlookClient):
                 except Exception:
                     pass
 
-                # Detect any enabled condition other than From / SenderAddress / Subject
-                try:
-                    conds = rule.Conditions
-                    supported_objs = [
-                        getattr(conds, "From", None),
-                        getattr(conds, "SenderAddress", None),
-                        getattr(conds, "Subject", None),
-                    ]
-                    supported_types = {1, 2, 15}  # olConditionFrom, olConditionSubject, olConditionSenderAddress
-                    for i in range(1, conds.Count + 1):
-                        cond = conds.Item(i)
-                        if not getattr(cond, "Enabled", False):
-                            continue
-                        cond_type = getattr(cond, "ConditionType", None)
-                        if cond_type is not None:
-                            if cond_type not in supported_types:
+                # Multiple condition types enabled together in Outlook use AND semantics (YAML uses OR)
+                if sum((from_enabled, sender_enabled, subject_enabled)) >= 2:
+                    has_unsupported_conditions = True
+
+                # Detect any enabled condition other than From / SenderAddress / Subject via ConditionType
+                if not has_unsupported_conditions:
+                    try:
+                        conds = rule.Conditions
+                        for i in range(1, conds.Count + 1):
+                            cond = conds.Item(i)
+                            if not getattr(cond, "Enabled", False):
+                                continue
+                            cond_type = getattr(cond, "ConditionType", None)
+                            if cond_type not in SUPPORTED_CONDITION_TYPES:
                                 has_unsupported_conditions = True
                                 break
-                        elif not any(cond is sup for sup in supported_objs if sup is not None):
-                            has_unsupported_conditions = True
-                            break
-                except Exception:
-                    pass
+                    except Exception:
+                        has_unsupported_conditions = True
 
                 result.append({
                     "name": name,
@@ -377,6 +393,7 @@ class WindowsOutlookClient(BaseOutlookClient):
         target_store_path: str,
         remove_legacy: bool = False,
         legacy_base_names: Optional[List[str]] = None,
+        remove_legacy_names: Optional[Iterable[str]] = None,
     ) -> Tuple[bool, str]:
         if not self._connected:
             return False, "Outlook COM not connected"
@@ -425,6 +442,7 @@ class WindowsOutlookClient(BaseOutlookClient):
             if not yaml_base_names:
                 yaml_base_names = {extract_base_rule_name(name) for name in compiled_names}
 
+            target_legacy_names = set(remove_legacy_names) if remove_legacy_names is not None else None
             managed_to_remove: List[str] = []
             legacy_to_clean: List[str] = []
             legacy_to_remove: List[str] = []
@@ -439,14 +457,17 @@ class WindowsOutlookClient(BaseOutlookClient):
                 if existing_name in compiled_names:
                     continue
 
-                if extract_base_rule_name(existing_name) in yaml_base_names:
+                is_yaml_legacy = extract_base_rule_name(existing_name) in yaml_base_names
+                if target_legacy_names is not None and existing_name in target_legacy_names:
+                    legacy_to_remove.append(existing_name)
+                elif is_yaml_legacy:
                     if self._is_conditionless_move_rule(existing_rule):
                         was_enabled = bool(getattr(existing_rule, "Enabled", False))
                         existing_rule.Enabled = False
                         if was_enabled:
                             disabled_count += 1
                             disabled_broken_legacy.append(existing_name)
-                    if remove_legacy:
+                    if target_legacy_names is None and remove_legacy:
                         legacy_to_remove.append(existing_name)
                     else:
                         legacy_to_clean.append(existing_name)
@@ -763,11 +784,13 @@ class MockOutlookClient(BaseOutlookClient):
         target_store_path: str,
         remove_legacy: bool = False,
         legacy_base_names: Optional[List[str]] = None,
+        remove_legacy_names: Optional[Iterable[str]] = None,
     ) -> Tuple[bool, str]:
         yaml_base_names = set(legacy_base_names or [])
         compiled_names = {r["name"] for r in rules_data}
         if not yaml_base_names:
             yaml_base_names = {extract_base_rule_name(name) for name in compiled_names}
+        target_legacy_names = set(remove_legacy_names) if remove_legacy_names is not None else None
 
         preserved_rules = []
         legacy_to_clean = []
@@ -780,8 +803,11 @@ class MockOutlookClient(BaseOutlookClient):
                 continue
             if old_name in compiled_names:
                 continue
+            if target_legacy_names is not None and old_name in target_legacy_names:
+                removed_count += 1
+                continue
             if extract_base_rule_name(old_name) in yaml_base_names:
-                if remove_legacy:
+                if target_legacy_names is None and remove_legacy:
                     removed_count += 1
                     continue
                 legacy_to_clean.append(old_name)
