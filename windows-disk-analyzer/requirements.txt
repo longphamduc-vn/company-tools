@@ -1,0 +1,4 @@
+# Zero external runtime dependencies required.
+# Uses Python 3.10+ standard library, Tkinter/TTK, and Windows ctypes Win32 APIs.
+# Optional dev tool for running tests with pytest:
+# pytest>=7.0
