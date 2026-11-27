@@ -275,10 +275,10 @@ class TestUiPhase2(unittest.TestCase):
         self.assertEqual(
             preview_names,
             [
-                f"{MANAGED_PREFIX}Big Vendor (Part 1)",
-                f"{MANAGED_PREFIX}Big Vendor (Part 2)",
-                f"{MANAGED_PREFIX}Big Vendor (Domains)",
-                f"{MANAGED_PREFIX}Big Vendor (Keywords)",
+                f"{MANAGED_PREFIX}Vendors_Big (Part 1)",
+                f"{MANAGED_PREFIX}Vendors_Big (Part 2)",
+                f"{MANAGED_PREFIX}Vendors_Big (Domains)",
+                f"{MANAGED_PREFIX}Vendors_Big (Keywords)",
             ],
         )
 
@@ -301,7 +301,7 @@ class TestUiPhase2(unittest.TestCase):
             win.update()
             quota_txt = view.lbl_quota.cget("text")
             self.assertIn("41 senders, 1 domain, 1 keyword → 4 native rules", quota_txt)
-            self.assertIn("Big Vendor (Keywords)", view.lbl_quota_subrules.cget("text"))
+            self.assertIn("Vendors_Big (Keywords)", view.lbl_quota_subrules.cget("text"))
 
             # Link group "executive" via modal dialog -> immediately updates to 43 senders BEFORE Save
             view._link_group_to_rule()

@@ -11,7 +11,7 @@ from core.outlook_client import BaseOutlookClient
 from core.sync_engine import SyncEngine
 from core.conflict_detector import ConflictDetector
 from gui.conflict_dialog import ConflictDialog
-from gui.quick_rule_dialog import QuickRuleDialog
+from gui.quick_rule_dialog import QuickRuleDialog, rule_name_from_folder
 
 
 def suggest_rule_and_folder(sender_name: str, sender_email: str) -> Tuple[str, str]:
@@ -88,6 +88,7 @@ class TriageView(ttk.Frame):
         self.on_message_activated = None   # integrated mode: user picked a mail -> show the reader
         self.on_rules_changed = None       # integrated mode: rules.yaml changed by Apply -> refresh tree
         self.status_sink = None            # integrated mode: where short feedback messages go
+        self.on_inbox_changed = None       # integrated mode: mail list/staging changed -> refresh tree mails
         self.yaml_mgr = yaml_mgr
         self.outlook = outlook
         self.sync_engine = sync_engine
@@ -366,8 +367,10 @@ class TriageView(ttk.Frame):
         if not self.selected_message:
             return
 
-        m = self.selected_message
+        self._show_message(self.selected_message)
 
+    def _show_message(self, m: EmailMessage):
+        self.selected_message = m
         # Instant Inspector update (<5ms)
         self.lbl_inspector_sender.config(text=m.sender_name if m.sender_name else m.sender_email)
         self.lbl_inspector_email.config(text=f"SMTP: {m.sender_email}")
@@ -469,6 +472,46 @@ class TriageView(ttk.Frame):
             merge_same_name=True,
         ))
 
+    def mails_by_rule(self) -> Dict[str, List[Tuple[EmailMessage, bool]]]:
+        """Where each loaded mail goes: {rule_id: [(mail, staged), ...]} (staged change wins)."""
+        staged = {a.message_id: a for a in self.staged_actions}
+        out: Dict[str, List[Tuple[EmailMessage, bool]]] = {}
+        for msg in self.messages:
+            action = staged.get(msg.entry_id)
+            if action is not None:
+                if action.rule_id:
+                    out.setdefault(action.rule_id, []).append((msg, True))
+                continue
+            rule, _ = self.sync_engine.match_message(msg.sender_email, msg.subject)
+            if rule is not None:
+                out.setdefault(rule.id, []).append((msg, False))
+        return out
+
+    def pending_new_rules(self) -> Dict[str, Tuple[str, List[EmailMessage]]]:
+        """Staged mails whose rule is created on Apply: {folder: (rule name, [mails])}."""
+        by_id = {m.entry_id: m for m in self.messages}
+        out: Dict[str, Tuple[str, List[EmailMessage]]] = {}
+        for action in self.staged_actions:
+            msg = by_id.get(action.message_id)
+            if action.rule_id or msg is None:
+                continue
+            folder = action.target_folder or ""
+            name, msgs = out.get(folder, (action.rule_name, []))
+            msgs.append(msg)
+            out[folder] = (name, msgs)
+        return out
+
+    def focus_message(self, entry_id: str) -> bool:
+        """Select a mail (e.g. clicked in the rules tree) and show it in the reader."""
+        msg = next((m for m in self.messages if m.entry_id == entry_id), None)
+        if msg is None:
+            return False
+        if self.tree_inbox.exists(entry_id):
+            self.tree_inbox.selection_set(entry_id)
+            self.tree_inbox.see(entry_id)
+        self._show_message(msg)
+        return True
+
     def _selected_messages(self) -> List[EmailMessage]:
         ids = set(self.tree_inbox.selection())
         return [m for m in self.messages if m.entry_id in ids]
@@ -490,8 +533,15 @@ class TriageView(ttk.Frame):
             if not folder or self.yaml_mgr.is_inside_unclassified(folder):
                 self.show_panel_status("New rules cannot be created in this folder.", error=True)
                 return 0
+            in_folder = [r for r in self.yaml_mgr.rules
+                         if (r.target_folder or "").lower() == folder.lower()]
             for msg in messages:
-                self._stage_new_rule_in_folder(msg, self._rule_name_for(msg, whole_domain), folder, whole_domain)
+                if len(in_folder) == 1:
+                    self._stage_add_to_existing_rule(
+                        msg, in_folder[0].id, match_mode="domain" if whole_domain else "email", refresh=False
+                    )
+                else:
+                    self._stage_new_rule_in_folder(msg, rule_name_from_folder(folder), folder, whole_domain)
             self._populate_inbox_table()
             self._update_pending_bar()
             self.show_panel_status(f"Staged {pluralize_count(len(messages), 'email')} into '{folder}'.")
@@ -499,9 +549,20 @@ class TriageView(ttk.Frame):
         rule_id = value
         mode = "domain" if whole_domain else "email"
         count = 0
+        already = 0
+        staged_ids = {a.message_id for a in self.staged_actions}
         for msg in messages:
+            if not whole_domain and msg.entry_id not in staged_ids:
+                current, _ = self.sync_engine.match_message(msg.sender_email, msg.subject)
+                if current is not None and current.id == rule_id:
+                    already += 1
+                    continue
             if self._stage_add_to_existing_rule(msg, rule_id, match_mode=mode, refresh=False):
                 count += 1
+        if already and not count:
+            self.show_panel_status(
+                f"{pluralize_count(already, 'email')} already go{'es' if already == 1 else ''} to this rule - nothing to change."
+            )
         if count:
             self._populate_inbox_table()
             self._update_pending_bar()
@@ -688,6 +749,8 @@ class TriageView(ttk.Frame):
         elif children and not self.tree_inbox.selection():
             self.tree_inbox.selection_set(children[0])
             self._on_message_select_fast(None)
+        if callable(self.on_inbox_changed):
+            self.on_inbox_changed()
 
     # -----------------------------------------------------------------
     # STAGING ENGINE & RULE SELECTION DIALOGS
@@ -923,6 +986,7 @@ class TriageView(ttk.Frame):
             sender_domain=sender_domain,
             blocked_folder=self.yaml_mgr.unclassified_folder(),
             title="New Rule",
+            auto_name=self.yaml_mgr.auto_rule_names,
         )
         if not result:
             return

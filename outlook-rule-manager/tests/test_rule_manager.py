@@ -81,7 +81,7 @@ class TestRuleManagerAndFolderOperations(unittest.TestCase):
     def test_duplicate_rule(self):
         dup = self.yaml_mgr.duplicate_rule("rule_executive")
         self.assertIsNotNone(dup)
-        self.assertTrue(dup.name.startswith("Copy of"))
+        self.assertEqual(dup.name, "Management_Executive_Board_Directors_2")  # names follow the folder
         self.assertEqual(dup.target_folder, r"Management\Executive_Board\Directors")
 
     def test_gui_drag_and_drop_flow(self):
@@ -94,12 +94,18 @@ class TestRuleManagerAndFolderOperations(unittest.TestCase):
         self.assertIn("__GROUPS__", children)
         self.assertIn("__POOL__", children)
 
-        # Drag rule_suppliers onto Engineering_Team\SCADA_Part\PLC_Unit folder node
-        dest_iid = r"fld_engineering_team\scada_part\plc_unit"
-        view._execute_drop("rule_rule_suppliers", dest_iid)
+        # Leaf folders with a single rule are one node: "📁 Omron_Unit  (rule: Purchasing_Team_Vendor_Part_Omron_Unit)"
+        self.assertEqual(view.merged_nodes["rule_rule_suppliers"], r"Purchasing_Team\Vendor_Part\Omron_Unit")
+        self.assertIn("(rule: Purchasing_Team_Vendor_Part_Omron_Unit)", view.tree.item("rule_rule_suppliers", "text"))
+        self.assertFalse(view.tree.exists(r"fld_purchasing_team\vendor_part\omron_unit"))
 
+        # Dragging it onto the PLC_Unit node moves the folder (with its rule) below PLC_Unit
+        view._execute_drop("rule_rule_suppliers", "rule_rule_engineering")
         sup_rule = next(r for r in self.yaml_mgr.rules if r.id == "rule_suppliers")
-        self.assertEqual(sup_rule.target_folder, r"Engineering_Team\SCADA_Part\PLC_Unit")
+        self.assertEqual(sup_rule.target_folder, r"Engineering_Team\SCADA_Part\PLC_Unit\Omron_Unit")
+        # PLC_Unit now has a subfolder, so it is shown as folder + rule again
+        self.assertTrue(view.tree.exists(r"fld_engineering_team\scada_part\plc_unit"))
+        self.assertNotIn("rule_rule_engineering", view.merged_nodes)
 
         # Drag pool address onto rule_executive
         pool_iid = "pool_former.contractor@vendor.com"
@@ -118,14 +124,14 @@ class TestRuleManagerAndFolderOperations(unittest.TestCase):
 
         self.assertFalse(hasattr(view, "_set_condition_mode"))
         self.assertFalse(hasattr(view, "condition_mode"))
-        self.assertEqual(view.lbl_rule_emails_hdr.cget("text"), "Emails (0)")
+        self.assertEqual(view.lbl_rule_emails_hdr.cget("text"), "Emails (0 + 2 from groups)")
         self.assertEqual(view.lbl_rule_domains_hdr.cget("text"), "Domains (0)")
         self.assertEqual(view.lbl_rule_keywords_hdr.cget("text"), "Subject Keywords (0)")
         self.assertIn("Executive Board", view.lst_rule_groups.get(0))
 
         view.txt_emails.insert(tk.END, "direct@company.com\n")
         view._on_rule_text_changed()
-        self.assertEqual(view.lbl_rule_emails_hdr.cget("text"), "Emails (1)")
+        self.assertEqual(view.lbl_rule_emails_hdr.cget("text"), "Emails (1 + 2 from groups)")
 
     def test_dynamic_arbitrary_level_shifts(self):
         # 1. Level 3 to Level 1 (Promote to Root)
@@ -167,15 +173,14 @@ class TestRuleManagerAndFolderOperations(unittest.TestCase):
         view = RuleManagerView(self.root, self.yaml_mgr, self.sync_engine)
         view.pack()
 
-        # Drag Omron_Unit (Level 3: Purchasing_Team\Vendor_Part\Omron_Unit) onto __HIERARCHY__ (Root)
-        source_iid = r"fld_purchasing_team\vendor_part\omron_unit"
-        view._execute_drop(source_iid, "__HIERARCHY__")
+        # Drag Omron_Unit (Level 3, shown merged with its rule) onto __HIERARCHY__ (Root)
+        view._execute_drop("rule_rule_suppliers", "__HIERARCHY__")
 
         sup_rule = next(r for r in self.yaml_mgr.rules if r.id == "rule_suppliers")
         self.assertEqual(sup_rule.target_folder, "Omron_Unit")  # Now at Level 1!
 
         # Now drag Omron_Unit (Level 1) onto Engineering_Team\SCADA_Part\PLC_Unit (Level 3) -> Becomes Level 4!
-        view._execute_drop("fld_omron_unit", r"fld_engineering_team\scada_part\plc_unit")
+        view._execute_drop("rule_rule_suppliers", "rule_rule_engineering")
         sup_rule = next(r for r in self.yaml_mgr.rules if r.id == "rule_suppliers")
         self.assertEqual(sup_rule.target_folder, r"Engineering_Team\SCADA_Part\PLC_Unit\Omron_Unit")
         self.assertEqual(len(sup_rule.target_folder.split("\\")), 4)  # Level 4!

@@ -7,6 +7,8 @@
 ## 🌟 Key Features
 
 - **Visual Folder Treeview & Drag-and-Drop Reorganization**: Browse hierarchical `Team \ Part \ Unit` folder trees visually. Reorganize rules and folders by dragging and dropping them directly between folders with instant YAML persistence.
+- **Folder › Rule › Mail tree**: A leaf folder with a single rule is one node — `📁 Directors  (rule: Executive Board)` — and the Inbox mails that rule catches are listed under it (staged ones marked `*`). Click a mail to read it; drag it onto another rule or folder to re-route its sender. New rules are named after their folder path (`Team\Part\Unit` → `Team_Part_Unit`), so dropping several mails on one folder gives one rule.
+- **Share rules (File › Export / Import)**: Export writes a copy of your rules, groups and folders without your PST paths. Import either **merges** (same name + folder = senders added, other rules added) or **replaces** your rules; your PST paths are always kept and Ctrl+Z undoes the import.
 - **Rule Studio & Inspector**: Dedicated clean cards for rules, folders, address groups, and orphaned pools with breadcrumb navigation and visual recipient pills.
 - **YAML Rule & Group Management**: Define rules, reusable address groups, and domains in a clean `rules.yaml` file. Manage thousands of addresses without Outlook's 64KB UI limitation.
 - **Native Outlook Synchronization**: Outlook executes all rules natively (24/7 in the background, even when this companion app is closed). Sync YAML configurations directly into Outlook with one click.

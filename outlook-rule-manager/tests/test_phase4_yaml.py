@@ -158,7 +158,7 @@ class TestPhase4YamlIntegrityAndIds(unittest.TestCase):
         )
         self.assertTrue(detector.resolve_import_to_yaml(conflict))
         self.assertTrue(detector.resolve_import_to_yaml(conflict))
-        imported_ids = [r.id for r in self.yaml_mgr.rules if r.name == "Legacy Vendor"]
+        imported_ids = [r.id for r in self.yaml_mgr.rules if "Legacy Vendor" in r.known_names()]
         self.assertEqual(imported_ids, ["rule_legacy_vendor", "rule_legacy_vendor_1"])
 
     def test_delete_group_and_add_sender_fallback_behavior(self):
@@ -324,7 +324,7 @@ class TestPhase4GuiIntegration(unittest.TestCase):
             with patch.object(view.conflict_detector, "detect_conflicts", return_value=[]):
                 view._apply_all_staged()
 
-        omron_rules = [r for r in self.yaml_mgr.rules if r.name == "Omron"]
+        omron_rules = [r for r in self.yaml_mgr.rules if "Omron" in r.known_names()]
         self.assertEqual([r.id for r in omron_rules], ["rule_omron", "rule_omron_1"])
 
     def test_triage_commit_35_add_to_rule_actions_creates_only_one_backup(self):

@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import unittest
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from core.models import EmailMessage
@@ -46,32 +47,40 @@ class TestCreateRulesFast(unittest.TestCase):
                 patch("gui.triage_view.messagebox.showinfo"), patch("gui.triage_view.messagebox.showwarning"):
             self.tv._apply_all_staged()
 
-    def test_drop_on_folder_stages_new_rule_named_after_sender(self):
-        folder = "Purchasing_Team\\Vendor_Part\\Omron_Unit"
+    def test_drop_on_empty_folder_stages_rule_named_after_folder_path(self):
+        folder = "Purchasing_Team"
         msg = next(m for m in self.tv.messages if m.entry_id == "MSG_004")  # Kenji Sato (Sato Automation)
         n = self.tv.drop_messages_on_target(self._folder_iid(folder), [msg])
         self.assertEqual(n, 1)
         action = self.tv.staged_actions[0]
         self.assertEqual((action.action_type, action.rule_name, action.target_folder),
-                         ("create_rule", "Kenji Sato", folder))
+                         ("create_rule", "Purchasing_Team", folder))
         self._apply()
-        rule = next(r for r in self.y.rules if r.name == "Kenji Sato")
+        rule = next(r for r in self.y.rules if r.name == "Purchasing_Team")
         self.assertEqual(rule.target_folder, folder)
         matched, _ = self.win.sync_engine.match_message(msg.sender_email, msg.subject)
         self.assertEqual(matched.id, rule.id)
         self.assertEqual(self.tv.last_apply_mismatches, [])
 
-    def test_ctrl_drop_on_folder_names_rule_after_company_and_merges(self):
-        folder = "Purchasing_Team\\Vendor_Part\\Omron_Unit"
+    def test_ctrl_drop_on_folder_gives_one_rule_for_all_mails(self):
+        folder = "Purchasing_Team\\Vendor_Part"
         a = _msg("A1", "Anna", "anna@keyence.co.jp")
         b = _msg("B1", "Ben", "ben@keyence.co.jp")
         self.tv.messages.extend([a, b])
         self.tv.drop_messages_on_target(self._folder_iid(folder), [a, b], whole_domain=True)
-        self.assertEqual([x.rule_name for x in self.tv.staged_actions], ["Keyence", "Keyence"])
+        self.assertEqual([x.rule_name for x in self.tv.staged_actions],
+                         ["Purchasing_Team_Vendor_Part", "Purchasing_Team_Vendor_Part"])
         self._apply()
-        keyence = [r for r in self.y.rules if r.name == "Keyence"]
-        self.assertEqual(len(keyence), 1)
-        self.assertEqual(keyence[0].domains, ["@keyence.co.jp"])
+        rules = [r for r in self.y.rules if r.name == "Purchasing_Team_Vendor_Part"]
+        self.assertEqual(len(rules), 1)
+        self.assertEqual(rules[0].domains, ["@keyence.co.jp"])
+
+    def test_drop_on_folder_with_one_rule_adds_to_that_rule(self):
+        folder = "Purchasing_Team\\Vendor_Part\\Omron_Unit"   # shown as one node with its rule
+        msg = next(m for m in self.tv.messages if m.entry_id == "MSG_004")
+        self.tv.drop_messages_on_target(self._folder_iid(folder), [msg])
+        action = self.tv.staged_actions[0]
+        self.assertEqual((action.action_type, action.rule_id), ("add_to_rule", "rule_suppliers"))
 
     def test_drop_on_folder_reuses_rule_with_same_name(self):
         folder = "Management\\Executive_Board\\Directors"
@@ -109,24 +118,33 @@ class TestCreateRulesFast(unittest.TestCase):
             self.tv._open_create_hierarchical_rule_dialog(msg)
         self.assertEqual(self.tv.staged_actions, [])
 
-    def test_rules_tab_new_rule_focuses_name_and_enter_saves(self):
+    def test_rules_tab_new_rule_is_named_after_folder_and_name_is_locked(self):
         rv = self.win.tab_rules
         self.win.show_rule_details()
         self.win.update()
-        rv.selected_folder_path = "Management\\Executive_Board\\Directors"
-        # OS focus/selection is unreliable when several Tk roots were created in one test process,
-        # so check that the name field is focused/selected via the dedicated hook.
-        with patch.object(rv, "_focus_new_rule_name") as focus_name:
+        rv.selected_folder_path = "Management\Executive_Board\Directors"
+        rv._add_rule_in_selected_folder()
+        self.win.update()
+        # The folder already has a rule, so the new one gets _2
+        self.assertEqual(rv.var_rule_name.get(), "Management_Executive_Board_Directors_2")
+        self.assertEqual(str(rv.ent_rule_name.cget("state")), "readonly")
+        self.assertEqual(rv.lbl_rule_prefix.cget("text"), "[Companion]")
+        # A typed name never sticks: names always follow the folder
+        rv.selected_rule.name = "Board Secretary"
+        self.y.save()
+        self.assertFalse(any(r.name == "Board Secretary" for r in self.y.rules))
+
+    def test_rules_tab_manual_names_when_auto_naming_is_off(self):
+        self.y.settings["auto_rule_names"] = False
+        rv = self.win.tab_rules
+        rv.selected_folder_path = "Management\Executive_Board\Directors"
+        with patch.object(rv, "_focus_new_rule_name"):
             rv._add_rule_in_selected_folder()
-            self.win.update()
-        focus_name.assert_called_once()
-        self.assertTrue(rv.var_rule_name.get().startswith("New Rule"))
+        self.assertEqual(str(rv.ent_rule_name.cget("state")), "normal")
         rv.ent_rule_name.delete(0, "end")
         rv.ent_rule_name.insert(0, "Board Secretary")
-        # Key events need OS focus (unreliable here): check the Enter binding exists, then run it
         self.assertTrue(rv.ent_rule_name.bind("<Return>"))
         rv._save_rule_changes()
-        self.win.update()
         self.assertTrue(any(r.name == "Board Secretary" for r in self.y.rules))
 
     def test_rules_tab_new_rule_refused_inside_unclassified(self):
@@ -162,14 +180,40 @@ class TestQuickRuleDialog(unittest.TestCase):
         self.assertEqual(list(d.cbo_folder.cget("values")), ["Team\\A", "Team\\B"])
         d.var_folder.set("Team\\A")
         d._update_folder_hint()
-        self.assertEqual(d.lbl_folder_hint.cget("text"), "Existing folder.")
+        self.assertEqual(d.lbl_folder_hint.cget("text"), "Existing folder.  Outlook rule: [Companion] Team_A")
         d.var_folder.set("Team/New")
         d._update_folder_hint()
-        self.assertEqual(d.lbl_folder_hint.cget("text"), "New folder will be created.")
+        self.assertEqual(d.lbl_folder_hint.cget("text"),
+                         "New folder will be created.  Outlook rule: [Companion] Team_New")
+        d.destroy()
+
+    def test_auto_name_dialog_name_is_folder_and_locked(self):
+        d = self._dialog(default_folder="Team\\A")
+        self.assertEqual(str(d.ent_name.cget("state")), "readonly")
+        self.assertEqual(d.var_name.get(), "Team_A")
+        d.var_folder.set("Team\\B")
+        d._on_folder_typed()
+        self.assertEqual(d.var_name.get(), "Team_B")
+        d.ok()
+        self.assertEqual(d.result, ("Team_B", "Team\\B", "email"))
+
+    def test_name_follows_folder_until_typed(self):
+        d = self._dialog(default_folder="Team\\A", auto_name=False)
+        self.assertEqual(d.var_name.get(), "Team_A")
+        d.var_folder.set("Team\\B\\Sub")
+        d._on_folder_typed()
+        self.assertEqual(d.var_name.get(), "Team_B_Sub")
+        d._on_name_typed(SimpleNamespace(keysym="x"))
+        d.var_name.set("Alice")
+        d.var_folder.set("Other")
+        d._on_folder_typed()
+        self.assertEqual(d.var_name.get(), "Alice")
         d.destroy()
 
     def test_ok_returns_normalized_result_and_validates(self):
-        d = self._dialog(default_folder="Team\\A")
+        d = self._dialog(default_folder="Team\\A", auto_name=False)
+        d._on_name_typed(SimpleNamespace(keysym="x"))
+        d.var_name.set("Alice")
         d.var_scope.set("domain")
         d.var_folder.set(" Team / C ")
         d.ok()

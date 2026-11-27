@@ -62,7 +62,7 @@ class ConflictDetector:
         for r in native_rules:
             base = extract_base_rule_name(r.get("name", ""))
             native_by_base.setdefault(base, []).append(r)
-        yaml_map = {r.name: r for r in self.yaml_mgr.rules}
+        yaml_map = {n: r for r in self.yaml_mgr.rules for n in r.known_names()}
 
         # 1. Check for Name Collisions and Folder Mismatches
         for r_name, r_yaml in yaml_map.items():
@@ -89,9 +89,11 @@ class ConflictDetector:
         # 2. Check for Senders Overlapping between Different Rules
         # Build map of email -> rule_name in YAML
         yaml_sender_to_rule: Dict[str, str] = {}
+        yaml_rule_by_sender: Dict[str, RuleConfig] = {}
         for r in self.yaml_mgr.rules:
             for email in self.yaml_mgr.get_all_emails_for_rule(r):
                 yaml_sender_to_rule[email.lower()] = r.name
+                yaml_rule_by_sender[email.lower()] = r
 
         # Check native rules for overlapping senders
         for r_native in native_rules:
@@ -101,7 +103,8 @@ class ConflictDetector:
             for email in native_emails:
                 if email in yaml_sender_to_rule:
                     yaml_target_rule = yaml_sender_to_rule[email]
-                    if yaml_target_rule != native_base_name:
+                    # The same rule under its current or a former (pre auto-naming) name is no overlap
+                    if native_base_name not in yaml_rule_by_sender[email].known_names():
                         conflicts.append(RuleConflict(
                             conflict_type="SENDER_OVERLAP",
                             rule_name=f"{email} ({yaml_target_rule} vs {native_name})",

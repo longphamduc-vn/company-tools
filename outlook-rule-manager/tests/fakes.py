@@ -320,3 +320,11 @@ class FakeNamespace:
 
     def GetItemFromID(self, entry_id: str):
         return self._items[entry_id]
+
+
+def managed_name(yaml_mgr, name: str, suffix: str = "") -> str:
+    """Outlook name of the YAML rule that is (or was, before automatic naming) called `name`."""
+    from core.models import MANAGED_PREFIX
+
+    rule = next(r for r in yaml_mgr.rules if name in r.known_names())
+    return f"{MANAGED_PREFIX}{rule.name}{suffix}"

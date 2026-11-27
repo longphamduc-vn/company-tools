@@ -14,6 +14,7 @@ from core.sync_engine import SyncEngine
 from core.yaml_manager import YamlConfigManager
 from gui.conflict_dialog import ConflictDialog
 from tests.fakes import (
+    managed_name,
     FakeAddressEntry,
     FakeExchangeUser,
     FakeFolder,
@@ -153,7 +154,7 @@ class TestPhase5NativeRuleInspectionAndResolveWarnings(unittest.TestCase):
         self.assertTrue(res.has_unsupported_conditions)
         self.assertEqual(res.unresolved_recipients, ["Old User"])
 
-        imported = next(r for r in self.yaml_mgr.rules if r.name == "Imported Multi")
+        imported = next(r for r in self.yaml_mgr.rules if "Imported Multi" in r.known_names())
         self.assertFalse(imported.enabled)
         self.assertEqual(imported.target_folder, r"Team\Part\Unit")
         self.assertEqual(imported.emails, ["a@vendor.com"])
@@ -176,14 +177,14 @@ class TestPhase5NativeRuleInspectionAndResolveWarnings(unittest.TestCase):
         res = detector.resolve_import_to_yaml(combo_conflict)
         self.assertTrue(res.has_unsupported_conditions)
 
-        imported = next(r for r in self.yaml_mgr.rules if r.name == "Combo Import")
+        imported = next(r for r in self.yaml_mgr.rules if "Combo Import" in r.known_names())
         self.assertFalse(imported.enabled)
 
         ok, msg = self.sync_engine.push_to_outlook()
         self.assertTrue(ok, msg)
         by_name = {r.Name: r for r in self.default_store.GetRules()}
-        self.assertFalse(by_name[f"{MANAGED_PREFIX}Combo Import"].Enabled)
-        self.assertFalse(by_name[f"{MANAGED_PREFIX}Combo Import (Keywords)"].Enabled)
+        self.assertFalse(by_name[managed_name(self.yaml_mgr, "Combo Import")].Enabled)
+        self.assertFalse(by_name[managed_name(self.yaml_mgr, "Combo Import", " (Keywords)")].Enabled)
 
     def test_save_native_rules_collects_unresolved_recipient_warnings(self):
         # Case 1: ResolveAll returns False with unresolved recipient
@@ -354,7 +355,7 @@ class TestPhase5ConflictDialogExecution(unittest.TestCase):
         self.assertIn("Clean Legacy", mock_ask.call_args[0][1])
         remaining_names = {r.Name for r in self.default_store.GetRules()}
         self.assertNotIn("Clean Legacy", remaining_names)
-        self.assertIn(f"{MANAGED_PREFIX}Clean Legacy", remaining_names)
+        self.assertIn(managed_name(self.yaml_mgr, "Clean Legacy"), remaining_names)
         self.assertIn("Imported to YAML: 1", mock_info.call_args[0][1])
 
     def test_all_problematic_imports_do_not_ask_to_delete_and_warn_user(self):
@@ -470,9 +471,9 @@ class TestPhase5ConflictDialogExecution(unittest.TestCase):
         self.assertIn("Problem Import Rule", remaining)
         self.assertIn("Executive Board", remaining)
         # Managed rules: Clean Import Rule enabled, Problem Import Rule disabled
-        self.assertTrue(remaining[f"{MANAGED_PREFIX}Clean Import Rule"].Enabled)
-        self.assertFalse(remaining[f"{MANAGED_PREFIX}Problem Import Rule"].Enabled)
-        self.assertFalse(remaining[f"{MANAGED_PREFIX}Problem Import Rule (Keywords)"].Enabled)
+        self.assertTrue(remaining[managed_name(self.yaml_mgr, "Clean Import Rule")].Enabled)
+        self.assertFalse(remaining[managed_name(self.yaml_mgr, "Problem Import Rule")].Enabled)
+        self.assertFalse(remaining[managed_name(self.yaml_mgr, "Problem Import Rule", " (Keywords)")].Enabled)
 
         # Verify MockOutlookClient also respects remove_legacy_names
         mock = MockOutlookClient()

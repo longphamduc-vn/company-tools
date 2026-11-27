@@ -33,7 +33,7 @@ class SyncEngine:
 
     def find_legacy_rules(self) -> List[str]:
         """Return unprefixed Outlook rule names matching YAML rules or split parts."""
-        yaml_names = {r.name for r in self.yaml_mgr.rules}
+        yaml_names = {n for r in self.yaml_mgr.rules for n in r.known_names()}
         legacy = []
         for native_rule in self.outlook.get_native_rules():
             r_name = native_rule.get("name", "")
@@ -200,7 +200,7 @@ class SyncEngine:
                     keyword_subrules.append(entry)
 
         compiled_rules = email_subrules + domain_subrules + keyword_subrules + unclassified_subrules
-        legacy_base_names = [r.name for r in self.yaml_mgr.rules]
+        legacy_base_names = [n for r in self.yaml_mgr.rules for n in r.known_names()]
 
         success, msg = self.outlook.save_native_rules(
             compiled_rules,

@@ -58,7 +58,7 @@ class TestUndoCore(unittest.TestCase):
     def test_undo_delete_rule_restores_rule_and_pool(self):
         self.y.remove_rule_and_repool("rule_executive")
         self.assertIn("ceo@company.com", self.y.unclassified_pool)
-        self.assertEqual(self.y.undo(), "Delete rule 'Executive Board'")
+        self.assertEqual(self.y.undo(), "Delete rule 'Management_Executive_Board_Directors'")
         self.assertTrue(any(r.id == "rule_executive" for r in self.y.rules))
         self.assertNotIn("ceo@company.com", self.y.unclassified_pool)
 

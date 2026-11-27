@@ -1,6 +1,8 @@
 """Main Application Window for Outlook Rule Companion."""
+import os
 import tkinter as tk
-from tkinter import ttk, messagebox
+from datetime import datetime
+from tkinter import ttk, messagebox, filedialog
 from typing import Optional, Tuple
 
 from core.yaml_manager import YamlConfigManager
@@ -67,8 +69,15 @@ class MainWindow(tk.Tk):
         right_box = ttk.Frame(header)
         right_box.pack(side=tk.RIGHT)
 
-        btn_reload = ttk.Button(right_box, text="Reload YAML", command=self._reload_yaml)
-        btn_reload.pack(side=tk.LEFT, padx=3)
+        # File: reload + share rules with colleagues (export / import)
+        self.mb_file = ttk.Menubutton(right_box, text="File")
+        self.menu_file = tk.Menu(self.mb_file, tearoff=0)
+        self.menu_file.add_command(label="Export rules for sharing...", command=self._export_rules)
+        self.menu_file.add_command(label="Import rules...", command=self._import_rules)
+        self.menu_file.add_separator()
+        self.menu_file.add_command(label="Reload rules.yaml", command=self._reload_yaml)
+        self.mb_file.config(menu=self.menu_file)
+        self.mb_file.pack(side=tk.LEFT, padx=3)
 
         self.btn_conflicts = ttk.Button(
             right_box,
@@ -253,11 +262,26 @@ class MainWindow(tk.Tk):
         self.tab_triage.on_message_activated = self.show_mail_details
         self.tab_triage.on_rules_changed = self.tab_rules.refresh_all
         self.tab_rules.on_item_activated = self.show_rule_details
+        # Mails listed under their rule in the tree
+        self.tab_rules.mail_provider = self.tab_triage.mails_by_rule
+        self.tab_rules.pending_provider = self.tab_triage.pending_new_rules
+        self.tab_rules.on_mail_selected = self._on_tree_mail_selected
+        self.tab_rules.on_mail_dropped = self._on_tree_mail_dropped
+        self.tab_triage.on_inbox_changed = self.tab_rules.refresh_mail_nodes
+        self.tab_rules.refresh_mail_nodes()
 
         self.details_mode = ""
         self.show_mail_details()
         self._sashes_placed = False
         self.workspace.bind("<Configure>", self._place_sashes, add="+")
+
+    def _on_tree_mail_selected(self, entry_id: str):
+        if self.tab_triage.focus_message(entry_id):
+            self.show_mail_details()
+
+    def _on_tree_mail_dropped(self, entry_id: str, target_iid: str, whole_domain: bool = False):
+        msgs = [m for m in self.tab_triage.messages if m.entry_id == entry_id]
+        self.tab_triage.drop_messages_on_target(target_iid, msgs, whole_domain=whole_domain)
 
     def _place_sashes(self, event=None):
         """Initial split (once, when the window first gets its real size): 24% | 34% | 42%."""
@@ -399,6 +423,102 @@ class MainWindow(tk.Tk):
         self.tab_triage.refresh_inbox()
         self.tab_rules.refresh_all()
         messagebox.showinfo("Reloaded", "Successfully reloaded configuration from rules.yaml.")
+
+    # --- sharing --------------------------------------------------------
+    def _ask_export_path(self) -> str:
+        return filedialog.asksaveasfilename(
+            parent=self,
+            title="Export rules for sharing",
+            defaultextension=".yaml",
+            initialfile=f"rules_shared_{datetime.now():%Y%m%d}.yaml",
+            filetypes=[("YAML files", "*.yaml *.yml"), ("All files", "*.*")],
+        )
+
+    def _ask_import_path(self) -> str:
+        return filedialog.askopenfilename(
+            parent=self,
+            title="Import rules",
+            filetypes=[("YAML files", "*.yaml *.yml"), ("All files", "*.*")],
+        )
+
+    def _ask_import_mode(self, filename: str, preview: dict) -> str:
+        """'merge' / 'replace' / '' (cancel)."""
+        dlg = tk.Toplevel(self)
+        dlg.title("Import rules")
+        dlg.transient(self)
+        dlg.resizable(False, False)
+        choice = {"mode": ""}
+        frm = ttk.Frame(dlg, padding=14)
+        frm.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(
+            frm,
+            text=(f"'{filename}' has {pluralize_count(len(preview['rules']), 'rule')} and "
+                  f"{pluralize_count(len(preview['groups']), 'group')}.\n\n"
+                  "Merge: add its rules and senders to yours (same name + folder = merged).\n"
+                  "Replace: your rules, groups and folders become exactly the file's.\n\n"
+                  "Your PST paths are kept either way. Undo (Ctrl+Z) reverts the import."),
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W)
+        btns = ttk.Frame(frm)
+        btns.pack(fill=tk.X, pady=(12, 0))
+
+        def _pick(mode):
+            choice["mode"] = mode
+            dlg.destroy()
+
+        ttk.Button(btns, text="Cancel", command=lambda: _pick("")).pack(side=tk.RIGHT)
+        ttk.Button(btns, text="Replace all", style="Danger.TButton", command=lambda: _pick("replace")).pack(
+            side=tk.RIGHT, padx=(0, 6))
+        ttk.Button(btns, text="Merge", style="Accent.TButton", command=lambda: _pick("merge")).pack(
+            side=tk.RIGHT, padx=(0, 6))
+        dlg.bind("<Escape>", lambda e: _pick(""))
+        dlg.protocol("WM_DELETE_WINDOW", lambda: _pick(""))
+        try:
+            dlg.grab_set()
+        except tk.TclError:
+            pass
+        self.wait_window(dlg)
+        return choice["mode"]
+
+    def _export_rules(self):
+        if not self.tab_rules.confirm_pending_changes(reset_if_discard=True):
+            return
+        path = self._ask_export_path()
+        if not path:
+            return
+        try:
+            info = self.yaml_mgr.export_config(path)
+        except OSError as exc:
+            messagebox.showerror("Export failed", str(exc), parent=self)
+            return
+        self.tab_rules._show_toast(
+            f"Exported {pluralize_count(info['rules'], 'rule')} to '{os.path.basename(path)}' "
+            "(PST paths left out)."
+        )
+
+    def _import_rules(self):
+        if not self.tab_rules.confirm_pending_changes(reset_if_discard=True):
+            return
+        path = self._ask_import_path()
+        if not path:
+            return
+        try:
+            preview = self.yaml_mgr.read_shared_file(path)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Import failed", str(exc), parent=self)
+            return
+        mode = self._ask_import_mode(os.path.basename(path), preview)
+        if not mode:
+            return
+        summary = self.yaml_mgr.import_config(path, mode=mode)
+        self.tab_rules.reset_selection_after_undo()
+        self.tab_rules.refresh_all()
+        self.tab_triage.refresh_inbox()
+        text = (f"Imported ({mode}): {summary['rules_added']} rules added, "
+                f"{summary['rules_merged']} merged.")
+        if summary["duplicate_senders"]:
+            text += f" {pluralize_count(summary['duplicate_senders'], 'sender')} in more than one rule - see Check Rule Conflicts."
+        self.tab_rules._show_toast(text, error=bool(summary["duplicate_senders"]))
 
     def _sync_to_outlook(self):
         if not self.tab_rules.confirm_pending_changes(reset_if_discard=True):

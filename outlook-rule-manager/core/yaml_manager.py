@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 import yaml
 
-from core.models import StoreConfig, AddressGroup, RuleConfig
+from core.models import StoreConfig, AddressGroup, RuleConfig, rule_name_from_folder
 
 
 class YamlConfigManager:
@@ -51,55 +51,143 @@ class YamlConfigManager:
             data = yaml.safe_load(f) or {}
 
         self.version = str(data.get("version", "2.0"))
-        self.settings = data.get("settings", self.settings)
+        parsed = self._parse_data(data, default_settings=self.settings)
+        self.settings = parsed["settings"]
+        self.stores = parsed["stores"]
+        self.groups = parsed["groups"]
+        self.unclassified_pool = parsed["unclassified_pool"]
+        self.rules = parsed["rules"]
 
-        # Parse stores
-        self.stores = {}
-        raw_stores = data.get("stores", {})
-        for s_id, s_data in raw_stores.items():
-            self.stores[s_id] = StoreConfig(
-                id=s_id,
-                name=s_data.get("name", s_id),
-                file_path=s_data.get("file_path", ""),
-                store_id=s_data.get("store_id", "")
-            )
-
-        # Parse groups
-        self.groups = {}
-        raw_groups = data.get("groups", {})
-        for g_id, g_data in raw_groups.items():
-            raw_domains = g_data.get("domains", []) or []
-            self.groups[g_id] = AddressGroup(
-                id=g_id,
-                name=g_data.get("name", g_id),
-                domains=self.normalize_domains(raw_domains),
-                emails=[e.lower().strip() for e in (g_data.get("emails", []) or [])]
-            )
-
-        # Parse unclassified pool
-        self.unclassified_pool = [e.lower().strip() for e in (data.get("unclassified_pool", []) or [])]
-
-        # Parse rules
-        self.rules = []
-        raw_rules = data.get("rules", [])
-        for r_data in raw_rules:
-            raw_rule_domains = r_data.get("domains", []) or []
-            self.rules.append(RuleConfig(
-                id=r_data.get("id", ""),
-                name=r_data.get("name", ""),
-                enabled=r_data.get("enabled", True),
-                groups=r_data.get("groups", []) or [],
-                emails=[e.lower().strip() for e in (r_data.get("emails", []) or [])],
-                domains=self.normalize_domains(raw_rule_domains),
-                subject_keywords=r_data.get("subject_keywords", []) or [],
-                target_store=r_data.get("target_store", "active_archive"),
-                target_folder=r_data.get("target_folder", "")
-            ))
+        self.apply_auto_rule_names()
 
         # A (re)load starts a fresh undo history
         self._undo_stack = []
         self._last_saved_state = self._capture_state()
         return True
+
+    @classmethod
+    def _parse_data(cls, data: Dict[str, Any], default_settings: Optional[dict] = None) -> Dict[str, Any]:
+        """Turn a rules.yaml dict into model objects (shared by load and import)."""
+        settings = data.get("settings") or copy.deepcopy(default_settings or {})
+        stores: Dict[str, StoreConfig] = {}
+        for s_id, s_data in (data.get("stores") or {}).items():
+            s_data = s_data or {}
+            stores[s_id] = StoreConfig(
+                id=s_id,
+                name=s_data.get("name", s_id),
+                file_path=s_data.get("file_path", "") or "",
+                store_id=s_data.get("store_id", "") or "",
+            )
+        groups: Dict[str, AddressGroup] = {}
+        for g_id, g_data in (data.get("groups") or {}).items():
+            g_data = g_data or {}
+            groups[g_id] = AddressGroup(
+                id=g_id,
+                name=g_data.get("name", g_id),
+                domains=cls.normalize_domains(g_data.get("domains", []) or []),
+                emails=[e.lower().strip() for e in (g_data.get("emails", []) or [])],
+            )
+        pool = [e.lower().strip() for e in (data.get("unclassified_pool", []) or [])]
+        rules: List[RuleConfig] = []
+        for r_data in data.get("rules", []) or []:
+            rules.append(RuleConfig(
+                id=r_data.get("id", ""),
+                name=r_data.get("name", ""),
+                enabled=r_data.get("enabled", True),
+                groups=r_data.get("groups", []) or [],
+                emails=[e.lower().strip() for e in (r_data.get("emails", []) or [])],
+                domains=cls.normalize_domains(r_data.get("domains", []) or []),
+                subject_keywords=r_data.get("subject_keywords", []) or [],
+                target_store=r_data.get("target_store", "active_archive"),
+                target_folder=r_data.get("target_folder", ""),
+                former_names=[str(n) for n in (r_data.get("former_names", []) or []) if n],
+            ))
+        return {"settings": settings, "stores": stores, "groups": groups,
+                "unclassified_pool": pool, "rules": rules}
+
+    # -----------------------------------------------------------------
+    # Automatic rule names: the folder path, A\\B\\C -> "A_B_C"
+    # -----------------------------------------------------------------
+    @property
+    def auto_rule_names(self) -> bool:
+        return bool(self.settings.get("auto_rule_names", True))
+
+    def is_fixed_name_rule(self, rule: RuleConfig) -> bool:
+        """The Unclassified fallback rule keeps its own name."""
+        return rule.id == "rule_unclassified" or self.is_inside_unclassified(rule.target_folder or "")
+
+    def auto_rule_name(self, folder: str, exclude_rule_id: Optional[str] = None) -> str:
+        """Name a (new) rule in `folder` would get: the folder name, plus _2, _3 … if taken."""
+        base = rule_name_from_folder(folder) or "Inbox"
+        taken = {r.name.lower() for r in self.rules if r.id != exclude_rule_id}
+        if base.lower() not in taken:
+            return base
+        n = 2
+        while f"{base}_{n}".lower() in taken:
+            n += 1
+        return f"{base}_{n}"
+
+    def apply_auto_rule_names(self) -> bool:
+        """Rename every rule after its folder (first rule of a folder gets the plain name)."""
+        if not self.auto_rule_names:
+            return False
+        changed = False
+        used: Set[str] = {r.name.lower() for r in self.rules if self.is_fixed_name_rule(r)}
+        for rule in self.rules:
+            if self.is_fixed_name_rule(rule):
+                continue
+            base = rule_name_from_folder(rule.target_folder) or "Inbox"
+            name, n = base, 2
+            while name.lower() in used:
+                name, n = f"{base}_{n}", n + 1
+            used.add(name.lower())
+            if rule.name != name:
+                if rule.name and rule.name not in rule.former_names:
+                    rule.former_names.append(rule.name)
+                if name in rule.former_names:
+                    rule.former_names.remove(name)
+                rule.name = name
+                changed = True
+        return changed
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize the current configuration to the rules.yaml structure."""
+        return {
+            "version": self.version,
+            "settings": self.settings,
+            "stores": {
+                s_id: {
+                    "name": s.name,
+                    "file_path": s.file_path,
+                    **({"store_id": s.store_id} if s.store_id else {}),
+                }
+                for s_id, s in self.stores.items()
+            },
+            "groups": {
+                g_id: {
+                    "name": g.name,
+                    "domains": g.domains,
+                    "emails": sorted(list(set(g.emails))),
+                }
+                for g_id, g in self.groups.items()
+            },
+            "unclassified_pool": sorted(list(set(self.unclassified_pool))),
+            "rules": [
+                {
+                    "id": r.id,
+                    "name": r.name,
+                    "enabled": r.enabled,
+                    "groups": r.groups,
+                    "emails": sorted(list(set(r.emails))),
+                    "domains": r.domains,
+                    "subject_keywords": r.subject_keywords,
+                    "target_store": r.target_store,
+                    "target_folder": r.target_folder,
+                    **({"former_names": list(r.former_names)} if r.former_names else {}),
+                }
+                for r in self.rules
+            ]
+        }
 
     # -----------------------------------------------------------------
     # Undo (in memory, last UNDO_LIMIT saves)
@@ -201,42 +289,9 @@ class YamlConfigManager:
         # 1. Create timestamped backup
         self._create_backup_file()
 
-        # 2. Serialize objects to dict
-        data = {
-            "version": self.version,
-            "settings": self.settings,
-            "stores": {
-                s_id: {
-                    "name": s.name,
-                    "file_path": s.file_path,
-                    **({"store_id": s.store_id} if s.store_id else {}),
-                }
-                for s_id, s in self.stores.items()
-            },
-            "groups": {
-                g_id: {
-                    "name": g.name,
-                    "domains": g.domains,
-                    "emails": sorted(list(set(g.emails))),
-                }
-                for g_id, g in self.groups.items()
-            },
-            "unclassified_pool": sorted(list(set(self.unclassified_pool))),
-            "rules": [
-                {
-                    "id": r.id,
-                    "name": r.name,
-                    "enabled": r.enabled,
-                    "groups": r.groups,
-                    "emails": sorted(list(set(r.emails))),
-                    "domains": r.domains,
-                    "subject_keywords": r.subject_keywords,
-                    "target_store": r.target_store,
-                    "target_folder": r.target_folder,
-                }
-                for r in self.rules
-            ]
-        }
+        # 2. Serialize objects to dict (rule names always follow their folder)
+        self.apply_auto_rule_names()
+        data = self.to_dict()
 
         # 3. Atomic write: temp file -> flush + fsync -> os.replace
         tmp_path = f"{self.config_path}.tmp"
@@ -777,3 +832,119 @@ class YamlConfigManager:
         return new_rule
 
 
+
+    # -----------------------------------------------------------------
+    # Export / import (sharing rules with colleagues)
+    # -----------------------------------------------------------------
+    def export_config(self, path: str, include_store_paths: bool = False) -> Dict[str, int]:
+        """Write a shareable copy of the rules. PST paths are blanked unless asked for."""
+        data = self.to_dict()
+        if not include_store_paths:
+            for store in data["stores"].values():
+                store["file_path"] = ""
+                store.pop("store_id", None)
+        data["exported_at"] = datetime.now().isoformat(timespec="seconds")
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        return {"rules": len(self.rules), "groups": len(self.groups)}
+
+    @classmethod
+    def read_shared_file(cls, path: str) -> Dict[str, Any]:
+        """Parse a shared rules file. Raises ValueError when it is not a rules.yaml-style file."""
+        with open(path, "r", encoding="utf-8") as f:
+            try:
+                data = yaml.safe_load(f)
+            except yaml.YAMLError as exc:
+                raise ValueError(f"Not a valid YAML file: {exc}") from exc
+        if not isinstance(data, dict) or not isinstance(data.get("rules"), list):
+            raise ValueError("This file has no 'rules' list, so it is not a rules file.")
+        for r in data["rules"]:
+            if not isinstance(r, dict) or not r.get("name"):
+                raise ValueError("Every rule in the file needs a name.")
+        return cls._parse_data(data)
+
+    def import_config(self, path: str, mode: str = "merge") -> Dict[str, int]:
+        """Import rules, groups, pool and empty folders from a shared file.
+
+        mode 'merge': rules with the same name and folder get the incoming senders added,
+        other rules are added (with a fresh id if theirs is taken); same-id groups with the
+        same name are merged, otherwise added.
+        mode 'replace': rules, groups, pool and custom folders are replaced.
+        Local stores (PST paths) and other settings are always kept. Undo restores the
+        previous state.
+        """
+        if mode not in ("merge", "replace"):
+            raise ValueError(f"Unknown import mode: {mode}")
+        incoming = self.read_shared_file(path)
+        fallback_store = "active_archive" if "active_archive" in self.stores else next(iter(self.stores), "active_archive")
+        for rule in incoming["rules"]:
+            if rule.target_store not in self.stores:
+                rule.target_store = fallback_store
+        in_folders = list((incoming["settings"] or {}).get("custom_folders", []) or [])
+        summary = {"rules_added": 0, "rules_merged": 0, "groups_added": 0, "groups_merged": 0}
+
+        if mode == "replace":
+            self.groups = incoming["groups"]
+            self.rules = incoming["rules"]
+            self.unclassified_pool = incoming["unclassified_pool"]
+            self.settings["custom_folders"] = in_folders
+            summary["rules_added"] = len(self.rules)
+            summary["groups_added"] = len(self.groups)
+        else:
+            group_id_map: Dict[str, str] = {}
+            for g_id, grp in incoming["groups"].items():
+                local = self.groups.get(g_id)
+                if local is not None and local.name.strip().lower() == grp.name.strip().lower():
+                    local.emails = sorted(set(local.emails) | set(grp.emails))
+                    local.domains = local.domains + [d for d in grp.domains if d not in local.domains]
+                    group_id_map[g_id] = g_id
+                    summary["groups_merged"] += 1
+                else:
+                    new_id = g_id if local is None else self.generate_group_id(grp.name)
+                    grp.id = new_id
+                    self.groups[new_id] = grp
+                    group_id_map[g_id] = new_id
+                    summary["groups_added"] += 1
+
+            for rule in incoming["rules"]:
+                rule.groups = [group_id_map.get(g, g) for g in rule.groups]
+                key = (rule.name.strip().lower(), (rule.target_folder or "").strip().lower())
+                local = next((r for r in self.rules
+                              if (r.name.strip().lower(), (r.target_folder or "").strip().lower()) == key), None)
+                if local is not None:
+                    local.emails = sorted(set(local.emails) | set(rule.emails))
+                    local.domains = local.domains + [d for d in rule.domains if d not in local.domains]
+                    local.groups = local.groups + [g for g in rule.groups if g not in local.groups]
+                    local.subject_keywords = self.normalize_keywords(local.subject_keywords + rule.subject_keywords)
+                    summary["rules_merged"] += 1
+                else:
+                    if not rule.id or any(r.id == rule.id for r in self.rules):
+                        rule.id = self.generate_rule_id(rule.name)
+                    self.rules.append(rule)
+                    summary["rules_added"] += 1
+
+            claimed = set()
+            for r in self.rules:
+                claimed.update(self.get_all_emails_for_rule(r))
+            self.unclassified_pool = sorted(
+                (set(self.unclassified_pool) | set(incoming["unclassified_pool"])) - claimed
+            )
+            folders = self.settings.setdefault("custom_folders", [])
+            for f in in_folders:
+                if f and f not in folders:
+                    folders.append(f)
+
+        summary["duplicate_senders"] = self._count_duplicate_senders()
+        self._set_change_label(f"Import '{os.path.basename(path)}' ({mode})")
+        self.save()
+        return summary
+
+    def _count_duplicate_senders(self) -> int:
+        """Senders (emails or domains) that more than one active rule claims."""
+        seen: Dict[str, int] = {}
+        for r in self.rules:
+            if not r.enabled or self.is_inside_unclassified(r.target_folder or ""):
+                continue
+            for value in set(self.get_all_emails_for_rule(r)) | set(self.get_all_domains_for_rule(r)):
+                seen[value] = seen.get(value, 0) + 1
+        return sum(1 for c in seen.values() if c > 1)

@@ -175,7 +175,7 @@ class TestUiSimplifyPhaseS1(unittest.TestCase):
                 self.assertEqual(len(items), 1)
                 vals = rev_tree.item(items[0], "values")
                 self.assertIn("rep@acme.example", vals[0])
-                self.assertEqual(vals[2], "Executive Board")
+                self.assertEqual(vals[2], exec_rule.name)
                 self.assertIn("Whole domain (@acme.example)", vals[3])
                 self.assertEqual(vals[4], exec_rule.target_folder)
 

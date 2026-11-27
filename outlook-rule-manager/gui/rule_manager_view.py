@@ -5,7 +5,8 @@ import os
 import re
 from typing import Optional, List, Tuple, Dict, Any
 
-from core.models import RuleConfig, AddressGroup, pluralize_count
+from gui.quick_rule_dialog import rule_name_from_folder
+from core.models import RuleConfig, AddressGroup, pluralize_count, MANAGED_PREFIX
 from core.yaml_manager import YamlConfigManager
 from core.sync_engine import SyncEngine
 
@@ -61,6 +62,18 @@ class RuleManagerView(ttk.Frame):
         # Mapping of tree iid to folder path
         self.folder_nodes_map: Dict[str, str] = {}
         self.rule_nodes_map: Dict[str, str] = {}  # iid -> rule_id
+        # A leaf folder holding exactly one rule is shown as ONE node (the rule's iid):
+        # "📁 Folder  (rule: Name)". Such nodes are in rule_nodes_map AND folder_nodes_map.
+        self.merged_nodes: Dict[str, str] = {}  # rule iid -> folder path
+        # Mails (inbox) shown under the rule they go to. Wired by MainWindow.
+        self.mail_provider = None      # () -> {rule_id: [(EmailMessage, staged: bool), ...]}
+        self.on_mail_selected = None   # (entry_id) -> None
+        self.on_mail_dropped = None    # (entry_id, target_iid, whole_domain) -> None
+        self._mail_node_ids: List[str] = []
+        self._pending_nodes: Dict[str, str] = {}  # "pending::<folder>" -> folder path (new rule awaiting Apply)
+        self.pending_provider = None   # () -> {folder: (rule_name, [EmailMessage, ...])}
+        self._drop_hover_iid: Optional[str] = None
+        self._drop_ctrl: bool = False
 
         # Scrollable inspector canvases + single shared mousewheel handler
         self._scrollable_canvases: List[tk.Canvas] = []
@@ -171,6 +184,9 @@ class RuleManagerView(ttk.Frame):
         )
         self.tree.tag_configure("rule_enabled", foreground="#0f172a")
         self.tree.tag_configure("rule_disabled", foreground="#94a3b8", font=("", 9, "italic"))
+        self.tree.tag_configure("mail", foreground="#475569")
+        self.tree.tag_configure("mail_staged", foreground="#0284c7", font=("", 9, "italic"))
+        self.tree.tag_configure("drop_hover", background="#bae6fd")
         self.tree.heading("#0", text="Folder Hierarchy")
         self.tree.heading("Details", text="Level / Senders")
         self.tree.column("#0", width=260)
@@ -195,8 +211,9 @@ class RuleManagerView(ttk.Frame):
         self.tree.bind("<KeyRelease-Up>", self._notify_item_activated, add="+")
         self.tree.bind("<KeyRelease-Down>", self._notify_item_activated, add="+")
         if self.integrated:
-            self.tree.column("#0", width=200)
-            self.tree.column("Details", width=80)
+            # Names need the room (folder (rule: …) > mail); Info only holds a short count/date
+            self.tree.column("#0", width=230, stretch=True)
+            self.tree.column("Details", width=128, minwidth=50, stretch=False)
             self.tree.heading("#0", text="Folders & Rules")
             self.tree.heading("Details", text="Info")
 
@@ -332,6 +349,9 @@ class RuleManagerView(ttk.Frame):
         row1.pack(fill=tk.X)
 
         tk.Label(row1, text="Rule Name:", bg="#ffffff", font=("", 9, "bold"), fg="#334155").pack(side=tk.LEFT, padx=(0, 6))
+        # Outlook name = prefix + name; the prefix keeps app rules apart from hand-made ones
+        self.lbl_rule_prefix = tk.Label(row1, text=MANAGED_PREFIX.strip(), bg="#ffffff", fg="#0284c7", font=("", 9, "bold"))
+        self.lbl_rule_prefix.pack(side=tk.LEFT, padx=(0, 4))
         self.ent_rule_name = ttk.Entry(
             row1, font=("", 9), width=26, textvariable=self.var_rule_name, exportselection=False
         )
@@ -433,6 +453,9 @@ class RuleManagerView(ttk.Frame):
         self.txt_emails.pack(fill=tk.X, pady=(0, 6))
         self.txt_emails.bind("<KeyRelease>", self._on_rule_text_changed)
         self.txt_emails.bind("<FocusOut>", self._on_rule_text_changed)
+        # Read-only: senders this rule gets from its linked groups (edit them in the group itself)
+        self.lbl_group_emails = tk.Label(rule_cond_body, text="", bg="#ffffff", fg="#94a3b8",
+                                         font=("Consolas", 8), justify=tk.LEFT, anchor=tk.W, wraplength=420)
 
         # Domains (one per line)
         self.lbl_rule_domains_hdr = tk.Label(
@@ -443,6 +466,8 @@ class RuleManagerView(ttk.Frame):
         self.txt_domains.pack(fill=tk.X, pady=(0, 6))
         self.txt_domains.bind("<KeyRelease>", self._on_rule_text_changed)
         self.txt_domains.bind("<FocusOut>", self._on_rule_text_changed)
+        self.lbl_group_domains = tk.Label(rule_cond_body, text="", bg="#ffffff", fg="#94a3b8",
+                                          font=("Consolas", 8), justify=tk.LEFT, anchor=tk.W, wraplength=420)
 
         # Subject Keywords (one per line)
         self.lbl_rule_keywords_hdr = tk.Label(
@@ -607,8 +632,13 @@ class RuleManagerView(ttk.Frame):
     def refresh_all(self, preserve_selection_iid: Optional[str] = None):
         """Rebuild the visual tree supporting arbitrary folder levels from YamlConfigManager."""
         self._in_tree_transition = True
+        previous_open = {
+            iid: bool(self.tree.item(iid, "open")) for iid in self.rule_nodes_map if self.tree.exists(iid)
+        }
         try:
             self.tree.delete(*self.tree.get_children())
+            self._mail_node_ids = []
+            self._drop_hover_iid = None
             self.folder_nodes_map.clear()
             self.rule_nodes_map.clear()
 
@@ -620,71 +650,8 @@ class RuleManagerView(ttk.Frame):
             root_hier_id = "__HIERARCHY__"
             self.tree.insert("", tk.END, iid=root_hier_id, text="Folders & Rules", values=("Root",), open=True)
 
-            all_folders = self.yaml_mgr.get_all_folders()
-
-            for fld in all_folders:
-                parts = [p.strip() for p in re.split(r'[\\/]', fld) if p.strip()]
-                parent_id = root_hier_id
-                accum_path = ""
-                for depth, part in enumerate(parts):
-                    accum_path = f"{accum_path}\\{part}" if accum_path else part
-                    fld_node_id = f"fld_{accum_path.lower().replace(' ', '_')}"
-                    if fld_node_id not in self.folder_nodes_map:
-                        self.tree.insert(
-                            parent_id, tk.END, iid=fld_node_id,
-                            text=f"📁 {part}", values=(f"Level {depth+1}",), open=True
-                        )
-                        self.folder_nodes_map[fld_node_id] = accum_path
-                    parent_id = fld_node_id
-
-            for rule in self.yaml_mgr.rules:
-                all_emails, all_domains, keywords = self.sync_engine.get_rule_conditions(rule)
-
-                if q:
-                    match_name = q in rule.name.lower()
-                    match_folder = q in (rule.target_folder or "").lower()
-                    match_emails = any(q in e.lower() for e in all_emails)
-                    match_domains = any(q in d.lower() for d in all_domains)
-                    match_kw = any(q in kw.lower() for kw in keywords)
-                    if not (match_name or match_folder or match_emails or match_domains or match_kw):
-                        continue
-
-                raw_folder = rule.target_folder or "_Unclassified"
-                fld_node_id = f"fld_{raw_folder.lower().replace(' ', '_')}"
-
-                if fld_node_id not in self.folder_nodes_map:
-                    parts = [p.strip() for p in re.split(r'[\\/]', raw_folder) if p.strip()]
-                    parent_id = root_hier_id
-                    accum = ""
-                    for d, pt in enumerate(parts):
-                        accum = f"{accum}\\{pt}" if accum else pt
-                        curr_fid = f"fld_{accum.lower().replace(' ', '_')}"
-                        if curr_fid not in self.folder_nodes_map:
-                            self.tree.insert(
-                                parent_id, tk.END, iid=curr_fid,
-                                text=f"📁 {pt}", values=(f"Level {d+1}",), open=True
-                            )
-                            self.folder_nodes_map[curr_fid] = accum
-                        parent_id = curr_fid
-                    fld_node_id = parent_id
-
-                summary = self.sync_engine.get_rule_quota_summary(rule)
-                total_senders = summary["email_count"] + summary["domain_count"]
-                rule_iid = f"rule_{rule.id}"
-                if rule.enabled:
-                    rule_label = f"⚡ {rule.name}"
-                    rule_tags = ("rule_enabled",)
-                else:
-                    rule_label = f"⏸ {rule.name} (disabled)"
-                    rule_tags = ("rule_disabled",)
-                self.tree.insert(
-                    fld_node_id, tk.END, iid=rule_iid,
-                    text=rule_label,
-                    values=(pluralize_count(total_senders, "sender"),),
-                    open=False,
-                    tags=rule_tags,
-                )
-                self.rule_nodes_map[rule_iid] = rule.id
+            self.merged_nodes.clear()
+            self._populate_hierarchy(root_hier_id, q, previous_open)
 
             # ---------------------------------------------------------
             # Category 2: Shared Address Groups
@@ -713,12 +680,196 @@ class RuleManagerView(ttk.Frame):
                 pool_iid = f"pool_{email}"
                 self.tree.insert(root_pool_id, tk.END, iid=pool_iid, text=f"📧 {email}", values=("Orphaned",))
 
+            self._pending_nodes = {}
+            self._insert_mail_nodes()
+            self._insert_pending_rule_nodes()
+
+            # Automatic names can change after any save (folder moved, sibling rule deleted)
+            if self.selected_rule is not None and self._rule_name_locked(self.selected_rule):
+                self.var_rule_name.set(self.selected_rule.name)
+
             target_sel = preserve_selection_iid or self._current_selected_iid
             if target_sel and self.tree.exists(target_sel):
                 self.tree.selection_set(target_sel)
         finally:
             self.update_idletasks()
             self._in_tree_transition = False
+
+    @staticmethod
+    def _split_path(path: str) -> List[str]:
+        return [p.strip() for p in re.split(r'[\\/]', path or "") if p.strip()]
+
+    @staticmethod
+    def _folder_iid(path: str) -> str:
+        return f"fld_{path.lower().replace(' ', '_')}"
+
+    def _rule_matches_query(self, rule: RuleConfig, q: str) -> bool:
+        if not q:
+            return True
+        all_emails, all_domains, keywords = self.sync_engine.get_rule_conditions(rule)
+        return (
+            q in rule.name.lower()
+            or q in (rule.target_folder or "").lower()
+            or any(q in e.lower() for e in all_emails)
+            or any(q in d.lower() for d in all_domains)
+            or any(q in kw.lower() for kw in keywords)
+        )
+
+    def _populate_hierarchy(self, root_iid: str, q: str, previous_open: Dict[str, bool]):
+        """Folders of any depth; rules under their folder; a leaf folder with a single rule is one node."""
+        unclassified = self.yaml_mgr.unclassified_folder()
+        rules = [r for r in self.yaml_mgr.rules if self._rule_matches_query(r, q)]
+
+        # Every folder path (and its parents), in display order
+        ordered: List[str] = []
+        seen = set()
+        for path in self.yaml_mgr.get_all_folders() + [r.target_folder or unclassified for r in rules]:
+            parts = self._split_path(path)
+            for i in range(1, len(parts) + 1):
+                sub = "\\".join(parts[:i])
+                if sub.lower() not in seen:
+                    seen.add(sub.lower())
+                    ordered.append(sub)
+
+        has_child = set()
+        for path in ordered:
+            parts = self._split_path(path)
+            if len(parts) > 1:
+                has_child.add("\\".join(parts[:-1]).lower())
+        rules_by_folder: Dict[str, List[RuleConfig]] = {}
+        for rule in rules:
+            key = "\\".join(self._split_path(rule.target_folder or unclassified)).lower()
+            rules_by_folder.setdefault(key, []).append(rule)
+
+        def _rule_values(rule):
+            summary = self.sync_engine.get_rule_quota_summary(rule)
+            text = pluralize_count(summary["email_count"], "sender")
+            if summary["domain_count"]:
+                text += f", {pluralize_count(summary['domain_count'], 'domain')}"
+            return (text,)
+
+        def _rule_tags(rule):
+            return ("rule_enabled",) if rule.enabled else ("rule_disabled",)
+
+        for path in ordered:
+            parts = self._split_path(path)
+            parent_iid = root_iid if len(parts) == 1 else self._folder_iid("\\".join(parts[:-1]))
+            if not self.tree.exists(parent_iid):
+                parent_iid = root_iid
+            key = path.lower()
+            folder_rules = rules_by_folder.get(key, [])
+            merge = (
+                len(folder_rules) == 1
+                and key not in has_child
+                and not self.yaml_mgr.is_inside_unclassified(path)
+            )
+            if merge:
+                rule = folder_rules[0]
+                rule_iid = f"rule_{rule.id}"
+                state = "" if rule.enabled else " (disabled)"
+                self.tree.insert(
+                    parent_iid, tk.END, iid=rule_iid,
+                    text=f"📁 {parts[-1]}  (rule: {rule.name}){state}",
+                    values=_rule_values(rule), open=previous_open.get(rule_iid, True), tags=_rule_tags(rule),
+                )
+                self.rule_nodes_map[rule_iid] = rule.id
+                self.folder_nodes_map[rule_iid] = path
+                self.merged_nodes[rule_iid] = path
+                continue
+            fld_iid = self._folder_iid(path)
+            self.tree.insert(
+                parent_iid, tk.END, iid=fld_iid,
+                text=f"📁 {parts[-1]}", values=("",), open=True,
+            )
+            self.folder_nodes_map[fld_iid] = path
+            for rule in folder_rules:
+                rule_iid = f"rule_{rule.id}"
+                label = f"⚡ {rule.name}" if rule.enabled else f"⏸ {rule.name} (disabled)"
+                self.tree.insert(
+                    fld_iid, tk.END, iid=rule_iid, text=label,
+                    values=_rule_values(rule), open=previous_open.get(rule_iid, True), tags=_rule_tags(rule),
+                )
+                self.rule_nodes_map[rule_iid] = rule.id
+
+    # --- mails under their rule ----------------------------------------
+    def _insert_mail_nodes(self):
+        if not callable(self.mail_provider):
+            return
+        by_rule = self.mail_provider() or {}
+        for rule_id, items in by_rule.items():
+            parent = f"rule_{rule_id}"
+            if not self.tree.exists(parent):
+                continue
+            for msg, staged in items:
+                iid = f"mail::{msg.entry_id}"
+                if self.tree.exists(iid):
+                    continue
+                who = msg.sender_name or msg.sender_email
+                try:
+                    when = msg.received_time.strftime("%d/%m")
+                except (AttributeError, ValueError):
+                    when = ""
+                self.tree.insert(
+                    parent, tk.END, iid=iid,
+                    text=f"{'* ' if staged else ''}✉ {who} — {msg.subject}",
+                    values=(when,), tags=("mail_staged" if staged else "mail",),
+                )
+                self._mail_node_ids.append(iid)
+
+    def _insert_pending_rule_nodes(self):
+        """Mails staged into a rule that only exists after Apply: show them under that future rule."""
+        if not callable(self.pending_provider):
+            return
+        for folder, (rule_name, msgs) in (self.pending_provider() or {}).items():
+            parent = next((i for i, p in self.folder_nodes_map.items()
+                           if p.lower() == folder.lower() and i.startswith("fld_")), None)
+            if parent is None:
+                # Merged folder+rule node or a folder that will be created: show at its parent / root
+                parent = next((i for i, p in self.folder_nodes_map.items() if p.lower() == folder.lower()), None)
+            label_folder = "" if parent and self.folder_nodes_map.get(parent, "").lower() == folder.lower() else f"  in {folder}"
+            if parent is None:
+                parent = "__HIERARCHY__"
+            node = f"pending::{folder.lower()}"
+            if self.tree.exists(node):
+                continue
+            self.tree.insert(
+                parent, 0, iid=node, open=True, tags=("mail_staged",),
+                text=f"* ⚡ {rule_name}  (new - Apply to create){label_folder}", values=("new",),
+            )
+            self._pending_nodes[node] = folder
+            self._mail_node_ids.append(node)
+            for msg in msgs:
+                iid = f"mail::{msg.entry_id}"
+                if self.tree.exists(iid):
+                    continue
+                self.tree.insert(
+                    node, tk.END, iid=iid, tags=("mail_staged",),
+                    text=f"* ✉ {msg.sender_name or msg.sender_email} — {msg.subject}",
+                    values=(msg.received_time.strftime("%d/%m") if hasattr(msg.received_time, "strftime") else "",),
+                )
+                self._mail_node_ids.append(iid)
+
+    def refresh_mail_nodes(self):
+        """Re-list the mails under each rule (inbox loaded, mail staged or applied)."""
+        selected = self.tree.selection()
+        self._in_tree_transition = True
+        try:
+            for iid in self._mail_node_ids:
+                if self.tree.exists(iid):
+                    self.tree.delete(iid)
+            self._mail_node_ids = []
+            self._pending_nodes = {}
+            self._insert_mail_nodes()
+            self._insert_pending_rule_nodes()
+            kept = [i for i in selected if self.tree.exists(i)]
+            if kept:
+                self.tree.selection_set(kept)
+        finally:
+            self._in_tree_transition = False
+
+    @staticmethod
+    def mail_entry_id(iid: Optional[str]) -> Optional[str]:
+        return iid.split("::", 1)[1] if iid and iid.startswith("mail::") else None
 
     def _select_tree_iid_silently(self, iid: Optional[str]):
         """Select a tree item programmatically without firing dirty prompts."""
@@ -752,13 +903,49 @@ class RuleManagerView(ttk.Frame):
 
     def _update_rule_count_labels(self):
         _, _, _, emails, domains, keywords = self._get_current_rule_form_values()
-        self.lbl_rule_emails_hdr.config(text=f"Emails ({len(emails)})")
-        self.lbl_rule_domains_hdr.config(text=f"Domains ({len(domains)})")
+        grp_emails, grp_domains = self._linked_group_senders(set(emails), set(domains))
+        n_ge = sum(len(v) for _, v in grp_emails)
+        n_gd = sum(len(v) for _, v in grp_domains)
+        self.lbl_rule_emails_hdr.config(
+            text=f"Emails ({len(emails)}" + (f" + {n_ge} from groups)" if n_ge else ")"))
+        self.lbl_rule_domains_hdr.config(
+            text=f"Domains ({len(domains)}" + (f" + {n_gd} from groups)" if n_gd else ")"))
+        self._show_group_senders(self.lbl_group_emails, self.txt_emails, grp_emails)
+        self._show_group_senders(self.lbl_group_domains, self.txt_domains, grp_domains)
         self.lbl_rule_keywords_hdr.config(text=f"Subject Keywords ({len(keywords)})")
+
+    def _linked_group_senders(self, own_emails=frozenset(), own_domains=frozenset()):
+        """[(group name, [emails])], [(group name, [domains])] for the groups linked in the form."""
+        emails, domains = [], []
+        for g_id in getattr(self, "_editing_rule_group_ids", []):
+            grp = self.yaml_mgr.groups.get(g_id)
+            if not grp:
+                continue
+            ge = sorted(e.lower() for e in grp.emails if e.lower() not in own_emails)
+            gd = sorted(d.lower() for d in grp.domains if d.lower() not in own_domains)
+            if ge:
+                emails.append((grp.name, ge))
+            if gd:
+                domains.append((grp.name, gd))
+        return emails, domains
+
+    def _show_group_senders(self, label, text_widget, items):
+        if not items:
+            label.pack_forget()
+            return
+        lines = []
+        for name, values in items:
+            lines.append(f"+ from group '{name}' (edit in the group):")
+            lines.extend(f"    {v}" for v in values)
+        label.config(text="\n".join(lines))
+        label.pack(after=text_widget, fill=tk.X, pady=(0, 6))
 
     def _on_rule_text_changed(self, _event=None):
         self._update_rule_count_labels()
         self._refresh_dirty_state()
+
+    def _rule_name_locked(self, rule: RuleConfig) -> bool:
+        return self.yaml_mgr.auto_rule_names or self.yaml_mgr.is_fixed_name_rule(rule)
 
     def is_rule_dirty(self) -> bool:
         if not self.selected_rule or not self.frame_rule.winfo_manager():
@@ -768,8 +955,10 @@ class RuleManagerView(ttk.Frame):
         saved_emails = sorted(list(set(e.strip().lower() for e in (r.emails or []) if e.strip())))
         saved_domains = sorted(list(set(YamlConfigManager.normalize_domains(r.domains or []))))
         saved_keywords = YamlConfigManager.normalize_keywords(r.subject_keywords or [])
+        # An automatic (folder-based) name is not the user's edit: it can change under the form
+        name_changed = not self._rule_name_locked(r) and f_name != (r.name or "").strip()
         return (
-            f_name != (r.name or "").strip()
+            name_changed
             or f_enabled != bool(r.enabled)
             or f_groups != list(r.groups or [])
             or f_emails != saved_emails
@@ -887,11 +1076,24 @@ class RuleManagerView(ttk.Frame):
 
         self._current_selected_iid = iid
 
-        # 1. Selected a Rule
+        # 0. Selected a mail under a rule: show it in the mail reader
+        entry_id = self.mail_entry_id(iid)
+        if entry_id:
+            self.selected_rule = None
+            self.selected_folder_path = None
+            self.selected_group = None
+            self.selected_pool_item = None
+            self._show_inspector(self.frame_empty)
+            self._refresh_dirty_state()
+            if callable(self.on_mail_selected):
+                self.on_mail_selected(entry_id)
+            return
+
+        # 1. Selected a Rule (a merged "folder + rule" node also knows its folder)
         if iid.startswith("rule_"):
             rule_id = self.rule_nodes_map.get(iid)
             self.selected_rule = next((r for r in self.yaml_mgr.rules if r.id == rule_id), None)
-            self.selected_folder_path = None
+            self.selected_folder_path = self.merged_nodes.get(iid)
             self.selected_group = None
             self.selected_pool_item = None
             if self.selected_rule:
@@ -960,9 +1162,10 @@ class RuleManagerView(ttk.Frame):
             breadcrumb_str = " > ".join(parts) if parts else "(Root)"
             self.lbl_breadcrumb.config(text=f"📁 {breadcrumb_str} (Level {len(parts)})")
 
-            # Core properties
-            self.ent_rule_name.delete(0, tk.END)
-            self.ent_rule_name.insert(0, rule.name)
+            # Core properties (name follows the folder unless automatic naming is off)
+            self.var_rule_name.set(rule.name)
+            locked = self._rule_name_locked(rule)
+            self.ent_rule_name.config(state="readonly" if locked else tk.NORMAL)
             self.var_rule_enabled.set(rule.enabled)
 
             # Linked Groups
@@ -1142,16 +1345,26 @@ class RuleManagerView(ttk.Frame):
 
         self.drag_window.geometry(f"+{event.x_root + 15}+{event.y_root + 12}")
 
-        # Hover hit test on tree
-        hover_iid = self.tree.identify_row(event.y)
-        if hover_iid:
-            self.tree.selection_set(hover_iid)
+        # Hover highlight (selection is left alone so the inspector doesn't flicker)
+        self._set_drop_hover(self.tree.identify_row(event.y) or None)
+
+    def _set_drop_hover(self, iid: Optional[str]):
+        if iid == self._drop_hover_iid:
+            return
+        for old in (self._drop_hover_iid,):
+            if old and self.tree.exists(old):
+                self.tree.item(old, tags=tuple(t for t in self.tree.item(old, "tags") if t != "drop_hover"))
+        self._drop_hover_iid = iid
+        if iid and self.tree.exists(iid):
+            self.tree.item(iid, tags=tuple(self.tree.item(iid, "tags")) + ("drop_hover",))
 
     def _on_drag_release(self, event):
         """Execute folder or rule move upon drop."""
         if self.drag_window:
             self.drag_window.destroy()
             self.drag_window = None
+        self._set_drop_hover(None)
+        self._drop_ctrl = bool(getattr(event, "state", 0) & 0x0004)
 
         if not self.is_dragging or not self.drag_source_id:
             self.drag_source_id = None
@@ -1171,6 +1384,22 @@ class RuleManagerView(ttk.Frame):
 
     def _execute_drop(self, source_iid: str, target_iid: str):
         """Reorganize hierarchy based on drop source and target (arbitrary levels)."""
+        # A mail is dropped like a mail from the list: it re-stages its sender
+        entry_id = self.mail_entry_id(source_iid)
+        if entry_id:
+            if self.mail_entry_id(target_iid):
+                target_iid = self.tree.parent(target_iid)
+            if callable(self.on_mail_dropped) and self.resolve_drop_iid(target_iid) is not None:
+                self.on_mail_dropped(entry_id, target_iid, self._drop_ctrl)
+            return
+        if self.mail_entry_id(target_iid):
+            target_iid = self.tree.parent(target_iid)
+        if not target_iid or target_iid == source_iid:
+            return
+        # A merged "folder + rule" node moves as a folder (its rule goes with it)
+        if source_iid in self.merged_nodes:
+            self._move_folder_by_drop(self.merged_nodes[source_iid], target_iid)
+            return
         # -------------------------------------------------------------
         # CASE 1: Dragging a Rule
         # -------------------------------------------------------------
@@ -1200,6 +1429,9 @@ class RuleManagerView(ttk.Frame):
                 if not dest_folder:
                     return
 
+            if dest_folder and dest_folder.lower() == (rule.target_folder or "").lower():
+                self._show_toast(f"Rule '{rule.name}' is already in '{dest_folder}'.")
+                return
             if dest_folder:
                 if not self.yaml_mgr.move_rule_to_folder(rule_id, dest_folder):
                     self._show_toast(f"Rules cannot be moved into '{self.yaml_mgr.unclassified_folder()}'.", error=True)
@@ -1219,49 +1451,63 @@ class RuleManagerView(ttk.Frame):
             source_folder = self.folder_nodes_map.get(source_iid)
             if not source_folder:
                 return
-
-            source_parts = [p.strip() for p in re.split(r'[\\/]', source_folder) if p.strip()]
-            folder_name = source_parts[-1]
-
-            # Dropped onto Root Hierarchy: Promote directly to Root (Level 1)!
-            if target_iid == "__HIERARCHY__":
-                ok, res = self.yaml_mgr.promote_folder_to_root(source_folder)
-                if ok:
-                    self._show_toast(f"Promoted '{folder_name}' to Root (Level 1)")
-                    self.refresh_all()
-                    new_fld_iid = f"fld_{res.lower().replace(' ', '_')}"
-                    if self.tree.exists(new_fld_iid):
-                        self.tree.selection_set(new_fld_iid)
-                        self._on_tree_select()
-                else:
-                    messagebox.showwarning("Promote Folder", res)
-                return
-
-            # Dropped onto another Folder node
-            dest_parent = ""
-            if target_iid.startswith("fld_"):
-                dest_parent = self.folder_nodes_map.get(target_iid)
-            elif target_iid.startswith("rule_"):
-                target_rule_id = self.rule_nodes_map.get(target_iid)
-                target_rule = next((r for r in self.yaml_mgr.rules if r.id == target_rule_id), None)
-                dest_parent = target_rule.target_folder if target_rule else ""
-            else:
-                return
-
-            ok, res = self.yaml_mgr.move_folder_hierarchy(source_folder, dest_parent)
-            if ok:
-                new_parts = [p.strip() for p in re.split(r'[\\/]', res) if p.strip()]
-                new_depth = len(new_parts)
-                self._show_toast(f"Moved '{folder_name}' to Level {new_depth}: '{res}'")
-                self.refresh_all()
-                new_fld_iid = f"fld_{res.lower().replace(' ', '_')}"
-                if self.tree.exists(new_fld_iid):
-                    self.tree.selection_set(new_fld_iid)
-                    self._on_tree_select()
-            else:
-                self._show_toast(res, error=True)
+            self._move_folder_by_drop(source_folder, target_iid)
             return
 
+        self._execute_pool_drop(source_iid, target_iid)
+
+    def _select_folder_node(self, path: str):
+        """Select the node showing folder `path` (a folder node or a merged folder+rule node)."""
+        iid = next((i for i, p in self.folder_nodes_map.items() if p.lower() == (path or "").lower()), None)
+        if iid and self.tree.exists(iid):
+            self.tree.selection_set(iid)
+            self._on_tree_select()
+
+    def _move_folder_by_drop(self, source_folder: str, target_iid: str):
+        """Move folder `source_folder` onto tree item `target_iid` (root, folder or rule)."""
+        source_parts = [p.strip() for p in re.split(r'[\\/]', source_folder) if p.strip()]
+        folder_name = source_parts[-1]
+        current_parent = "\\".join(source_parts[:-1])
+
+        # Dropped onto Root Hierarchy: Promote directly to Root (Level 1)!
+        if target_iid == "__HIERARCHY__":
+            if not current_parent:
+                self._show_toast(f"'{folder_name}' is already a top-level folder.")
+                return
+            ok, res = self.yaml_mgr.promote_folder_to_root(source_folder)
+            if ok:
+                self._show_toast(f"Promoted '{folder_name}' to Root (Level 1)")
+                self.refresh_all()
+                self._select_folder_node(res)
+            else:
+                messagebox.showwarning("Promote Folder", res)
+            return
+
+        # Dropped onto another Folder node
+        dest_parent = ""
+        if target_iid in self.folder_nodes_map:
+            dest_parent = self.folder_nodes_map.get(target_iid)
+        elif target_iid.startswith("rule_"):
+            target_rule_id = self.rule_nodes_map.get(target_iid)
+            target_rule = next((r for r in self.yaml_mgr.rules if r.id == target_rule_id), None)
+            dest_parent = target_rule.target_folder if target_rule else ""
+        else:
+            return
+        if (dest_parent or "").lower() == current_parent.lower():
+            self._show_toast(f"'{folder_name}' is already in '{current_parent}'.")
+            return
+
+        ok, res = self.yaml_mgr.move_folder_hierarchy(source_folder, dest_parent)
+        if ok:
+            new_parts = [p.strip() for p in re.split(r'[\\/]', res) if p.strip()]
+            new_depth = len(new_parts)
+            self._show_toast(f"Moved '{folder_name}' to Level {new_depth}: '{res}'")
+            self.refresh_all()
+            self._select_folder_node(res)
+        else:
+            self._show_toast(res, error=True)
+
+    def _execute_pool_drop(self, source_iid: str, target_iid: str):
         # -------------------------------------------------------------
         # CASE 3: Dragging an Unclassified Email
         # -------------------------------------------------------------
@@ -1291,6 +1537,10 @@ class RuleManagerView(ttk.Frame):
 
     def _get_drag_source_title(self, iid: str) -> str:
         """Return human-readable title for dragging item."""
+        if self.mail_entry_id(iid):
+            return "mail (drop on a rule or folder)"
+        if iid in self.merged_nodes:
+            return f"Folder '{self._split_path(self.merged_nodes[iid])[-1]}' with its rule"
         if iid.startswith("rule_"):
             rule_id = self.rule_nodes_map.get(iid)
             rule = next((r for r in self.yaml_mgr.rules if r.id == rule_id), None)
@@ -1319,6 +1569,10 @@ class RuleManagerView(ttk.Frame):
         """What a mail dropped on tree item `iid` means: ('rule', id) / ('folder', path) / ('new', None)."""
         if not iid:
             return None
+        if self.mail_entry_id(iid):
+            iid = self.tree.parent(iid)
+        if iid in self._pending_nodes:
+            return ("folder", self._pending_nodes[iid])
         if iid in self.rule_nodes_map:
             return ("rule", self.rule_nodes_map[iid])
         if iid in self.folder_nodes_map:
@@ -1328,7 +1582,8 @@ class RuleManagerView(ttk.Frame):
         return None
 
     def _notify_item_activated(self, event=None):
-        if callable(self.on_item_activated) and self.tree.selection():
+        sel = self.tree.selection()
+        if callable(self.on_item_activated) and sel and not self.mail_entry_id(sel[0]):
             self.after_idle(self.on_item_activated)
 
     def _on_delete_key(self):
@@ -1341,7 +1596,9 @@ class RuleManagerView(ttk.Frame):
         return "break"
 
     def _on_rename_key(self):
-        if self.selected_rule:
+        if self.selected_rule and self.selected_folder_path and self.yaml_mgr.auto_rule_names:
+            self._rename_selected_folder()   # the rule is named after its folder
+        elif self.selected_rule:
             self._focus_new_rule_name()
         elif self.selected_folder_path:
             self._rename_selected_folder()
@@ -1421,10 +1678,17 @@ class RuleManagerView(ttk.Frame):
         # Rule context menu
         elif iid.startswith("rule_"):
             menu.add_command(label="Toggle Active / Disabled", command=self._toggle_rule_enabled)
-            menu.add_command(label="Move to Folder...", command=self._open_folder_picker_dialog)
+            menu.add_command(label="Move Rule to Folder...", command=self._open_folder_picker_dialog)
             menu.add_command(label="Duplicate Rule", command=self._duplicate_selected_rule)
             menu.add_separator()
             menu.add_command(label="Delete Rule", command=self._delete_selected)
+            if iid in self.merged_nodes:
+                menu.add_separator()
+                menu.add_command(label="+ Add Subfolder", command=self._add_subfolder)
+                menu.add_command(label="Rename Folder...", command=self._rename_selected_folder)
+                menu.add_command(label="Delete Folder...", command=self._delete_selected_folder)
+        elif self.mail_entry_id(iid):
+            return
 
         # Group context menu
         elif iid.startswith("grp_"):
@@ -1649,7 +1913,8 @@ class RuleManagerView(ttk.Frame):
             self._show_toast(f"New rules cannot be created inside '{self.yaml_mgr.unclassified_folder()}'.", error=True)
             return
 
-        rule_name = f"New Rule {len(self.yaml_mgr.rules) + 1}"
+        # One folder, one rule: name it after the folder path (A\B\C -> A_B_C)
+        rule_name = self.yaml_mgr.auto_rule_name(dest_folder)
         self.yaml_mgr.next_change_label = f"Create rule in '{dest_folder}'"
         new_id = self.yaml_mgr.generate_rule_id(rule_name)
         new_rule = RuleConfig(
@@ -1673,6 +1938,8 @@ class RuleManagerView(ttk.Frame):
             self.after_idle(self._focus_new_rule_name)
 
     def _focus_new_rule_name(self):
+        if str(self.ent_rule_name.cget("state")) == "readonly":
+            return  # automatic name: nothing to type
         if self.ent_rule_name.winfo_exists():
             self.ent_rule_name.focus_set()
             self.ent_rule_name.select_range(0, tk.END)
@@ -1687,7 +1954,8 @@ class RuleManagerView(ttk.Frame):
             messagebox.showwarning("Notice", "Rule name cannot be empty.")
             return False
 
-        self.selected_rule.name = name
+        if not self._rule_name_locked(self.selected_rule):
+            self.selected_rule.name = name
         self.selected_rule.enabled = enabled
         self.selected_rule.groups = groups
         self.selected_rule.emails = emails
@@ -1696,7 +1964,7 @@ class RuleManagerView(ttk.Frame):
 
         self.yaml_mgr.next_change_label = f"Edit rule '{self.selected_rule.name}'"
         self.yaml_mgr.save()
-        self._show_toast(f"Saved rule '{name}' to rules.yaml")
+        self._show_toast(f"Saved rule '{self.selected_rule.name}' to rules.yaml")
         self._refresh_dirty_state()
 
         if refresh_tree:
@@ -1778,6 +2046,8 @@ class RuleManagerView(ttk.Frame):
             else:
                 label = f"{g_id} (missing group)"
             self.lst_rule_groups.insert(tk.END, label)
+        if hasattr(self, "lbl_group_emails"):
+            self._update_rule_count_labels()
 
     def _link_group_to_rule(self):
         if not self.selected_rule:

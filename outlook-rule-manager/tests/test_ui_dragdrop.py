@@ -76,7 +76,7 @@ class TestInboxDragDrop(unittest.TestCase):
         self.assertEqual(action.sender_email, "sato@sato-automation.jp")
         self.assertTrue(self.tv.pending_bar.winfo_ismapped())
         self.assertTrue(str(self.tv.tree_inbox.set("MSG_004", "WillGoTo")).startswith("* "))
-        self.assertIn("Omron Equipment", self.rv.lbl_toast.cget("text"))
+        self.assertIn("Purchasing_Team_Vendor_Part_Omron_Unit", self.rv.lbl_toast.cget("text"))
         # Ghost window and hover cleaned up
         self.assertIsNone(self.tv._drag_ghost)
         self.assertFalse(self.tv._drag_active)
@@ -131,7 +131,7 @@ class TestInboxDragDrop(unittest.TestCase):
             self.tv._apply_all_staged()
         rule = next(r for r in self.win.yaml_mgr.rules if r.id == "rule_suppliers")
         self.assertIn("sato@sato-automation.jp", self.win.yaml_mgr.get_all_emails_for_rule(rule))
-        self.assertEqual(self.rv.tree.set("rule_rule_suppliers", "Details"), "4 senders")
+        self.assertEqual(self.rv.tree.set("rule_rule_suppliers", "Details"), "2 senders, 2 domains")
 
     def test_clicks_switch_right_pane_between_mail_and_rule(self):
         self.assertEqual(self.win.details_mode, "mail")

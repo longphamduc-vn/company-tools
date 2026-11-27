@@ -31,11 +31,11 @@ class TestAssignSenderCore(unittest.TestCase):
     def test_move_sender_out_of_single_use_group(self):
         # lead.scada@ is in group 'engineering', used only by rule_engineering
         preview = self.y.preview_sender_move("lead.scada@company.com", "rule_suppliers")
-        self.assertEqual(preview["from_rules"], ["SCADA PLC Maintenance"])
+        self.assertEqual(preview["from_rules"], ["Engineering_Team_SCADA_Part_PLC_Unit"])
         self.assertEqual(preview["shared_groups"], [])
 
         result = self.y.assign_sender("lead.scada@company.com", "rule_suppliers")
-        self.assertEqual(result["moved_from"], ["SCADA PLC Maintenance"])
+        self.assertEqual(result["moved_from"], ["Engineering_Team_SCADA_Part_PLC_Unit"])
         self.assertEqual(self._holders("lead.scada@company.com"), ["rule_suppliers"])
         matched, _ = self.engine.match_message("lead.scada@company.com", "x")
         self.assertEqual(matched.id, "rule_suppliers")
@@ -64,10 +64,10 @@ class TestAssignSenderCore(unittest.TestCase):
     def test_shared_group_is_untouched_unless_allowed(self):
         self._rule("rule_unclassified").groups.append("executive")  # 'executive' now shared by 2 rules
         preview = self.y.preview_sender_move("ceo@company.com", "rule_engineering")
-        self.assertEqual(preview["shared_groups"], [("Executive Board", ["Executive Board", "[Unclassified]"])])
+        self.assertEqual(preview["shared_groups"], [("Executive Board", ["Management_Executive_Board_Directors", "[Unclassified]"])])
 
         result = self.y.assign_sender("ceo@company.com", "rule_engineering")
-        self.assertEqual(result["blocked_by_groups"], [("Executive Board", ["Executive Board", "[Unclassified]"])])
+        self.assertEqual(result["blocked_by_groups"], [("Executive Board", ["Management_Executive_Board_Directors", "[Unclassified]"])])
         self.assertIn("ceo@company.com", self.y.groups["executive"].emails)
 
         result = self.y.assign_sender("ceo@company.com", "rule_engineering", remove_from_shared_groups=True)
@@ -83,7 +83,7 @@ class TestAssignSenderCore(unittest.TestCase):
     def test_detach_for_new_rule(self):
         self.y.rules.append(RuleConfig(id="rule_new", name="New", emails=["eng1@company.com"], target_folder="X"))
         moved, blocked = self.y.detach_sender("eng1@company.com", except_rule_id="rule_new")
-        self.assertEqual(moved, ["SCADA PLC Maintenance"])
+        self.assertEqual(moved, ["Engineering_Team_SCADA_Part_PLC_Unit"])
         self.assertEqual(blocked, [])
         self.assertEqual(self._holders("eng1@company.com"), ["rule_new"])
 
@@ -123,8 +123,8 @@ class TestMoveSenderThroughInbox(unittest.TestCase):
     def test_preview_then_apply_moves_sender(self):
         msg = next(m for m in self.tv.messages if m.entry_id == "MSG_001")  # lead.scada@ -> SCADA rule today
         self.tv.drop_messages_on_target("rule_rule_suppliers", [msg])
-        self.assertEqual(self.tv.staged_actions[0].moved_from, ["SCADA PLC Maintenance"])
-        self.assertIn("(from SCADA PLC Maintenance)", self.tv.tree_inbox.set("MSG_001", "WillGoTo"))
+        self.assertEqual(self.tv.staged_actions[0].moved_from, ["Engineering_Team_SCADA_Part_PLC_Unit"])
+        self.assertIn("(from Engineering_Team_SCADA_Part_PLC_Unit)", self.tv.tree_inbox.set("MSG_001", "WillGoTo"))
         promised = self.tv.staged_actions[0].target_folder
 
         self._apply()
