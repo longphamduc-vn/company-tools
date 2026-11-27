@@ -2,6 +2,8 @@
 
 **Outlook Rule Companion** is an automation and management desktop assistant for Microsoft Outlook Classic. It simplifies creating, organizing, and maintaining email rules across annual PST archive files without replacing Outlook's native execution engine.
 
+> 🇻🇳 Tiếng Việt cho người dùng: [Giới thiệu chức năng](GIOI_THIEU.md) · [Hướng dẫn sử dụng](HUONG_DAN.md)
+
 ---
 
 ## 🌟 Key Features
