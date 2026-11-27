@@ -58,117 +58,6 @@ class TestUiPhase1(unittest.TestCase):
         return WindowsOutlookClient(namespace=namespace)
 
     # ------------------------------------------------------------------
-    # 1.1 Group ID uniqueness
-    # ------------------------------------------------------------------
-    def test_generate_group_id_uniqueness_and_after_delete(self):
-        yaml_mgr = YamlConfigManager(self.config_path)
-        self.assertEqual(yaml_mgr.generate_group_id("Vendor Group!"), "grp_vendor_group")
-        self.assertEqual(yaml_mgr.generate_group_id("grp_Already"), "grp_already")
-        self.assertEqual(yaml_mgr.generate_group_id("!!!"), "grp_new")
-
-        root = tk.Tk()
-        root.withdraw()
-        try:
-            sync_engine = SyncEngine(yaml_mgr, MockOutlookClient())
-            view = RuleManagerView(root, yaml_mgr, sync_engine)
-            view.pack()
-
-            with patch("gui.rule_manager_view.simpledialog.askstring", return_value="Vendors"), patch.object(
-                view, "_show_toast"
-            ):
-                view._add_group()
-                view._add_group()
-                view._add_group()
-
-            self.assertIn("grp_vendors", yaml_mgr.groups)
-            self.assertIn("grp_vendors_1", yaml_mgr.groups)
-            self.assertIn("grp_vendors_2", yaml_mgr.groups)
-
-            # Delete #2 ("grp_vendors_1"), then add another group with same name
-            deleted = yaml_mgr.delete_group("grp_vendors_1")
-            self.assertTrue(deleted)
-
-            with patch("gui.rule_manager_view.simpledialog.askstring", return_value="Vendors"), patch.object(
-                view, "_show_toast"
-            ):
-                view._add_group()
-
-            # Must remain 3 distinct groups and not collide with grp_vendors_2
-            self.assertIn("grp_vendors", yaml_mgr.groups)
-            self.assertIn("grp_vendors_1", yaml_mgr.groups)
-            self.assertIn("grp_vendors_2", yaml_mgr.groups)
-            self.assertEqual(len([k for k in yaml_mgr.groups if k.startswith("grp_vendors")]), 3)
-        finally:
-            root.destroy()
-
-    # ------------------------------------------------------------------
-    # 1.2 Linked Groups editor in RuleManagerView
-    # ------------------------------------------------------------------
-    def test_rule_inspector_linked_groups_link_unlink_and_save_persistence(self):
-        yaml_mgr = YamlConfigManager(self.config_path)
-        sync_engine = SyncEngine(yaml_mgr, MockOutlookClient())
-
-        root = tk.Tk()
-        root.withdraw()
-        try:
-            view = RuleManagerView(root, yaml_mgr, sync_engine)
-            view.pack()
-            root.update_idletasks()
-
-            view.tree.selection_set("rule_rule_executive")
-            view._on_tree_select()
-
-            self.assertEqual(view.lst_rule_groups.size(), 1)
-            self.assertIn("Executive Board", view.lst_rule_groups.get(0))
-
-            # Unlink removes from UI staging list but does NOT persist before Save
-            view.lst_rule_groups.selection_set(0)
-            view._unlink_group_from_rule()
-            self.assertEqual(view.lst_rule_groups.size(), 0)
-            self.assertEqual(_rule_by_id(yaml_mgr, "rule_executive").groups, ["executive"])
-            self.assertEqual(
-                _rule_by_id(YamlConfigManager(self.config_path), "rule_executive").groups,
-                ["executive"],
-            )
-
-            # Link "Engineering SCADA Team" via modal dialog
-            view._link_group_to_rule()
-            root.update_idletasks()
-            dialogs = [w for w in view.winfo_children() if isinstance(w, tk.Toplevel)]
-            self.assertEqual(len(dialogs), 1)
-            dlg = dialogs[0]
-
-            lst_boxes = _find_widgets_of_type(dlg, tk.Listbox)
-            self.assertEqual(len(lst_boxes), 1)
-            modal_lst = lst_boxes[0]
-            eng_idx = next(
-                i for i in range(modal_lst.size()) if "Engineering SCADA Team" in modal_lst.get(i)
-            )
-            modal_lst.selection_set(eng_idx)
-
-            link_btn = next(
-                b for b in _find_widgets_of_type(dlg, ttk.Button) if b.cget("text") == "Link Selected"
-            )
-            link_btn.invoke()
-            root.update_idletasks()
-
-            self.assertEqual(view.lst_rule_groups.size(), 1)
-            self.assertIn("Engineering SCADA Team", view.lst_rule_groups.get(0))
-            # Still unsaved on disk until Save Rule to YAML
-            self.assertEqual(
-                _rule_by_id(YamlConfigManager(self.config_path), "rule_executive").groups,
-                ["executive"],
-            )
-
-            with patch.object(view, "_show_toast"):
-                view._save_rule_changes()
-
-            reloaded = YamlConfigManager(self.config_path)
-            self.assertEqual(_rule_by_id(reloaded, "rule_executive").groups, ["engineering"])
-        finally:
-            root.destroy()
-
-    # ------------------------------------------------------------------
     # 1.3 Simulation banner, Retry Connection, and [SIMULATION] dialogs
     # ------------------------------------------------------------------
     def test_simulation_banner_visibility_and_retry_connection(self):
@@ -245,7 +134,7 @@ class TestUiPhase1(unittest.TestCase):
             triage = win.tab_triage
             self.assertGreater(len(triage.messages), 0)
             triage.selected_message = triage.messages[0]
-            exec_rule = _rule_by_id(win.yaml_mgr, "rule_executive")
+            exec_rule = _rule_by_id(win.yaml_mgr, r"rule_management\executive_board\directors")
             with patch.object(triage, "_prompt_rule_selection", return_value=(exec_rule, "email")), patch(
                 "gui.triage_view.messagebox"
             ) as mock_triage_mb:
@@ -306,7 +195,7 @@ class TestUiPhase1(unittest.TestCase):
                     RuleConflict(
                         conflict_type="NAME_COLLISION",
                         rule_name="Executive Board",
-                        yaml_rule=_rule_by_id(win.yaml_mgr, "rule_executive"),
+                        yaml_rule=_rule_by_id(win.yaml_mgr, r"rule_management\executive_board\directors"),
                         outlook_rule_info={"name": "Executive Board", "emails": [], "target_folder": ""},
                         description="Overlap",
                         suggested_action="OVERWRITE",
@@ -424,7 +313,7 @@ class TestUiPhase1(unittest.TestCase):
             win.update()
 
             # Select rule -> Save Rule button must be mapped & inside window bounds
-            win.tab_rules.tree.selection_set("rule_rule_executive")
+            win.tab_rules.tree.selection_set(r"rule_rule_management\executive_board\directors")
             win.tab_rules._on_tree_select()
             win.update()
 
@@ -436,31 +325,19 @@ class TestUiPhase1(unittest.TestCase):
             )
 
             # Verify mousewheel helper scrolls rule canvas when shrunk to cause vertical overflow
-            win.geometry("920x460")
+            win.minsize(100, 100)
+            win.geometry("920x420")
             win.update()
             self.assertTrue(bool(btn_save_rule.winfo_ismapped()))
             self.assertLessEqual(
                 btn_save_rule.winfo_rooty() + btn_save_rule.winfo_height(),
                 win.winfo_rooty() + win.winfo_height(),
             )
-            fake_wheel = type("WheelEvent", (), {"widget": win.tab_rules.lst_rule_groups, "delta": -120})()
+            fake_wheel = type("WheelEvent", (), {"widget": win.tab_rules.txt_emails, "delta": -120})()
             first_before, last_before = win.tab_rules.rule_scroll_canvas.yview()
             self.assertLess(last_before, 1.0)
             win.tab_rules._on_scrollable_mousewheel(fake_wheel)
             self.assertGreater(win.tab_rules.rule_scroll_canvas.yview()[0], first_before)
-
-            # Select group -> Save Group button also mapped & visible inside window bounds
-            win.geometry("1280x760")
-            win.tab_rules.tree.selection_set("grp_executive")
-            win.tab_rules._on_tree_select()
-            win.update()
-
-            btn_save_group = win.tab_rules.btn_save_group
-            self.assertTrue(bool(btn_save_group.winfo_ismapped()))
-            self.assertLessEqual(
-                btn_save_group.winfo_rooty() + btn_save_group.winfo_height(),
-                win.winfo_rooty() + win.winfo_height(),
-            )
         finally:
             win.destroy()
 

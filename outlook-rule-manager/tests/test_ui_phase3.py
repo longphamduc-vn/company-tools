@@ -7,7 +7,7 @@ from tkinter import ttk
 import unittest
 from unittest.mock import patch
 
-from core.models import AddressGroup, RuleConfig, pluralize_count
+from core.models import RuleConfig, pluralize_count
 from core.outlook_client import MockOutlookClient, WindowsOutlookClient
 from core.sync_engine import SyncEngine, match_email_domain
 from gui import styles
@@ -131,13 +131,13 @@ class TestUiPhase3(unittest.TestCase):
                 self.assertNotIn("NAVIGATOR", txt)
 
             self.assertIn("Folders & Rules", rules_texts)
-            self.assertIn("Shared Address Groups", rules_texts)
 
+            exec_id = r"rule_management\executive_board\directors"
             # Disabled rule styling + suffix in Rules tree
-            self.assertIn("(disabled)", win.tab_rules.tree.item("rule_rule_executive", "text"))
-            self.assertIn("rule_disabled", win.tab_rules.tree.item("rule_rule_executive", "tags"))
+            self.assertIn("(disabled)", win.tab_rules.tree.item(f"rule_{exec_id}", "text"))
+            self.assertIn("rule_disabled", win.tab_rules.tree.item(f"rule_{exec_id}", "tags"))
 
-            # [Unclassified] rule counts 1 singular sender; single-item group counts 1 member
+            # [Unclassified] rule counts 1 singular sender
             self.assertEqual(pluralize_count(1, "sender"), "1 sender")
             self.assertEqual(pluralize_count(2, "sender"), "2 senders")
             self.assertEqual(pluralize_count(0, "domain"), "0 domains")
@@ -153,7 +153,7 @@ class TestUiPhase3(unittest.TestCase):
                 win.tab_rules.menu_new.entrycget(i, "label")
                 for i in range(win.tab_rules.menu_new.index("end") + 1)
             ]
-            self.assertEqual(new_menu_labels, ["Rule", "Folder", "Subfolder", "Group"])
+            self.assertEqual(new_menu_labels, ["Rule", "Folder", "Subfolder"])
             self.assertNotIn("+ Root Folder (L1)", rules_toolbar_btns)
             self.assertNotIn("+ Subfolder (L+1)", rules_toolbar_btns)
 
@@ -172,7 +172,7 @@ class TestUiPhase3(unittest.TestCase):
             )
 
             # Checkbox "Enabled" + "(applies to Outlook on next Sync)", clean breadcrumb, singular emails/domains
-            win.tab_rules.tree.selection_set("rule_rule_executive")
+            win.tab_rules.tree.selection_set(f"rule_{exec_id}")
             win.tab_rules._on_tree_select()
             win.update()
             crumb = win.tab_rules.lbl_breadcrumb.cget("text")
@@ -182,27 +182,12 @@ class TestUiPhase3(unittest.TestCase):
             self.assertEqual(win.tab_rules.chk_rule_enabled.cget("text"), "Enabled")
             hdr_labels = [l.cget("text") for l in _find_widgets(win.tab_rules.frame_rule, tk.Label)]
             self.assertIn("(applies to Outlook on next Sync)", hdr_labels)
-            self.assertIn("0 domains", win.tab_rules.lst_rule_groups.get(0))
 
-            # Rule with 1 email, 1 domain, 1 keyword -> singular quota text & "1 native rule" vs "3 native rules"
-            win.tab_rules.tree.selection_set("rule_rule_suppliers")
-            win.tab_rules._on_tree_select()
-            win.update()
-            self.assertIn("(1 email, 2 domains)", win.tab_rules.lst_rule_groups.get(0))
-
-            one_rule = RuleConfig(
-                id="rule_one",
-                name="One Item",
-                enabled=True,
-                emails=["one@x.com"],
-                target_folder="One\\Folder",
-            )
-            win.yaml_mgr.rules.append(one_rule)
-            win.yaml_mgr.groups["solo_grp"] = AddressGroup(id="solo_grp", name="Solo Group", emails=["solo@x.com"])
+            one_rule = win.yaml_mgr.ensure_rule_for_folder(r"One\Folder")
+            one_rule.emails = ["one@x.com"]
             win.yaml_mgr.save()
             win.tab_rules.refresh_all()
-            self.assertEqual(win.tab_rules.tree.item("grp_solo_grp", "values")[0], "1 member")
-            win.tab_rules.tree.selection_set("rule_rule_one")
+            win.tab_rules.tree.selection_set(f"rule_{one_rule.id}")
             win.tab_rules._on_tree_select()
             self.assertIn("1 sender, 0 domains, 0 keywords → 1 native rule", win.tab_rules.lbl_quota.cget("text"))
             self.assertNotIn("1 native rules", win.tab_rules.lbl_quota.cget("text"))
@@ -255,7 +240,7 @@ class TestUiPhase3(unittest.TestCase):
             view: RuleManagerView = win.tab_rules
 
             # Multi-type rule has 3 native rules (email + domain + keyword) WITHOUT "(Part " -> GREEN
-            view.tree.selection_set("rule_rule_multi")
+            view.tree.selection_set(r"rule_rule_vendors\mix")
             view._on_tree_select()
             win.update()
             self.assertIn("1 sender, 1 domain, 1 keyword → 3 native rules", view.lbl_quota.cget("text"))
@@ -273,7 +258,7 @@ class TestUiPhase3(unittest.TestCase):
             self.assertEqual(view.lbl_test_result.cget("text"), "MATCH! (Domain Rule)")
 
             # Threshold-split rule has "(Part " -> ORANGE
-            view.tree.selection_set("rule_rule_split")
+            view.tree.selection_set(r"rule_rule_vendors\big")
             view._on_tree_select()
             win.update()
             self.assertEqual(view.lbl_quota.cget("fg"), "#ea580c")
@@ -291,29 +276,22 @@ class TestUiPhase3(unittest.TestCase):
             win.update()
             view: RuleManagerView = win.tab_rules
 
-            # Start on rule_executive
-            view.tree.selection_set("rule_rule_executive")
+            exec_id = r"rule_management\executive_board\directors"
+            eng_id = r"rule_engineering_team\scada_part\plc_unit"
+            sup_id = r"rule_purchasing_team\vendor_part\omron_unit"
+
+            # Start on executive rule
+            view.tree.selection_set(f"rule_{exec_id}")
             view._on_tree_select()
             win.update()
             self.assertFalse(view.has_unsaved_changes())
             self.assertEqual(view.btn_save_rule.cget("text"), "Save Rule to YAML")
 
-            # Link/Unlink & Add/Remove Keyword mark form dirty -> "Save Changes ●"
-            view._editing_rule_group_ids.append("suppliers")
-            view._refresh_linked_groups_listbox()
-            view._refresh_dirty_state()
-            self.assertTrue(view.has_unsaved_changes())
-            self.assertEqual(view.btn_save_rule.cget("text"), "Save Changes ●")
-            self.assertEqual(view.btn_save_rule.cget("style"), "DirtySave.TButton")
-
-            view.lst_rule_groups.selection_set(view.lst_rule_groups.size() - 1)
-            view._unlink_group_from_rule()
-            self.assertFalse(view.has_unsaved_changes())
-
             view.txt_keywords.insert(tk.END, "Urgent\n")
             view._on_rule_text_changed()
             self.assertTrue(view.has_unsaved_changes())
             self.assertEqual(view.btn_save_rule.cget("text"), "Save Changes ●")
+            self.assertEqual(view.btn_save_rule.cget("style"), "DirtySave.TButton")
 
             # Normal Save refreshes tree WITHOUT asking "Save changes?"
             with patch("gui.rule_manager_view.messagebox.askyesnocancel") as mock_ask, patch.object(
@@ -324,67 +302,62 @@ class TestUiPhase3(unittest.TestCase):
             self.assertFalse(view.has_unsaved_changes())
             self.assertEqual(view.btn_save_rule.cget("text"), "Save Rule to YAML")
 
-            # Case 1: Edit domain on rule_executive, select rule_engineering, Cancel (None) -> stay on old rule
+            # Case 1: Edit domain on exec rule, select eng rule, Cancel (None) -> stay on old rule
             view.txt_domains.insert(tk.END, "@canceldom.com\n")
             view._on_rule_text_changed()
             self.assertTrue(view.has_unsaved_changes())
 
             with patch("gui.rule_manager_view.messagebox.askyesnocancel", return_value=None) as mock_ask:
-                view.tree.selection_set("rule_rule_engineering")
+                view.tree.selection_set(f"rule_{eng_id}")
                 view._on_tree_select()
                 mock_ask.assert_called_once()
-            self.assertEqual(view.selected_rule.id, "rule_executive")
+            self.assertEqual(view.selected_rule.id, exec_id)
             self.assertTrue(view.has_unsaved_changes())
-            self.assertEqual(view.tree.selection()[0], "rule_rule_executive")
+            self.assertEqual(view.tree.selection()[0], f"rule_{exec_id}")
             self.assertNotIn(
                 "@canceldom.com",
-                next(r for r in YamlConfigManager(self.config_path).rules if r.id == "rule_executive").domains,
+                next(r for r in YamlConfigManager(self.config_path).rules if r.id == exec_id).domains,
             )
 
-            # Case 2: Switch again and answer No (False) -> discarded, switches to rule_engineering
+            # Case 2: Switch again and answer No (False) -> discarded, switches to eng rule
             with patch("gui.rule_manager_view.messagebox.askyesnocancel", return_value=False) as mock_ask:
-                view.tree.selection_set("rule_rule_engineering")
+                view.tree.selection_set(f"rule_{eng_id}")
                 view._on_tree_select()
                 mock_ask.assert_called_once()
-            self.assertEqual(view.selected_rule.id, "rule_engineering")
+            self.assertEqual(view.selected_rule.id, eng_id)
             self.assertFalse(view.has_unsaved_changes())
             self.assertNotIn(
                 "@canceldom.com",
-                next(r for r in YamlConfigManager(self.config_path).rules if r.id == "rule_executive").domains,
+                next(r for r in YamlConfigManager(self.config_path).rules if r.id == exec_id).domains,
             )
 
-            # Case 3: Edit domain on rule_engineering, switch to rule_suppliers, answer Yes (True) -> saved!
-            view.txt_domains.insert(tk.END, "@saveddom.com\n")
+            # Case 3: Edit domain on eng rule, switch to sup rule, answer Yes (True) -> saved!
+            view.txt_domains.insert(tk.END, "\n@saveddom.com\n")
             view._on_rule_text_changed()
             with patch("gui.rule_manager_view.messagebox.askyesnocancel", return_value=True) as mock_ask, patch.object(
                 view, "_show_toast"
             ):
-                view.tree.selection_set("rule_rule_suppliers")
+                view.tree.selection_set(f"rule_{sup_id}")
                 view._on_tree_select()
                 mock_ask.assert_called_once()
-            self.assertEqual(view.selected_rule.id, "rule_suppliers")
+            self.assertEqual(view.selected_rule.id, sup_id)
             self.assertIn(
                 "@saveddom.com",
-                next(r for r in YamlConfigManager(self.config_path).rules if r.id == "rule_engineering").domains,
+                next(r for r in YamlConfigManager(self.config_path).rules if r.id == eng_id).domains,
             )
 
-            # Group dirty tracking + tab change Cancel keeps tab 1 + close Cancel prevents destroy
-            view.tree.selection_set("grp_executive")
-            view._on_tree_select()
-            win.update()
-            view.txt_group_domains.insert(tk.END, "\n@board.com")
-            view._refresh_dirty_state()
-            self.assertTrue(view.is_group_dirty())
-            self.assertEqual(view.btn_save_group.cget("text"), "Save Changes ●")
+            # Dirty tracking on sup rule + pane switch Cancel + close Cancel/Yes
+            view.txt_domains.insert(tk.END, "\n@supboard.com")
+            view._on_rule_text_changed()
+            self.assertTrue(view.is_rule_dirty())
 
-            # Attempt switching the right pane to a mail -> Cancel keeps the group editor
             win.show_rule_details()
             with patch("gui.rule_manager_view.messagebox.askyesnocancel", return_value=None) as mock_ask:
                 win.show_mail_details()
                 win.update()
                 mock_ask.assert_called()
             self.assertEqual(win.details_mode, "rule")
-            self.assertTrue(view.is_group_dirty())
+            self.assertTrue(view.is_rule_dirty())
 
             # Attempt window close -> Cancel keeps window alive; Yes saves & closes
             with patch("gui.rule_manager_view.messagebox.askyesnocancel", return_value=None):
@@ -396,7 +369,7 @@ class TestUiPhase3(unittest.TestCase):
             ):
                 win._on_close_window()
             reloaded = YamlConfigManager(self.config_path)
-            self.assertIn("@board.com", reloaded.groups["executive"].domains)
+            self.assertIn("@supboard.com", next(r for r in reloaded.rules if r.id == sup_id).domains)
             with self.assertRaises(tk.TclError):
                 win.winfo_exists()
         finally:

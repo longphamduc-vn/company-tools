@@ -1,14 +1,36 @@
 """YAML Configuration Manager with Versioned Backups."""
 import copy
-import os
-import shutil
 import glob
+import os
 import re
+import shutil
 from datetime import datetime
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 import yaml
 
-from core.models import StoreConfig, AddressGroup, RuleConfig, rule_name_from_folder
+from core.config_format import (
+    dump_folders,
+    dump_yaml,
+    migrate_v2_with_warnings,
+    normalize_domain as _fmt_normalize_domain,
+    normalize_domains as _fmt_normalize_domains,
+    normalize_folder_path,
+    normalize_keywords as _fmt_normalize_keywords,
+    parse_folders,
+    unique_rule_id,
+)
+from core.models import RuleConfig, StoreConfig, rule_name_from_folder
+
+
+def _is_v2_data(data: Dict[str, Any]) -> bool:
+    if "rules" in data:
+        return True
+    raw_ver = str(data.get("version", "2.0") or "2.0").strip()
+    try:
+        major = int(raw_ver.split(".", 1)[0])
+        return major < 3
+    except ValueError:
+        return "folders" not in data
 
 
 class YamlConfigManager:
@@ -19,17 +41,18 @@ class YamlConfigManager:
         self.backup_dir = os.path.join(os.path.dirname(self.config_path), "backups")
         os.makedirs(self.backup_dir, exist_ok=True)
 
-        self.version: str = "2.0"
+        self.version: str = "3.0"
         self.settings: dict = {
             "auto_split_threshold": 40,
             "unclassified_folder": "_Unclassified",
             "backup_versions": 30,
-            "custom_folders": []
         }
         self.stores: Dict[str, StoreConfig] = {}
-        self.groups: Dict[str, AddressGroup] = {}
+        self.folders: List[str] = []
         self.rules: List[RuleConfig] = []
         self.unclassified_pool: List[str] = []
+        self.legacy_rule_names: List[str] = []
+        self.load_warnings: List[str] = []
         self.unsynced_changes: int = 0
         self.has_synced: bool = False
         self._change_listeners: List[Callable[[], Any]] = []
@@ -43,151 +66,58 @@ class YamlConfigManager:
         self.load()
 
     def load(self) -> bool:
-        """Load configuration from YAML file."""
+        """Load configuration from YAML file, migrating v2 files automatically."""
         if not os.path.exists(self.config_path):
             return False
 
         with open(self.config_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+            try:
+                data = yaml.safe_load(f) or {}
+            except yaml.YAMLError as exc:
+                raise ValueError(f"{os.path.basename(self.config_path)} is not valid YAML: {exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"{os.path.basename(self.config_path)} must contain settings / folders sections, not a list or text."
+            )
 
-        self.version = str(data.get("version", "2.0"))
-        parsed = self._parse_data(data, default_settings=self.settings)
-        self.settings = parsed["settings"]
-        self.stores = parsed["stores"]
-        self.groups = parsed["groups"]
-        self.unclassified_pool = parsed["unclassified_pool"]
-        self.rules = parsed["rules"]
+        mig_warnings: List[str] = []
+        migrated = False
+        if isinstance(data, dict) and _is_v2_data(data):
+            bak_path = f"{self.config_path}.v2.bak"
+            if not os.path.exists(bak_path):
+                shutil.copy2(self.config_path, bak_path)
+            data, mig_warnings = migrate_v2_with_warnings(data)
+            migrated = True
 
-        self.apply_auto_rule_names()
+        parsed = parse_folders(data, default_settings=self.settings)
+        self.version = parsed.version
+        self.settings = parsed.settings
+        self.stores = parsed.stores
+        self.folders = parsed.folders
+        self.rules = parsed.rules
+        self.unclassified_pool = parsed.unclassified
+        self.legacy_rule_names = parsed.legacy_rule_names
+        self.load_warnings = list(dict.fromkeys(mig_warnings + parsed.warnings))
+
+        if migrated:
+            self.save()
 
         # A (re)load starts a fresh undo history
         self._undo_stack = []
         self._last_saved_state = self._capture_state()
         return True
 
-    @classmethod
-    def _parse_data(cls, data: Dict[str, Any], default_settings: Optional[dict] = None) -> Dict[str, Any]:
-        """Turn a rules.yaml dict into model objects (shared by load and import)."""
-        settings = data.get("settings") or copy.deepcopy(default_settings or {})
-        stores: Dict[str, StoreConfig] = {}
-        for s_id, s_data in (data.get("stores") or {}).items():
-            s_data = s_data or {}
-            stores[s_id] = StoreConfig(
-                id=s_id,
-                name=s_data.get("name", s_id),
-                file_path=s_data.get("file_path", "") or "",
-                store_id=s_data.get("store_id", "") or "",
-            )
-        groups: Dict[str, AddressGroup] = {}
-        for g_id, g_data in (data.get("groups") or {}).items():
-            g_data = g_data or {}
-            groups[g_id] = AddressGroup(
-                id=g_id,
-                name=g_data.get("name", g_id),
-                domains=cls.normalize_domains(g_data.get("domains", []) or []),
-                emails=[e.lower().strip() for e in (g_data.get("emails", []) or [])],
-            )
-        pool = [e.lower().strip() for e in (data.get("unclassified_pool", []) or [])]
-        rules: List[RuleConfig] = []
-        for r_data in data.get("rules", []) or []:
-            rules.append(RuleConfig(
-                id=r_data.get("id", ""),
-                name=r_data.get("name", ""),
-                enabled=r_data.get("enabled", True),
-                groups=r_data.get("groups", []) or [],
-                emails=[e.lower().strip() for e in (r_data.get("emails", []) or [])],
-                domains=cls.normalize_domains(r_data.get("domains", []) or []),
-                subject_keywords=r_data.get("subject_keywords", []) or [],
-                target_store=r_data.get("target_store", "active_archive"),
-                target_folder=r_data.get("target_folder", ""),
-                former_names=[str(n) for n in (r_data.get("former_names", []) or []) if n],
-            ))
-        return {"settings": settings, "stores": stores, "groups": groups,
-                "unclassified_pool": pool, "rules": rules}
-
-    # -----------------------------------------------------------------
-    # Automatic rule names: the folder path, A\\B\\C -> "A_B_C"
-    # -----------------------------------------------------------------
-    @property
-    def auto_rule_names(self) -> bool:
-        return bool(self.settings.get("auto_rule_names", True))
-
-    def is_fixed_name_rule(self, rule: RuleConfig) -> bool:
-        """The Unclassified fallback rule keeps its own name."""
-        return rule.id == "rule_unclassified" or self.is_inside_unclassified(rule.target_folder or "")
-
-    def auto_rule_name(self, folder: str, exclude_rule_id: Optional[str] = None) -> str:
-        """Name a (new) rule in `folder` would get: the folder name, plus _2, _3 … if taken."""
-        base = rule_name_from_folder(folder) or "Inbox"
-        taken = {r.name.lower() for r in self.rules if r.id != exclude_rule_id}
-        if base.lower() not in taken:
-            return base
-        n = 2
-        while f"{base}_{n}".lower() in taken:
-            n += 1
-        return f"{base}_{n}"
-
-    def apply_auto_rule_names(self) -> bool:
-        """Rename every rule after its folder (first rule of a folder gets the plain name)."""
-        if not self.auto_rule_names:
-            return False
-        changed = False
-        used: Set[str] = {r.name.lower() for r in self.rules if self.is_fixed_name_rule(r)}
-        for rule in self.rules:
-            if self.is_fixed_name_rule(rule):
-                continue
-            base = rule_name_from_folder(rule.target_folder) or "Inbox"
-            name, n = base, 2
-            while name.lower() in used:
-                name, n = f"{base}_{n}", n + 1
-            used.add(name.lower())
-            if rule.name != name:
-                if rule.name and rule.name not in rule.former_names:
-                    rule.former_names.append(rule.name)
-                if name in rule.former_names:
-                    rule.former_names.remove(name)
-                rule.name = name
-                changed = True
-        return changed
-
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize the current configuration to the rules.yaml structure."""
-        return {
-            "version": self.version,
-            "settings": self.settings,
-            "stores": {
-                s_id: {
-                    "name": s.name,
-                    "file_path": s.file_path,
-                    **({"store_id": s.store_id} if s.store_id else {}),
-                }
-                for s_id, s in self.stores.items()
-            },
-            "groups": {
-                g_id: {
-                    "name": g.name,
-                    "domains": g.domains,
-                    "emails": sorted(list(set(g.emails))),
-                }
-                for g_id, g in self.groups.items()
-            },
-            "unclassified_pool": sorted(list(set(self.unclassified_pool))),
-            "rules": [
-                {
-                    "id": r.id,
-                    "name": r.name,
-                    "enabled": r.enabled,
-                    "groups": r.groups,
-                    "emails": sorted(list(set(r.emails))),
-                    "domains": r.domains,
-                    "subject_keywords": r.subject_keywords,
-                    "target_store": r.target_store,
-                    "target_folder": r.target_folder,
-                    **({"former_names": list(r.former_names)} if r.former_names else {}),
-                }
-                for r in self.rules
-            ]
-        }
+        """Serialize the current configuration to the v3 rules.yaml structure."""
+        return dump_folders(
+            rules=self.rules,
+            folders=self.folders,
+            unclassified=self.unclassified_pool,
+            legacy_rule_names=self.legacy_rule_names,
+            settings=self.settings,
+            stores=self.stores,
+            version=self.version,
+        )
 
     # -----------------------------------------------------------------
     # Undo (in memory, last UNDO_LIMIT saves)
@@ -198,9 +128,10 @@ class YamlConfigManager:
         return copy.deepcopy({
             "settings": self.settings,
             "stores": self.stores,
-            "groups": self.groups,
+            "folders": self.folders,
             "rules": self.rules,
             "unclassified_pool": self.unclassified_pool,
+            "legacy_rule_names": self.legacy_rule_names,
         })
 
     def can_undo(self) -> bool:
@@ -217,9 +148,10 @@ class YamlConfigManager:
         state = copy.deepcopy(state)
         self.settings = state["settings"]
         self.stores = state["stores"]
-        self.groups = state["groups"]
+        self.folders = state["folders"]
         self.rules = state["rules"]
         self.unclassified_pool = state["unclassified_pool"]
+        self.legacy_rule_names = state["legacy_rule_names"]
         self._restoring_undo = True
         try:
             self.save()
@@ -240,35 +172,17 @@ class YamlConfigManager:
     @staticmethod
     def normalize_domain(domain_str: str) -> str:
         """Normalize a domain to lowercase stripped '@domain' format; return '' if empty."""
-        val = (domain_str or "").lower().strip()
-        if not val:
-            return ""
-        if "@" in val:
-            val = val.split("@", 1)[1].strip()
-        val = val.lstrip("@").strip()
-        if not val:
-            return ""
-        return f"@{val}"
+        return _fmt_normalize_domain(domain_str)
 
     @classmethod
     def normalize_domains(cls, domains: List[str]) -> List[str]:
         """Normalize a list of domains and drop empty entries."""
-        return [d for d in (cls.normalize_domain(x) for x in (domains or [])) if d]
+        return _fmt_normalize_domains(domains)
 
     @staticmethod
     def normalize_keywords(keywords: Iterable[str]) -> List[str]:
         """Strip whitespace, drop empty items, and deduplicate case-insensitively keeping first spelling."""
-        seen: Set[str] = set()
-        result: List[str] = []
-        for raw in keywords or []:
-            kw = str(raw).strip()
-            if not kw:
-                continue
-            key = kw.lower()
-            if key not in seen:
-                seen.add(key)
-                result.append(kw)
-        return result
+        return _fmt_normalize_keywords(keywords)
 
     def _create_backup_file(self) -> None:
         """Create a unique microsecond-timestamped backup copy and prune old backups."""
@@ -284,20 +198,32 @@ class YamlConfigManager:
         shutil.copy2(self.config_path, backup_file)
         self._prune_backups()
 
+    def _sync_rule_names_and_folders(self) -> None:
+        """Keep rule names derived from target_folder and ensure folders list is consistent."""
+        seen_folders = {f.lower() for f in self.folders}
+        for r in self.rules:
+            if r.id == "rule_unclassified" or self.is_inside_unclassified(r.target_folder or ""):
+                r.emails = sorted(set(e.lower().strip() for e in (self.unclassified_pool or []) if e and e.strip()))
+                continue
+            norm = normalize_folder_path(r.target_folder or "")
+            if norm:
+                r.target_folder = norm
+                r.name = rule_name_from_folder(norm)
+                if norm.lower() not in seen_folders:
+                    self.folders.append(norm)
+                    seen_folders.add(norm.lower())
+
     def save(self) -> bool:
         """Create versioned backup and write updated configuration to YAML atomically."""
-        # 1. Create timestamped backup
         self._create_backup_file()
-
-        # 2. Serialize objects to dict (rule names always follow their folder)
-        self.apply_auto_rule_names()
+        self._sync_rule_names_and_folders()
         data = self.to_dict()
+        yaml_text = dump_yaml(data)
 
-        # 3. Atomic write: temp file -> flush + fsync -> os.replace
         tmp_path = f"{self.config_path}.tmp"
         try:
             with open(tmp_path, "w", encoding="utf-8") as f:
-                yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+                f.write(yaml_text)
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_path, self.config_path)
@@ -347,20 +273,41 @@ class YamlConfigManager:
                     pass
 
     def get_all_emails_for_rule(self, rule: RuleConfig) -> List[str]:
-        """Collect all distinct emails matching this rule (direct emails + emails from groups)."""
-        emails = set(rule.emails)
-        for g_id in rule.groups:
-            if g_id in self.groups:
-                emails.update(self.groups[g_id].emails)
-        return sorted(list(emails))
+        """Return sorted distinct direct emails for this rule."""
+        return sorted(list(set(rule.emails)))
 
     def get_all_domains_for_rule(self, rule: RuleConfig) -> List[str]:
-        """Collect all distinct domains matching this rule (direct + from groups)."""
-        domains = set(rule.domains)
-        for g_id in rule.groups:
-            if g_id in self.groups:
-                domains.update(self.groups[g_id].domains)
-        return sorted(list(domains))
+        """Return sorted distinct direct domains for this rule."""
+        return sorted(list(set(rule.domains)))
+
+    def rule_for_folder(self, path: str) -> Optional[RuleConfig]:
+        """Return the rule assigned to `path` (case-insensitive), or None."""
+        norm = normalize_folder_path(path).lower()
+        if not norm:
+            return None
+        return next(
+            (r for r in self.rules if normalize_folder_path(r.target_folder or "").lower() == norm),
+            None,
+        )
+
+    def ensure_rule_for_folder(self, path: str) -> RuleConfig:
+        """Return the rule for `path`, creating an empty rule (and registering the folder) if needed."""
+        norm = normalize_folder_path(path)
+        existing = self.rule_for_folder(norm)
+        if existing is not None:
+            return existing
+        if norm and norm.lower() not in {f.lower() for f in self.folders}:
+            self.folders.append(norm)
+        new_rule = RuleConfig(
+            # A rule moved away keeps its id for the session, so the plain id may be taken
+            id=unique_rule_id(norm, (r.id for r in self.rules)),
+            name=rule_name_from_folder(norm),
+            enabled=True,
+            target_folder=norm,
+        )
+        unc_idx = next((i for i, r in enumerate(self.rules) if r.id == "rule_unclassified"), len(self.rules))
+        self.rules.insert(unc_idx, new_rule)
+        return new_rule
 
     def _remove_rule_no_save(self, rule_id: str) -> bool:
         """Remove a rule and move its emails to unclassified_pool without saving."""
@@ -368,13 +315,10 @@ class YamlConfigManager:
         if not rule_to_remove:
             return False
 
-        # Collect direct emails and group emails
-        emails_to_repool = self.get_all_emails_for_rule(rule_to_remove)
-        for email in emails_to_repool:
+        for email in self.get_all_emails_for_rule(rule_to_remove):
             if email and email not in self.unclassified_pool:
                 self.unclassified_pool.append(email)
 
-        # Remove the rule
         self.rules = [r for r in self.rules if r.id != rule_id]
         return True
 
@@ -386,26 +330,6 @@ class YamlConfigManager:
         if self._remove_rule_no_save(rule_id):
             self.save()
 
-    def delete_group(self, g_id: str, repool_emails: bool = False) -> bool:
-        """Delete an address group, detach it from all rules, and optionally repool its emails."""
-        if g_id not in self.groups:
-            return False
-
-        group = self.groups.pop(g_id)
-        self._set_change_label(f"Delete group '{group.name}'")
-        for rule in self.rules:
-            if g_id in rule.groups:
-                rule.groups = [gid for gid in rule.groups if gid != g_id]
-
-        if repool_emails:
-            for email in group.emails:
-                norm_email = email.lower().strip()
-                if norm_email and norm_email not in self.unclassified_pool:
-                    self.unclassified_pool.append(norm_email)
-
-        self.save()
-        return True
-
     def add_sender_to_rule_or_group(
         self,
         email: str,
@@ -413,12 +337,11 @@ class YamlConfigManager:
         as_domain: bool = False,
         save: bool = True,
     ):
-        """Add email or normalized domain to a rule or its first valid group."""
+        """Add email or normalized domain directly to a rule."""
         raw = (email or "").lower().strip()
         if not raw:
             return
 
-        # Remove from unclassified_pool if present
         if raw in self.unclassified_pool:
             self.unclassified_pool.remove(raw)
 
@@ -426,19 +349,15 @@ class YamlConfigManager:
         if not rule:
             return
 
-        target_group = next((self.groups[g_id] for g_id in rule.groups if g_id in self.groups), None)
-
         if as_domain:
             domain = self.normalize_domain(raw)
             if not domain:
                 return
-            target_list = target_group.domains if target_group is not None else rule.domains
-            if domain not in target_list:
-                target_list.append(domain)
+            if domain not in rule.domains:
+                rule.domains.append(domain)
         else:
-            target_list = target_group.emails if target_group is not None else rule.emails
-            if raw not in target_list:
-                target_list.append(raw)
+            if raw not in rule.emails:
+                rule.emails.append(raw)
 
         if save:
             self.save()
@@ -452,131 +371,77 @@ class YamlConfigManager:
 
     def _sender_holders(
         self, value: str, as_domain: bool, target_rule_id: Optional[str]
-    ) -> Tuple[List[RuleConfig], List[Tuple[AddressGroup, List[RuleConfig]]]]:
-        """Find other rules holding `value` at the same match level.
-
-        Returns (rules holding it directly, [(group holding it, rules using that group)]).
-        Groups linked to the target rule are ignored (the value stays reachable from the target).
-        """
-        target = next((r for r in self.rules if r.id == target_rule_id), None)
-        target_groups = set(target.groups) if target else set()
-        direct: List[RuleConfig] = []
-        group_hits: Dict[str, Tuple[AddressGroup, List[RuleConfig]]] = {}
+    ) -> List[RuleConfig]:
+        """Find other rules holding `value` at the same match level."""
+        holders: List[RuleConfig] = []
         for r in self.rules:
             if r.id == target_rule_id:
                 continue
             own = r.domains if as_domain else r.emails
             if value in own:
-                direct.append(r)
-            for g_id in r.groups:
-                grp = self.groups.get(g_id)
-                if grp is None or g_id in target_groups:
-                    continue
-                members = grp.domains if as_domain else grp.emails
-                if value in members and g_id not in group_hits:
-                    users = [u for u in self.rules if g_id in u.groups]
-                    group_hits[g_id] = (grp, users)
-        return direct, list(group_hits.values())
+                holders.append(r)
+        return holders
 
     def preview_sender_move(self, value: str, rule_id: Optional[str], as_domain: bool = False) -> Dict[str, Any]:
-        """Describe what assigning `value` to `rule_id` would move, without changing anything.
-
-        from_rules: names of rules that currently hold the value and would lose it.
-        shared_groups: [(group name, [rule names])] for groups used by several rules (needs confirmation).
-        """
+        """Describe which rules would lose `value` if assigned to `rule_id`."""
         value = self._normalize_sender_value(value, as_domain)
-        direct, group_hits = self._sender_holders(value, as_domain, rule_id)
-        from_rules: List[str] = [r.name for r in direct]
-        shared: List[Tuple[str, List[str]]] = []
-        for grp, users in group_hits:
-            if len(users) <= 1:
-                from_rules.extend(u.name for u in users if u.name not in from_rules)
-            else:
-                shared.append((grp.name, [u.name for u in users]))
-        return {"from_rules": from_rules, "shared_groups": shared}
+        holders = self._sender_holders(value, as_domain, rule_id)
+        return {"from_rules": [r.name for r in holders]}
 
     def detach_sender(
         self,
         value: str,
         as_domain: bool = False,
         except_rule_id: Optional[str] = None,
-        remove_from_shared_groups: bool = False,
-    ) -> Tuple[List[str], List[Tuple[str, List[str]]]]:
-        """Remove `value` from every rule (and single-use group) other than `except_rule_id`.
-
-        Groups shared by several rules are only changed when remove_from_shared_groups is True.
-        Returns (names of rules it was removed from, shared groups left untouched).
-        """
+    ) -> List[str]:
+        """Remove `value` from every rule other than `except_rule_id`."""
         value = self._normalize_sender_value(value, as_domain)
         if not value:
-            return [], []
-        direct, group_hits = self._sender_holders(value, as_domain, except_rule_id)
+            return []
+        holders = self._sender_holders(value, as_domain, except_rule_id)
         moved_from: List[str] = []
-        blocked: List[Tuple[str, List[str]]] = []
-        for r in direct:
+        for r in holders:
             own = r.domains if as_domain else r.emails
             while value in own:
                 own.remove(value)
             moved_from.append(r.name)
-        for grp, users in group_hits:
-            if len(users) > 1 and not remove_from_shared_groups:
-                blocked.append((grp.name, [u.name for u in users]))
-                continue
-            members = grp.domains if as_domain else grp.emails
-            while value in members:
-                members.remove(value)
-            moved_from.extend(u.name for u in users if u.name not in moved_from)
         if not as_domain and value in self.unclassified_pool:
             self.unclassified_pool.remove(value)
-        return moved_from, blocked
+        return moved_from
 
     def assign_sender(
         self,
         value: str,
         rule_id: str,
         as_domain: bool = False,
-        remove_from_shared_groups: bool = False,
         save: bool = True,
     ) -> Dict[str, Any]:
-        """Move a sender email (or domain) into `rule_id`, removing it from other rules at the same level.
-
-        An exact email in one rule already beats a domain in another, so moving an email never
-        touches domains (and vice versa).
-        """
+        """Move a sender email (or domain) into `rule_id`, removing it from other rules at the same level."""
         rule = next((r for r in self.rules if r.id == rule_id), None)
         value = self._normalize_sender_value(value, as_domain)
         if not rule or not value:
-            return {"added": False, "moved_from": [], "blocked_by_groups": []}
+            return {"added": False, "moved_from": []}
 
-        moved_from, blocked = self.detach_sender(
-            value, as_domain=as_domain, except_rule_id=rule_id,
-            remove_from_shared_groups=remove_from_shared_groups,
-        )
-        target_group = next((self.groups[g] for g in rule.groups if g in self.groups), None)
-        if as_domain:
-            target_list = target_group.domains if target_group is not None else rule.domains
-        else:
-            target_list = target_group.emails if target_group is not None else rule.emails
-        already = value in target_list or (
-            value in (self.get_all_domains_for_rule(rule) if as_domain else self.get_all_emails_for_rule(rule))
-        )
-        if not already:
+        moved_from = self.detach_sender(value, as_domain=as_domain, except_rule_id=rule_id)
+        target_list = rule.domains if as_domain else rule.emails
+        if value not in target_list:
             target_list.append(value)
         self._set_change_label(f"Move '{value}' to rule '{rule.name}'")
         if save:
             self.save()
-        return {"added": True, "moved_from": moved_from, "blocked_by_groups": blocked}
+        return {"added": True, "moved_from": moved_from}
 
     def get_existing_hierarchy(self) -> Tuple[List[str], List[str], List[str]]:
-        """Collect all distinct Teams, Parts, and Units from current rules and custom folders."""
+        """Collect all distinct Teams, Parts, and Units from current rules and folders."""
         teams = set()
         parts = set()
         units = set()
         all_paths = set(r.target_folder for r in self.rules if r.target_folder)
-        all_paths.update(self.settings.get("custom_folders", []))
+        all_paths.update(self.folders)
 
+        unc = self.unclassified_folder().lower()
         for folder in all_paths:
-            if folder and folder != "_Unclassified":
+            if folder and folder.lower() != unc:
                 segments = [s.strip() for s in re.split(r'[\\/]', folder) if s.strip()]
                 if len(segments) >= 1:
                     teams.add(segments[0])
@@ -592,19 +457,21 @@ class YamlConfigManager:
         for r in self.rules:
             if r.target_folder:
                 folders.add(r.target_folder)
-        for cf in self.settings.get("custom_folders", []):
-            if cf:
-                folders.add(cf)
+        for f in self.folders:
+            if f:
+                folders.add(f)
         return sorted(list(folders))
 
-    def add_custom_folder(self, folder_path: str) -> bool:
-        """Register a folder path so it stays in hierarchy even without rules."""
-        folder_path = "\\".join([s.strip() for s in re.split(r'[\\/]', folder_path) if s.strip()])
+    def add_folder(self, folder_path: str) -> bool:
+        """Register a folder path so it stays in hierarchy even without a rule."""
+        folder_path = normalize_folder_path(folder_path)
         if not folder_path:
             return False
-        custom_folders = self.settings.setdefault("custom_folders", [])
-        if folder_path not in custom_folders:
-            custom_folders.append(folder_path)
+        parts = folder_path.split("\\")
+        if any(p.startswith("_") for p in parts) or self.is_inside_unclassified(folder_path):
+            return False
+        if folder_path.lower() not in {f.lower() for f in self.folders}:
+            self.folders.append(folder_path)
             self._set_change_label(f"Create folder '{folder_path}'")
             self.save()
         return True
@@ -619,33 +486,43 @@ class YamlConfigManager:
 
     def is_inside_unclassified(self, path: str) -> bool:
         """True if `path` is the Unclassified folder or anything below it."""
-        norm = "\\".join(s.strip() for s in re.split(r'[\\/]', path or "") if s.strip()).lower()
+        norm = normalize_folder_path(path).lower()
         unc = self.unclassified_folder().lower()
         return norm == unc or norm.startswith(unc + "\\")
 
-    def move_rule_to_folder(self, rule_id: str, new_folder_path: str) -> bool:
-        """Move a rule to a target folder hierarchy (never into the Unclassified folder)."""
-        new_folder_path = "\\".join([s.strip() for s in re.split(r'[\\/]', new_folder_path) if s.strip()])
-        for r in self.rules:
-            if r.id == rule_id:
-                if r.id != "rule_unclassified" and self.is_inside_unclassified(new_folder_path):
-                    return False
-                if r.target_folder == new_folder_path:
-                    return True
-                self._set_change_label(f"Move rule '{r.name}' to '{new_folder_path}'")
-                r.target_folder = new_folder_path
-                self.save()
-                return True
-        return False
+    def move_rule_to_folder(self, rule_id: str, new_folder_path: str) -> Tuple[bool, str]:
+        """Move a rule to a target folder hierarchy (never into Unclassified or an occupied folder)."""
+        new_folder_path = normalize_folder_path(new_folder_path)
+        if not new_folder_path:
+            return False, "Target folder cannot be empty."
+        if any(p.startswith("_") for p in new_folder_path.split("\\")) and not self.is_inside_unclassified(new_folder_path):
+            return False, "Folder name cannot start with '_'."
+
+        rule = next((r for r in self.rules if r.id == rule_id), None)
+        if not rule:
+            return False, "Rule not found."
+        if rule.id != "rule_unclassified" and self.is_inside_unclassified(new_folder_path):
+            return False, f"Rules cannot be moved into '{self.unclassified_folder()}'."
+        if (rule.target_folder or "").lower() == new_folder_path.lower():
+            return True, new_folder_path
+
+        occupant = self.rule_for_folder(new_folder_path)
+        if occupant is not None and occupant.id != rule_id:
+            return False, f"'{new_folder_path}' already has a rule"
+
+        self._set_change_label(f"Move rule '{rule.name}' to '{new_folder_path}'")
+        rule.target_folder = new_folder_path
+        if rule.id != "rule_unclassified":
+            rule.name = rule_name_from_folder(new_folder_path)
+            if new_folder_path.lower() not in {f.lower() for f in self.folders}:
+                self.folders.append(new_folder_path)
+        self.save()
+        return True, new_folder_path
 
     def move_folder_hierarchy(self, source_path: str, dest_parent_path: str) -> Tuple[bool, str]:
-        """
-        Move a folder hierarchy (and all contained rules) into another destination parent folder.
-        e.g., source='Engineering_Team\\SCADA_Part\\PLC_Unit', dest_parent='Purchasing_Team\\Vendor_Part'
-        Results in 'Purchasing_Team\\Vendor_Part\\PLC_Unit'.
-        """
-        source_path = "\\".join([s.strip() for s in re.split(r'[\\/]', source_path) if s.strip()])
-        dest_parent_path = "\\".join([s.strip() for s in re.split(r'[\\/]', dest_parent_path) if s.strip()])
+        """Move a folder hierarchy (and all contained rules) into another destination parent folder."""
+        source_path = normalize_folder_path(source_path)
+        dest_parent_path = normalize_folder_path(dest_parent_path)
 
         if not source_path:
             return False, "Source folder cannot be empty."
@@ -654,41 +531,50 @@ class YamlConfigManager:
         if self.is_inside_unclassified(dest_parent_path):
             return False, f"Folders cannot be moved into '{self.unclassified_folder()}'."
 
-        # Prevent circular nesting
-        if dest_parent_path == source_path or dest_parent_path.startswith(source_path + "\\"):
+        if dest_parent_path.lower() == source_path.lower() or dest_parent_path.lower().startswith(source_path.lower() + "\\"):
             return False, "Cannot move a folder into itself or its own subfolder."
 
-        source_parts = source_path.split("\\")
-        folder_name = source_parts[-1]
+        folder_name = source_path.split("\\")[-1]
+        new_base_path = f"{dest_parent_path}\\{folder_name}" if dest_parent_path else folder_name
 
-        if dest_parent_path:
-            new_base_path = f"{dest_parent_path}\\{folder_name}"
-        else:
-            # Moved to root (becomes a top-level Team)
-            new_base_path = folder_name
-
-        if new_base_path == source_path:
+        if new_base_path.lower() == source_path.lower():
             return True, new_base_path
 
-        # Update all rules
+        src_low = source_path.lower()
+        # Check for rule collisions at destination before mutating
         for r in self.rules:
-            if r.target_folder == source_path:
-                r.target_folder = new_base_path
-            elif r.target_folder and r.target_folder.startswith(source_path + "\\"):
-                sub_suffix = r.target_folder[len(source_path):]
-                r.target_folder = f"{new_base_path}{sub_suffix}"
+            rf_low = (r.target_folder or "").lower()
+            if rf_low == src_low or rf_low.startswith(src_low + "\\"):
+                suffix = (r.target_folder or "")[len(source_path):]
+                candidate = f"{new_base_path}{suffix}"
+                existing = self.rule_for_folder(candidate)
+                if existing is not None and existing.id != r.id:
+                    return False, f"'{candidate}' already has a rule"
 
-        # Update custom folders
-        custom_folders = self.settings.get("custom_folders", [])
-        new_custom = []
-        for cf in custom_folders:
-            if cf == source_path:
-                new_custom.append(new_base_path)
-            elif cf.startswith(source_path + "\\"):
-                new_custom.append(f"{new_base_path}{cf[len(source_path):]}")
+        for r in self.rules:
+            rf_low = (r.target_folder or "").lower()
+            if rf_low == src_low:
+                r.target_folder = new_base_path
+                r.name = rule_name_from_folder(new_base_path)
+            elif rf_low.startswith(src_low + "\\"):
+                sub_suffix = (r.target_folder or "")[len(source_path):]
+                r.target_folder = f"{new_base_path}{sub_suffix}"
+                r.name = rule_name_from_folder(r.target_folder)
+
+        new_folders: List[str] = []
+        seen: Set[str] = set()
+        for f in self.folders:
+            f_low = f.lower()
+            if f_low == src_low:
+                updated = new_base_path
+            elif f_low.startswith(src_low + "\\"):
+                updated = f"{new_base_path}{f[len(source_path):]}"
             else:
-                new_custom.append(cf)
-        self.settings["custom_folders"] = new_custom
+                updated = f
+            if updated.lower() not in seen:
+                seen.add(updated.lower())
+                new_folders.append(updated)
+        self.folders = new_folders
 
         self._set_change_label(f"Move folder '{source_path}' to '{new_base_path}'")
         self.save()
@@ -699,26 +585,24 @@ class YamlConfigManager:
         return self.move_folder_hierarchy(source_path, "")
 
     def move_folder_up_one_level(self, source_path: str) -> Tuple[bool, str]:
-        """Move a folder up one level into its grandparent folder (e.g. Level 3 -> Level 2, Level 2 -> Level 1)."""
-        source_path = "\\".join([s.strip() for s in re.split(r'[\\/]', source_path) if s.strip()])
+        """Move a folder up one level into its grandparent folder."""
+        source_path = normalize_folder_path(source_path)
         parts = source_path.split("\\")
         if len(parts) <= 1:
             return False, "Folder is already at Root level (Level 1)."
-
         if len(parts) == 2:
-            # Grandparent is root
             return self.move_folder_hierarchy(source_path, "")
-        else:
-            grandparent = "\\".join(parts[:-2])
-            return self.move_folder_hierarchy(source_path, grandparent)
+        return self.move_folder_hierarchy(source_path, "\\".join(parts[:-2]))
 
     def rename_folder_hierarchy(self, old_path: str, new_name: str) -> Tuple[bool, str]:
-        """Rename the last segment of a folder path across all rules."""
-        old_path = "\\".join([s.strip() for s in re.split(r'[\\/]', old_path) if s.strip()])
-        new_name = new_name.strip().replace("\\", "_").replace("/", "_")
+        """Rename the last segment of a folder path across all rules and folders."""
+        old_path = normalize_folder_path(old_path)
+        new_name = (new_name or "").strip().replace("\\", "_").replace("/", "_")
 
         if not old_path or not new_name:
             return False, "Invalid folder name."
+        if new_name.startswith("_"):
+            return False, "Folder name cannot start with '_'."
 
         parts = old_path.split("\\")
         parts[-1] = new_name
@@ -727,111 +611,68 @@ class YamlConfigManager:
         if new_path == old_path:
             return True, new_path
 
+        old_low = old_path.lower()
         for r in self.rules:
-            if r.target_folder == old_path:
-                r.target_folder = new_path
-            elif r.target_folder and r.target_folder.startswith(old_path + "\\"):
-                sub_suffix = r.target_folder[len(old_path):]
-                r.target_folder = f"{new_path}{sub_suffix}"
+            rf_low = (r.target_folder or "").lower()
+            if rf_low == old_low or rf_low.startswith(old_low + "\\"):
+                suffix = (r.target_folder or "")[len(old_path):]
+                candidate = f"{new_path}{suffix}"
+                existing = self.rule_for_folder(candidate)
+                if existing is not None and existing.id != r.id:
+                    return False, f"'{candidate}' already has a rule"
 
-        custom_folders = self.settings.get("custom_folders", [])
-        new_custom = []
-        for cf in custom_folders:
-            if cf == old_path:
-                new_custom.append(new_path)
-            elif cf.startswith(old_path + "\\"):
-                new_custom.append(f"{new_path}{cf[len(old_path):]}")
+        for r in self.rules:
+            rf_low = (r.target_folder or "").lower()
+            if rf_low == old_low:
+                r.target_folder = new_path
+                r.name = rule_name_from_folder(new_path)
+            elif rf_low.startswith(old_low + "\\"):
+                sub_suffix = (r.target_folder or "")[len(old_path):]
+                r.target_folder = f"{new_path}{sub_suffix}"
+                r.name = rule_name_from_folder(r.target_folder)
+
+        new_folders: List[str] = []
+        seen: Set[str] = set()
+        for f in self.folders:
+            f_low = f.lower()
+            if f_low == old_low:
+                updated = new_path
+            elif f_low.startswith(old_low + "\\"):
+                updated = f"{new_path}{f[len(old_path):]}"
             else:
-                new_custom.append(cf)
-        self.settings["custom_folders"] = new_custom
+                updated = f
+            if updated.lower() not in seen:
+                seen.add(updated.lower())
+                new_folders.append(updated)
+        self.folders = new_folders
 
         self._set_change_label(f"Rename folder '{old_path}' to '{new_path}'")
         self.save()
         return True, new_path
 
     def delete_folder_hierarchy(self, folder_path: str, repool_addresses: bool = True) -> int:
-        """
-        Delete a folder and either repool its addresses or move its rules to _Unclassified.
-        Returns the number of affected rules. Saves once.
-        """
-        folder_path = "\\".join([s.strip() for s in re.split(r'[\\/]', folder_path) if s.strip()])
+        """Delete a folder and repool its rules' addresses into unclassified_pool."""
+        folder_path = normalize_folder_path(folder_path)
+        fp_low = folder_path.lower()
         affected_rules = [
             r for r in self.rules
-            if r.target_folder == folder_path or (r.target_folder and r.target_folder.startswith(folder_path + "\\"))
+            if (r.target_folder or "").lower() == fp_low or (r.target_folder or "").lower().startswith(fp_low + "\\")
         ]
-
-        unclassified_fld = self.settings.get("unclassified_folder", "_Unclassified")
 
         for r in affected_rules:
             if repool_addresses:
                 self._remove_rule_no_save(r.id)
             else:
-                # Re-route to _Unclassified
-                r.target_folder = unclassified_fld
+                self._remove_rule_no_save(r.id)
 
-        # Remove from custom folders
-        custom_folders = self.settings.get("custom_folders", [])
-        self.settings["custom_folders"] = [
-            cf for cf in custom_folders
-            if cf != folder_path and not cf.startswith(folder_path + "\\")
+        self.folders = [
+            f for f in self.folders
+            if f.lower() != fp_low and not f.lower().startswith(fp_low + "\\")
         ]
 
         self._set_change_label(f"Delete folder '{folder_path}'")
         self.save()
         return len(affected_rules)
-
-    def _generate_unique_id(self, prefix: str, base: str, existing_ids: Set[str]) -> str:
-        """Generate a unique slugified ID starting with the given prefix."""
-        slug = re.sub(r"[^a-z0-9_]", "_", (base or "").lower())
-        slug = re.sub(r"_+", "_", slug).lstrip("_")
-        if slug.startswith(prefix):
-            slug = slug[len(prefix):]
-        slug = slug.strip("_")
-        if not slug:
-            slug = "new"
-        candidate_base = f"{prefix}{slug}"
-
-        if candidate_base not in existing_ids:
-            return candidate_base
-
-        suffix = 1
-        while f"{candidate_base}_{suffix}" in existing_ids:
-            suffix += 1
-        return f"{candidate_base}_{suffix}"
-
-    def generate_rule_id(self, base: str) -> str:
-        """Generate a unique slugified rule ID starting with 'rule_'."""
-        return self._generate_unique_id("rule_", base, {r.id for r in self.rules})
-
-    def generate_group_id(self, base: str) -> str:
-        """Generate a unique slugified group ID starting with 'grp_'."""
-        return self._generate_unique_id("grp_", base, set(self.groups.keys()))
-
-    def duplicate_rule(self, rule_id: str) -> Optional[RuleConfig]:
-        """Duplicate an existing rule with a unique ID and 'Copy of' name."""
-        rule = next((r for r in self.rules if r.id == rule_id), None)
-        if not rule:
-            return None
-
-        new_name = f"Copy of {rule.name}"
-        new_id = self.generate_rule_id(new_name)
-        new_rule = RuleConfig(
-            id=new_id,
-            name=new_name,
-            enabled=rule.enabled,
-            groups=list(rule.groups),
-            emails=list(rule.emails),
-            domains=list(rule.domains),
-            subject_keywords=list(rule.subject_keywords),
-            target_store=rule.target_store,
-            target_folder=rule.target_folder
-        )
-        self.rules.append(new_rule)
-        self._set_change_label(f"Duplicate rule '{rule.name}'")
-        self.save()
-        return new_rule
-
-
 
     # -----------------------------------------------------------------
     # Export / import (sharing rules with colleagues)
@@ -845,94 +686,80 @@ class YamlConfigManager:
                 store.pop("store_id", None)
         data["exported_at"] = datetime.now().isoformat(timespec="seconds")
         with open(path, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-        return {"rules": len(self.rules), "groups": len(self.groups)}
+            f.write(dump_yaml(data))
+        return {"rules": len(self.rules)}
 
     @classmethod
     def read_shared_file(cls, path: str) -> Dict[str, Any]:
-        """Parse a shared rules file. Raises ValueError when it is not a rules.yaml-style file."""
+        """Parse a shared v3 (or v2, auto-migrated) rules file."""
         with open(path, "r", encoding="utf-8") as f:
             try:
                 data = yaml.safe_load(f)
             except yaml.YAMLError as exc:
                 raise ValueError(f"Not a valid YAML file: {exc}") from exc
-        if not isinstance(data, dict) or not isinstance(data.get("rules"), list):
-            raise ValueError("This file has no 'rules' list, so it is not a rules file.")
-        for r in data["rules"]:
-            if not isinstance(r, dict) or not r.get("name"):
-                raise ValueError("Every rule in the file needs a name.")
-        return cls._parse_data(data)
+        if not isinstance(data, dict) or ("folders" not in data and "rules" not in data):
+            raise ValueError("This file has no 'folders' or 'rules' section, so it is not a rules file.")
+        if _is_v2_data(data):
+            if not isinstance(data.get("rules"), list):
+                raise ValueError("This file has no 'rules' list, so it is not a rules file.")
+            for r in data["rules"]:
+                if not isinstance(r, dict) or not r.get("name"):
+                    raise ValueError("Every rule in the file needs a name.")
+            data, _ = migrate_v2_with_warnings(data)
+        parsed = parse_folders(data)
+        return {
+            "settings": parsed.settings,
+            "stores": parsed.stores,
+            "folders": parsed.folders,
+            "rules": parsed.rules,
+            "unclassified_pool": parsed.unclassified,
+            "legacy_rule_names": parsed.legacy_rule_names,
+            "warnings": parsed.warnings,
+        }
 
     def import_config(self, path: str, mode: str = "merge") -> Dict[str, int]:
-        """Import rules, groups, pool and empty folders from a shared file.
-
-        mode 'merge': rules with the same name and folder get the incoming senders added,
-        other rules are added (with a fresh id if theirs is taken); same-id groups with the
-        same name are merged, otherwise added.
-        mode 'replace': rules, groups, pool and custom folders are replaced.
-        Local stores (PST paths) and other settings are always kept. Undo restores the
-        previous state.
-        """
+        """Import folders, rules, unclassified, and legacy_rule_names from a shared file."""
         if mode not in ("merge", "replace"):
             raise ValueError(f"Unknown import mode: {mode}")
         incoming = self.read_shared_file(path)
-        fallback_store = "active_archive" if "active_archive" in self.stores else next(iter(self.stores), "active_archive")
-        for rule in incoming["rules"]:
-            if rule.target_store not in self.stores:
-                rule.target_store = fallback_store
-        in_folders = list((incoming["settings"] or {}).get("custom_folders", []) or [])
-        summary = {"rules_added": 0, "rules_merged": 0, "groups_added": 0, "groups_merged": 0}
+        summary = {"rules_added": 0, "rules_merged": 0}
 
         if mode == "replace":
-            self.groups = incoming["groups"]
+            self.folders = incoming["folders"]
             self.rules = incoming["rules"]
             self.unclassified_pool = incoming["unclassified_pool"]
-            self.settings["custom_folders"] = in_folders
+            self.legacy_rule_names = incoming["legacy_rule_names"]
             summary["rules_added"] = len(self.rules)
-            summary["groups_added"] = len(self.groups)
         else:
-            group_id_map: Dict[str, str] = {}
-            for g_id, grp in incoming["groups"].items():
-                local = self.groups.get(g_id)
-                if local is not None and local.name.strip().lower() == grp.name.strip().lower():
-                    local.emails = sorted(set(local.emails) | set(grp.emails))
-                    local.domains = local.domains + [d for d in grp.domains if d not in local.domains]
-                    group_id_map[g_id] = g_id
-                    summary["groups_merged"] += 1
-                else:
-                    new_id = g_id if local is None else self.generate_group_id(grp.name)
-                    grp.id = new_id
-                    self.groups[new_id] = grp
-                    group_id_map[g_id] = new_id
-                    summary["groups_added"] += 1
+            for f in incoming["folders"]:
+                if f and f.lower() not in {x.lower() for x in self.folders}:
+                    self.folders.append(f)
 
             for rule in incoming["rules"]:
-                rule.groups = [group_id_map.get(g, g) for g in rule.groups]
-                key = (rule.name.strip().lower(), (rule.target_folder or "").strip().lower())
-                local = next((r for r in self.rules
-                              if (r.name.strip().lower(), (r.target_folder or "").strip().lower()) == key), None)
+                if rule.id == "rule_unclassified" or self.is_inside_unclassified(rule.target_folder or ""):
+                    continue
+                local = self.rule_for_folder(rule.target_folder)
                 if local is not None:
                     local.emails = sorted(set(local.emails) | set(rule.emails))
-                    local.domains = local.domains + [d for d in rule.domains if d not in local.domains]
-                    local.groups = local.groups + [g for g in rule.groups if g not in local.groups]
+                    local.domains = sorted(set(local.domains) | set(rule.domains))
                     local.subject_keywords = self.normalize_keywords(local.subject_keywords + rule.subject_keywords)
                     summary["rules_merged"] += 1
                 else:
-                    if not rule.id or any(r.id == rule.id for r in self.rules):
-                        rule.id = self.generate_rule_id(rule.name)
-                    self.rules.append(rule)
+                    rule.id = unique_rule_id(rule.target_folder, (r.id for r in self.rules))
+                    unc_idx = next((i for i, r in enumerate(self.rules) if r.id == "rule_unclassified"), len(self.rules))
+                    self.rules.insert(unc_idx, rule)
                     summary["rules_added"] += 1
 
             claimed = set()
             for r in self.rules:
-                claimed.update(self.get_all_emails_for_rule(r))
+                if r.id != "rule_unclassified" and not self.is_inside_unclassified(r.target_folder or ""):
+                    claimed.update(self.get_all_emails_for_rule(r))
             self.unclassified_pool = sorted(
                 (set(self.unclassified_pool) | set(incoming["unclassified_pool"])) - claimed
             )
-            folders = self.settings.setdefault("custom_folders", [])
-            for f in in_folders:
-                if f and f not in folders:
-                    folders.append(f)
+            for name in incoming.get("legacy_rule_names", []):
+                if name and name not in self.legacy_rule_names:
+                    self.legacy_rule_names.append(name)
 
         summary["duplicate_senders"] = self._count_duplicate_senders()
         self._set_change_label(f"Import '{os.path.basename(path)}' ({mode})")

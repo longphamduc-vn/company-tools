@@ -62,7 +62,10 @@ class ConflictDetector:
         for r in native_rules:
             base = extract_base_rule_name(r.get("name", ""))
             native_by_base.setdefault(base, []).append(r)
-        yaml_map = {n: r for r in self.yaml_mgr.rules for n in r.known_names()}
+        yaml_map: Dict[str, RuleConfig] = {}
+        for r in self.yaml_mgr.rules:
+            yaml_map[r.name] = r
+        legacy_set = set(self.yaml_mgr.legacy_rule_names)
 
         # 1. Check for Name Collisions and Folder Mismatches
         for r_name, r_yaml in yaml_map.items():
@@ -103,8 +106,8 @@ class ConflictDetector:
             for email in native_emails:
                 if email in yaml_sender_to_rule:
                     yaml_target_rule = yaml_sender_to_rule[email]
-                    # The same rule under its current or a former (pre auto-naming) name is no overlap
-                    if native_base_name not in yaml_rule_by_sender[email].known_names():
+                    # The same rule under its current name, or an old (legacy) copy of it, is no overlap
+                    if native_base_name != yaml_rule_by_sender[email].name and native_base_name not in legacy_set:
                         conflicts.append(RuleConflict(
                             conflict_type="SENDER_OVERLAP",
                             rule_name=f"{email} ({yaml_target_rule} vs {native_name})",
@@ -121,7 +124,8 @@ class ConflictDetector:
         # 3. Check for Untracked Legacy Outlook Rules
         for r_native in native_rules:
             r_name = r_native.get("name", "")
-            if not r_name.startswith(MANAGED_PREFIX) and extract_base_rule_name(r_name) not in yaml_map:
+            base_name = extract_base_rule_name(r_name)
+            if not r_name.startswith(MANAGED_PREFIX) and base_name not in yaml_map and base_name not in legacy_set:
                 conflicts.append(RuleConflict(
                     conflict_type="LEGACY_RULE",
                     rule_name=r_name,
@@ -152,19 +156,22 @@ class ConflictDetector:
         has_unsupported = bool(r_info.get("has_unsupported_conditions", False))
         imported_enabled = False if has_unsupported else r_info.get("enabled", True)
 
-        # Clean unique ID
-        clean_id = self.yaml_mgr.generate_rule_id(r_name)
-        new_rule = RuleConfig(
-            id=clean_id,
-            name=r_name,
-            enabled=imported_enabled,
-            emails=emails,
-            domains=domains,
-            subject_keywords=subject_keywords,
-            target_store="active_archive",
-            target_folder=folder
+        already_had_rule = self.yaml_mgr.rule_for_folder(folder) is not None
+        new_rule = self.yaml_mgr.ensure_rule_for_folder(folder)
+        for e in emails:
+            if e not in new_rule.emails:
+                new_rule.emails.append(e)
+        for d in domains:
+            if d not in new_rule.domains:
+                new_rule.domains.append(d)
+        new_rule.subject_keywords = self.yaml_mgr.normalize_keywords(
+            new_rule.subject_keywords + subject_keywords
         )
-        self.yaml_mgr.rules.append(new_rule)
+        # Only a rule created by this import may start disabled; never switch off a rule already in use
+        if not imported_enabled and not already_had_rule:
+            new_rule.enabled = False
+        if r_name and r_name != new_rule.name and r_name not in self.yaml_mgr.legacy_rule_names:
+            self.yaml_mgr.legacy_rule_names.append(r_name)
         if save:
             self.yaml_mgr.save()
         return ImportResult(

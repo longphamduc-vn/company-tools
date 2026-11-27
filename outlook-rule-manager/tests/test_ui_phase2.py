@@ -64,7 +64,7 @@ class TestUiPhase2(unittest.TestCase):
             win.update()
 
             view: RuleManagerView = win.tab_rules
-            view.tree.selection_set("rule_rule_executive")
+            view.tree.selection_set(r"rule_rule_management\executive_board\directors")
             view._on_tree_select()
             win.update()
 
@@ -85,7 +85,7 @@ class TestUiPhase2(unittest.TestCase):
                 view._save_rule_changes()
 
             reloaded = YamlConfigManager(self.config_path)
-            saved_rule = next(r for r in reloaded.rules if r.id == "rule_executive")
+            saved_rule = next(r for r in reloaded.rules if r.id == r"rule_management\executive_board\directors")
             self.assertEqual(saved_rule.subject_keywords, ["SCADA", "Alarm"])
 
             # Test Match supports optional Subject entry
@@ -110,7 +110,7 @@ class TestUiPhase2(unittest.TestCase):
                 view._save_rule_changes()
 
             reloaded2 = YamlConfigManager(self.config_path)
-            saved_rule2 = next(r for r in reloaded2.rules if r.id == "rule_executive")
+            saved_rule2 = next(r for r in reloaded2.rules if r.id == r"rule_management\executive_board\directors")
             self.assertEqual(saved_rule2.subject_keywords, ["PLC", "Breaker"])
 
             # Save button still visible at 1120x720 with keywords inside rule_cond_body
@@ -256,13 +256,12 @@ class TestUiPhase2(unittest.TestCase):
     def test_preview_compiled_rules_and_live_quota_updates(self):
         yaml_mgr = YamlConfigManager(self.config_path)
         big_rule = RuleConfig(
-            id="rule_big",
-            name="Big Vendor",
+            id=r"rule_vendors\big",
+            name="Vendors_Big",
             enabled=True,
             emails=[f"user{i:02d}@vendor.com" for i in range(41)],
             domains=["@vendor.com"],
             subject_keywords=["Quote"],
-            target_store="active_archive",
             target_folder="Vendors\\Big",
         )
         yaml_mgr.rules = [big_rule]
@@ -288,7 +287,7 @@ class TestUiPhase2(unittest.TestCase):
         created_managed = [r["name"] for r in mock_client.get_native_rules() if r["name"].startswith(MANAGED_PREFIX)]
         self.assertEqual(created_managed, preview_names)
 
-        # GUI quota updates immediately on Link/Unlink and after Save + empty/no-folder warnings
+        # GUI quota updates after Save + empty/no-folder warnings
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
         try:
             win.show_rule_details()
@@ -296,30 +295,12 @@ class TestUiPhase2(unittest.TestCase):
             view: RuleManagerView = win.tab_rules
 
             # Check initial quota display for big_rule (41 emails, 1 domain, 1 keyword -> 4 native rules)
-            view.tree.selection_set("rule_rule_big")
+            view.tree.selection_set(r"rule_rule_vendors\big")
             view._on_tree_select()
             win.update()
             quota_txt = view.lbl_quota.cget("text")
             self.assertIn("41 senders, 1 domain, 1 keyword → 4 native rules", quota_txt)
             self.assertIn("Vendors_Big (Keywords)", view.lbl_quota_subrules.cget("text"))
-
-            # Link group "executive" via modal dialog -> immediately updates to 43 senders BEFORE Save
-            view._link_group_to_rule()
-            win.update_idletasks()
-            dlg = next(w for w in view.winfo_children() if isinstance(w, tk.Toplevel))
-            modal_lst = next(w for w in dlg.winfo_children() if isinstance(w, tk.Listbox))
-            exec_idx = next(i for i in range(modal_lst.size()) if "Executive Board" in modal_lst.get(i))
-            modal_lst.selection_set(exec_idx)
-            btn_bar = next(w for w in dlg.winfo_children() if isinstance(w, ttk.Frame))
-            link_btn = next(b for b in btn_bar.winfo_children() if isinstance(b, ttk.Button) and b.cget("text") == "Link Selected")
-            link_btn.invoke()
-            win.update_idletasks()
-            self.assertIn("43 senders, 1 domain, 1 keyword → 4 native rules", view.lbl_quota.cget("text"))
-
-            # Unlink via UI method -> drops back to 41 senders immediately
-            view.lst_rule_groups.selection_set(0)
-            view._unlink_group_from_rule()
-            self.assertIn("41 senders, 1 domain, 1 keyword → 4 native rules", view.lbl_quota.cget("text"))
 
             # Remove keyword and Save -> drops to 0 keywords and 3 native rules
             view.txt_keywords.delete("1.0", tk.END)

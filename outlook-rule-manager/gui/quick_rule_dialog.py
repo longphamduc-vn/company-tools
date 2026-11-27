@@ -1,20 +1,20 @@
-"""Quick New Rule dialog: just a name and a folder (pick an existing one or type a new path)."""
+"""Quick New Rule dialog: pick an existing folder or type a new path."""
 import re
 import tkinter as tk
 from tkinter import ttk
 from typing import List, Optional, Tuple
+
+from core.models import rule_name_from_folder, outlook_rule_name  # noqa: F401  (re-exported)
 
 
 def normalize_folder_path(path: str) -> str:
     return "\\".join(s.strip() for s in re.split(r"[\\/]", path or "") if s.strip())
 
 
-from core.models import rule_name_from_folder, outlook_rule_name  # noqa: E402,F401  (re-exported)
-
-
 class QuickRuleDialog(tk.Toplevel):
     """Modal dialog. After it closes, `result` is (name, folder, scope) or None.
 
+    `name` is always derived from `folder` via rule_name_from_folder(folder).
     scope is "email" or "domain" when sender info is given, otherwise "email".
     """
 
@@ -28,7 +28,6 @@ class QuickRuleDialog(tk.Toplevel):
         sender_domain: str = "",
         blocked_folder: str = "_Unclassified",
         title: str = "New Rule",
-        auto_name: bool = True,
     ):
         super().__init__(parent)
         self.title(title)
@@ -47,34 +46,20 @@ class QuickRuleDialog(tk.Toplevel):
                 row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 8)
             )
 
-        ttk.Label(frm, text="Name:").grid(row=1, column=0, sticky=tk.W, pady=3)
-        # The name follows the folder (A\\B\\C -> A_B_C) until the user types a name
-        self._name_follows_folder = True
-        if default_folder:
-            default_name = rule_name_from_folder(default_folder)
-        self.var_name = tk.StringVar(value=default_name)
-        self.ent_name = ttk.Entry(frm, textvariable=self.var_name, width=40)
-        self.ent_name.grid(row=1, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
-        self.ent_name.bind("<Key>", self._on_name_typed)
-        self._auto_name = auto_name
-        if auto_name:
-            # Name = folder path; Outlook shows it as "[Companion] <name>"
-            self.ent_name.config(state="readonly")
-
-        ttk.Label(frm, text="Folder:").grid(row=2, column=0, sticky=tk.W, pady=3)
+        ttk.Label(frm, text="Folder:").grid(row=1, column=0, sticky=tk.W, pady=3)
         self.var_folder = tk.StringVar(value=default_folder)
         self.cbo_folder = ttk.Combobox(frm, textvariable=self.var_folder, values=self._folders, width=40)
-        self.cbo_folder.grid(row=2, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
+        self.cbo_folder.grid(row=1, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
         self.cbo_folder.bind("<KeyRelease>", self._on_folder_typed)
-        self.cbo_folder.bind("<<ComboboxSelected>>", lambda e: self._on_folder_changed())
+        self.cbo_folder.bind("<<ComboboxSelected>>", lambda e: self._update_folder_hint())
 
         self.lbl_folder_hint = ttk.Label(frm, text="", foreground="#64748b", font=("", 8))
-        self.lbl_folder_hint.grid(row=3, column=1, sticky=tk.W, padx=(8, 0))
+        self.lbl_folder_hint.grid(row=2, column=1, sticky=tk.W, padx=(8, 0))
 
         self.var_scope = tk.StringVar(value="email")
         if sender_email:
             scope_row = ttk.Frame(frm)
-            scope_row.grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=(8, 0))
+            scope_row.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(8, 0))
             ttk.Radiobutton(scope_row, text="This sender", value="email", variable=self.var_scope).pack(side=tk.LEFT)
             if sender_domain:
                 ttk.Radiobutton(
@@ -82,7 +67,7 @@ class QuickRuleDialog(tk.Toplevel):
                 ).pack(side=tk.LEFT, padx=(12, 0))
 
         btns = ttk.Frame(frm)
-        btns.grid(row=5, column=0, columnspan=2, sticky=tk.E, pady=(12, 0))
+        btns.grid(row=4, column=0, columnspan=2, sticky=tk.E, pady=(12, 0))
         ttk.Button(btns, text="Cancel", command=self.cancel).pack(side=tk.RIGHT)
         self.btn_ok = ttk.Button(btns, text="Create", style="Accent.TButton", command=self.ok)
         self.btn_ok.pack(side=tk.RIGHT, padx=(0, 6))
@@ -92,35 +77,21 @@ class QuickRuleDialog(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.cancel)
 
         self._update_folder_hint()
-        # Start where the user most likely types: the name if empty, otherwise the folder
-        target = self.ent_name if not default_name else self.cbo_folder if not default_folder else self.ent_name
-        if auto_name:
-            target = self.cbo_folder
-        target.focus_set()
-        if target is self.ent_name:
-            self.ent_name.select_range(0, tk.END)
+        self.cbo_folder.focus_set()
 
     # -- folder field ---------------------------------------------------
-    def _on_name_typed(self, event=None):
-        if event is None or event.keysym not in ("Return", "Escape", "Tab", "Shift_L", "Shift_R"):
-            self._name_follows_folder = False
-
     def _on_folder_typed(self, event=None):
         typed = self.var_folder.get().strip().lower()
         matches = [f for f in self._folders if typed in f.lower()] if typed else self._folders
         self.cbo_folder.configure(values=matches)
-        self._on_folder_changed()
-
-    def _on_folder_changed(self):
-        path = normalize_folder_path(self.var_folder.get())
-        if (self._auto_name or self._name_follows_folder) and path:
-            self.var_name.set(rule_name_from_folder(path))
         self._update_folder_hint()
 
     def _update_folder_hint(self):
         path = normalize_folder_path(self.var_folder.get())
         if not path:
             self.lbl_folder_hint.config(text="Pick a folder or type a new path (A\\B\\C).", foreground="#64748b")
+        elif self._has_underscore_segment(path):
+            self.lbl_folder_hint.config(text="Folder names cannot start with '_'.", foreground="#b91c1c")
         elif self._is_blocked(path):
             self.lbl_folder_hint.config(text="Rules cannot be created in the Unclassified folder.", foreground="#b91c1c")
         elif path.lower() in {f.lower() for f in self._folders}:
@@ -128,9 +99,13 @@ class QuickRuleDialog(tk.Toplevel):
         else:
             self.lbl_folder_hint.config(text="New folder will be created." + self._outlook_note(path), foreground="#ea580c")
 
-    def _outlook_note(self, path: str) -> str:
-        """In automatic-name mode, show the name the rule will have in Outlook."""
-        return f"  Outlook rule: {outlook_rule_name(rule_name_from_folder(path))}" if self._auto_name else ""
+    @staticmethod
+    def _outlook_note(path: str) -> str:
+        return f"  Outlook rule: {outlook_rule_name(rule_name_from_folder(path))}"
+
+    @staticmethod
+    def _has_underscore_segment(path: str) -> bool:
+        return any(seg.startswith("_") for seg in path.split("\\") if seg)
 
     def _is_blocked(self, path: str) -> bool:
         low = path.lower()
@@ -139,16 +114,11 @@ class QuickRuleDialog(tk.Toplevel):
     # -- result ---------------------------------------------------------
     def ok(self):
         folder = normalize_folder_path(self.var_folder.get())
-        if self._auto_name and folder:
-            self.var_name.set(rule_name_from_folder(folder))
-        name = self.var_name.get().strip()
-        if not name:
-            self.ent_name.focus_set()
-            return
-        if not folder or self._is_blocked(folder):
+        if not folder or self._is_blocked(folder) or self._has_underscore_segment(folder):
             self._update_folder_hint()
             self.cbo_folder.focus_set()
             return
+        name = rule_name_from_folder(folder)
         self.result = (name, folder, self.var_scope.get())
         self.destroy()
 

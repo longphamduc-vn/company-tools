@@ -74,7 +74,7 @@ class TestUiSimplifyPhaseS2(unittest.TestCase):
             )
 
             # Pending bar shows clean count without trailing " —"
-            exec_rule = next(r for r in win.yaml_mgr.rules if r.id == "rule_executive")
+            exec_rule = next(r for r in win.yaml_mgr.rules if r.id == "rule_management\\executive_board\\directors")
             triage._stage_add_to_existing_rule(triage.messages[0], exec_rule.id, match_mode="email")
             win.update()
             self.assertEqual(triage.lbl_pending_status.cget("text"), "1 pending change")
@@ -160,7 +160,7 @@ class TestUiSimplifyPhaseS2(unittest.TestCase):
                 view.menu_new.entrycget(i, "label")
                 for i in range(view.menu_new.index("end") + 1)
             ]
-            self.assertEqual(menu_labels, ["Rule", "Folder", "Subfolder", "Group"])
+            self.assertEqual(menu_labels, ["Rule", "Folder", "Subfolder"])
 
             toolbar_frame = view.mb_new.master
             # Single screen: the navigator is narrow, so Filter sits on its own row right under the toolbar
@@ -188,7 +188,7 @@ class TestUiSimplifyPhaseS2(unittest.TestCase):
                 self.assertFalse(hasattr(view, old_attr), f"{old_attr} should be removed")
 
             # Select rule_big (41 emails, 1 domain, 1 keyword)
-            view.tree.selection_set("rule_rule_big")
+            view.tree.selection_set("rule_rule_vendors\\big")
             view._on_tree_select()
             win.update()
 

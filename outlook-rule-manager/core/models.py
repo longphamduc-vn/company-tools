@@ -45,30 +45,14 @@ class StoreConfig:
 
 
 @dataclass
-class AddressGroup:
-    id: str
-    name: str
-    domains: List[str] = field(default_factory=list)
-    emails: List[str] = field(default_factory=list)
-
-
-@dataclass
 class RuleConfig:
     id: str
     name: str
     enabled: bool = True
-    groups: List[str] = field(default_factory=list)
     emails: List[str] = field(default_factory=list)
     domains: List[str] = field(default_factory=list)
     subject_keywords: List[str] = field(default_factory=list)
-    target_store: str = "active_archive"
     target_folder: str = ""
-    # Names the rule had before automatic naming; still used to recognise the user's old
-    # (unprefixed) Outlook rules of the same name as legacy copies.
-    former_names: List[str] = field(default_factory=list)
-
-    def known_names(self) -> List[str]:
-        return [self.name] + [n for n in self.former_names if n and n != self.name]
 
 
 @dataclass

@@ -32,8 +32,8 @@ class SyncEngine:
         self.outlook = outlook_client
 
     def find_legacy_rules(self) -> List[str]:
-        """Return unprefixed Outlook rule names matching YAML rules or split parts."""
-        yaml_names = {n for r in self.yaml_mgr.rules for n in r.known_names()}
+        """Return unprefixed Outlook rule names matching YAML rules or legacy_rule_names."""
+        yaml_names = {r.name for r in self.yaml_mgr.rules} | set(self.yaml_mgr.legacy_rule_names)
         legacy = []
         for native_rule in self.outlook.get_native_rules():
             r_name = native_rule.get("name", "")
@@ -42,22 +42,6 @@ class SyncEngine:
             if extract_base_rule_name(r_name) in yaml_names:
                 legacy.append(r_name)
         return legacy
-
-    def _effective_rule(self, rule: RuleConfig, group_ids: Optional[List[str]] = None) -> RuleConfig:
-        """Return rule or a shallow view using overridden linked group IDs."""
-        if group_ids is None:
-            return rule
-        return RuleConfig(
-            id=rule.id,
-            name=rule.name,
-            enabled=rule.enabled,
-            groups=list(group_ids),
-            emails=rule.emails,
-            domains=rule.domains,
-            subject_keywords=rule.subject_keywords,
-            target_store=rule.target_store,
-            target_folder=rule.target_folder,
-        )
 
     def _resolve_rule_conditions(self, rule: RuleConfig) -> Tuple[List[str], List[str], List[str]]:
         """Collect resolved (emails, domains, subject_keywords) for a rule."""
@@ -142,17 +126,15 @@ class SyncEngine:
 
         return False, "NO MATCH"
 
-    def preview_compiled_rules(self, rule: RuleConfig, group_ids: Optional[List[str]] = None) -> List[str]:
+    def preview_compiled_rules(self, rule: RuleConfig) -> List[str]:
         """Return ordered native Outlook rule names that push_to_outlook will create for rule."""
-        effective = self._effective_rule(rule, group_ids)
-        entries, _ = self._compile_single_rule(effective)
+        entries, _ = self._compile_single_rule(rule)
         return [entry["name"] for entry in entries]
 
-    def get_rule_quota_summary(self, rule: RuleConfig, group_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    def get_rule_quota_summary(self, rule: RuleConfig) -> Dict[str, Any]:
         """Return condition counts and compiled Outlook sub-rule preview for a rule."""
-        effective = self._effective_rule(rule, group_ids)
-        emails, domains, keywords = self._resolve_rule_conditions(effective)
-        entries, skip_reason = self._compile_single_rule(effective)
+        emails, domains, keywords = self._resolve_rule_conditions(rule)
+        entries, skip_reason = self._compile_single_rule(rule)
         return {
             "email_count": len(emails),
             "domain_count": len(domains),
@@ -200,7 +182,9 @@ class SyncEngine:
                     keyword_subrules.append(entry)
 
         compiled_rules = email_subrules + domain_subrules + keyword_subrules + unclassified_subrules
-        legacy_base_names = [n for r in self.yaml_mgr.rules for n in r.known_names()]
+        legacy_base_names = list(
+            dict.fromkeys([r.name for r in self.yaml_mgr.rules] + list(self.yaml_mgr.legacy_rule_names))
+        )
 
         success, msg = self.outlook.save_native_rules(
             compiled_rules,

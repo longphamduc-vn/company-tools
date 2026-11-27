@@ -122,7 +122,7 @@ class TestUiSimplifyPhaseS3(unittest.TestCase):
                 for b in _find_widgets(win.inspector_host, ttk.Button)  # widgets live in the shared right pane
                 if b.cget("style") == "Danger.TButton"
             }
-            self.assertTrue({"Delete Rule", "Delete Folder", "Delete Group", "Clear Entire Pool"} <= danger_texts)
+            self.assertTrue({"Delete Rule", "Delete Folder", "Clear Entire Pool"} <= danger_texts)
             # Style is defined centrally
             self.assertEqual(str(ttk.Style(win).lookup("Danger.TButton", "foreground")), styles.DANGER)
         finally:

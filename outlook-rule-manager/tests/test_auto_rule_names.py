@@ -4,7 +4,7 @@ import shutil
 import tempfile
 import unittest
 
-from core.models import MANAGED_PREFIX, RuleConfig, outlook_rule_name, rule_name_from_folder
+from core.models import MANAGED_PREFIX, outlook_rule_name, rule_name_from_folder
 from core.outlook_client import WindowsOutlookClient
 from core.sync_engine import SyncEngine
 from core.yaml_manager import YamlConfigManager
@@ -23,48 +23,35 @@ class TestAutoRuleNames(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def _rule(self, rule_id):
-        return next(r for r in self.y.rules if r.id == rule_id)
+    def _rule_for(self, folder):
+        return self.y.rule_for_folder(folder)
 
     def test_helpers(self):
         self.assertEqual(rule_name_from_folder("Team\\Part/Unit"), "Team_Part_Unit")
         self.assertEqual(outlook_rule_name("Team_Part"), f"{MANAGED_PREFIX}Team_Part")
 
     def test_names_follow_folders_on_load_and_old_names_are_remembered(self):
-        exec_rule = self._rule("rule_executive")
+        exec_rule = self._rule_for("Management\\Executive_Board\\Directors")
         self.assertEqual(exec_rule.name, "Management_Executive_Board_Directors")
-        self.assertEqual(exec_rule.former_names, ["Executive Board"])
+        self.assertIn("Executive Board", self.y.legacy_rule_names)
         # The Unclassified fallback keeps its own name
-        self.assertEqual(self._rule("rule_unclassified").name, "[Unclassified]")
-        # former_names survive a save + reload
+        unc = next(r for r in self.y.rules if r.id == "rule_unclassified")
+        self.assertEqual(unc.name, "[Unclassified]")
+        # legacy_rule_names survive a save + reload
         self.y.save()
         reloaded = YamlConfigManager(self.config_path)
-        self.assertEqual(next(r for r in reloaded.rules if r.id == "rule_executive").former_names,
-                         ["Executive Board"])
-
-    def test_second_rule_in_folder_gets_suffix(self):
-        folder = self._rule("rule_executive").target_folder
-        self.assertEqual(self.y.auto_rule_name(folder), "Management_Executive_Board_Directors_2")
-        self.y.rules.append(RuleConfig(id="rule_b", name="anything", target_folder=folder))
-        self.y.save()
-        self.assertEqual(self._rule("rule_b").name, "Management_Executive_Board_Directors_2")
+        self.assertIn("Executive Board", reloaded.legacy_rule_names)
 
     def test_moving_or_renaming_folder_renames_rule(self):
-        self.y.move_rule_to_folder("rule_suppliers", "Vendors\\Omron")
-        self.assertEqual(self._rule("rule_suppliers").name, "Vendors_Omron")
+        suppliers = self._rule_for("Purchasing_Team\\Vendor_Part\\Omron_Unit")
+        ok, _ = self.y.move_rule_to_folder(suppliers.id, "Vendors\\Omron")
+        self.assertTrue(ok)
+        self.assertEqual(self._rule_for("Vendors\\Omron").name, "Vendors_Omron")
         ok, _ = self.y.rename_folder_hierarchy("Vendors", "Suppliers")
         self.assertTrue(ok)
-        rule = self._rule("rule_suppliers")
+        rule = self._rule_for("Suppliers\\Omron")
+        self.assertIsNotNone(rule)
         self.assertEqual(rule.name, "Suppliers_Omron")
-        self.assertIn("Omron Equipment", rule.former_names)
-        self.assertIn("Vendors_Omron", rule.former_names)
-
-    def test_auto_naming_can_be_switched_off(self):
-        self.y.settings["auto_rule_names"] = False
-        rule = self._rule("rule_executive")
-        rule.name = "Board"
-        self.y.save()
-        self.assertEqual(self._rule("rule_executive").name, "Board")
 
     def test_sync_renames_outlook_rule_and_still_finds_old_hand_made_rule(self):
         store_path = self.y.stores["active_archive"].file_path

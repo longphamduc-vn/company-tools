@@ -323,8 +323,11 @@ class FakeNamespace:
 
 
 def managed_name(yaml_mgr, name: str, suffix: str = "") -> str:
-    """Outlook name of the YAML rule that is (or was, before automatic naming) called `name`."""
+    """Outlook name of the YAML rule that is called `name` (or targets folder `name`)."""
     from core.models import MANAGED_PREFIX
 
-    rule = next(r for r in yaml_mgr.rules if name in r.known_names())
-    return f"{MANAGED_PREFIX}{rule.name}{suffix}"
+    rule = next((r for r in yaml_mgr.rules if r.name == name), None)
+    if rule is None:
+        rule = yaml_mgr.rule_for_folder(name)
+    rule_name = rule.name if rule is not None else name
+    return f"{MANAGED_PREFIX}{rule_name}{suffix}"

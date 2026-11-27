@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import yaml
 
-from core.conflict_detector import ConflictDetector, RuleConflict
-from core.models import AddressGroup, EmailMessage, RuleConfig
+from core.config_format import parse_folders
+from core.models import EmailMessage, RuleConfig
 from core.outlook_client import MockOutlookClient
 from core.sync_engine import SyncEngine
 from core.yaml_manager import YamlConfigManager
@@ -54,7 +54,7 @@ class TestPhase4YamlIntegrityAndIds(unittest.TestCase):
         # First backup holds state BEFORE the first deletion
         with open(backups[0], "r", encoding="utf-8") as f:
             first_backup_data = yaml.safe_load(f)
-        self.assertEqual([r["id"] for r in first_backup_data["rules"]], initial_rule_ids)
+        self.assertEqual([r.id for r in parse_folders(first_backup_data).rules], initial_rule_ids)
 
     def test_prune_backups_with_mixed_legacy_and_microsecond_formats(self):
         self.yaml_mgr.settings["backup_versions"] = 3
@@ -110,14 +110,8 @@ class TestPhase4YamlIntegrityAndIds(unittest.TestCase):
 
     def test_delete_folder_hierarchy_five_rules_creates_single_backup(self):
         for i in range(5):
-            self.yaml_mgr.rules.append(
-                RuleConfig(
-                    id=f"rule_batch_{i}",
-                    name=f"Batch {i}",
-                    emails=[f"batch{i}@vendor.com"],
-                    target_folder=r"BulkTeam\SubPart",
-                )
-            )
+            r = self.yaml_mgr.ensure_rule_for_folder(rf"BulkTeam\SubPart\F{i}")
+            r.emails = [f"batch{i}@vendor.com"]
         self.yaml_mgr.save()
 
         # Clear backups created during setup
@@ -131,111 +125,29 @@ class TestPhase4YamlIntegrityAndIds(unittest.TestCase):
         for i in range(5):
             self.assertIn(f"batch{i}@vendor.com", self.yaml_mgr.unclassified_pool)
 
-    def test_generate_rule_id_slugification_and_uniqueness_across_call_sites(self):
-        # Slug normalization & empty fallback
-        self.assertEqual(self.yaml_mgr.generate_rule_id(""), "rule_new")
-        self.assertEqual(self.yaml_mgr.generate_rule_id("!!!   ---"), "rule_new")
-        self.assertEqual(self.yaml_mgr.generate_rule_id("rule_"), "rule_new")
-        self.assertEqual(self.yaml_mgr.generate_rule_id("A___B  !! C"), "rule_a_b_c")
-        self.assertEqual(self.yaml_mgr.generate_rule_id("rule_executive"), "rule_executive_1")
-
-        # Deleting a rule then duplicating never reuses or collides with existing IDs
-        dup1 = self.yaml_mgr.duplicate_rule("rule_executive")
-        self.assertIsNotNone(dup1)
-        self.yaml_mgr.remove_rule_and_repool("rule_executive")
-        dup2 = self.yaml_mgr.duplicate_rule(dup1.id)
-        self.assertIsNotNone(dup2)
-        all_ids = [r.id for r in self.yaml_mgr.rules]
-        self.assertEqual(len(all_ids), len(set(all_ids)))
-
-        # ConflictDetector.resolve_import_to_yaml generates unique IDs on repeated imports
-        detector = ConflictDetector(self.yaml_mgr, MockOutlookClient())
-        conflict = RuleConflict(
-            conflict_type="LEGACY_RULE",
-            rule_name="Legacy Vendor",
-            yaml_rule=None,
-            outlook_rule_info={"name": "Legacy Vendor", "target_folder": "Archive\\Vendors", "emails": ["a@v.com"]},
-        )
-        self.assertTrue(detector.resolve_import_to_yaml(conflict))
-        self.assertTrue(detector.resolve_import_to_yaml(conflict))
-        imported_ids = [r.id for r in self.yaml_mgr.rules if "Legacy Vendor" in r.known_names()]
-        self.assertEqual(imported_ids, ["rule_legacy_vendor", "rule_legacy_vendor_1"])
-
-    def test_delete_group_and_add_sender_fallback_behavior(self):
-        # Rule referencing two groups where the first does not exist
-        self.yaml_mgr.groups["secondary"] = AddressGroup(id="secondary", name="Secondary", domains=[], emails=[])
-        self.yaml_mgr.rules.append(
-            RuleConfig(
-                id="rule_multi_grp",
-                name="Multi Group",
-                groups=["executive", "secondary"],
-                target_folder="Test",
-            )
-        )
-
-        # Delete executive WITH repool=False -> detached from rules, emails not repooled
-        ok = self.yaml_mgr.delete_group("executive", repool_emails=False)
-        self.assertTrue(ok)
-        self.assertNotIn("executive", self.yaml_mgr.groups)
-        for r in self.yaml_mgr.rules:
-            self.assertNotIn("executive", r.groups)
-        self.assertNotIn("ceo@company.com", self.yaml_mgr.unclassified_pool)
-
-        # Rule formerly using 'executive' can still receive senders without KeyError
-        self.yaml_mgr.add_sender_to_rule_or_group("new.exec@company.com", "rule_executive")
-        exec_rule = next(r for r in self.yaml_mgr.rules if r.id == "rule_executive")
-        self.assertIn("new.exec@company.com", exec_rule.emails)
-
-        # Dangling first group skips to first valid group ('secondary')
-        multi_rule = next(r for r in self.yaml_mgr.rules if r.id == "rule_multi_grp")
-        multi_rule.groups = ["ghost_group", "secondary"]
-        self.yaml_mgr.add_sender_to_rule_or_group("fallback@partner.com", "rule_multi_grp")
-        self.assertIn("fallback@partner.com", self.yaml_mgr.groups["secondary"].emails)
-
-        # Delete 'secondary' WITH repool_emails=True
-        ok2 = self.yaml_mgr.delete_group("secondary", repool_emails=True)
-        self.assertTrue(ok2)
-        self.assertIn("fallback@partner.com", self.yaml_mgr.unclassified_pool)
-        self.assertNotIn("secondary", multi_rule.groups)
-
-        # When only nonexistent group remains, add_sender writes directly to rule without error
-        self.yaml_mgr.add_sender_to_rule_or_group("direct@partner.com", "rule_multi_grp")
-        self.assertIn("direct@partner.com", multi_rule.emails)
-
     def test_domain_normalization_on_load_and_add_and_dryrun_matching(self):
         with open(self.config_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
-        data["groups"]["engineering"]["domains"] = ["  @TechPartner.COM  ", "sub.Vendor.org", "", "   "]
-        data["rules"].append({
-            "id": "rule_case_domain",
-            "name": "Case Domain",
-            "enabled": True,
-            "groups": [],
-            "emails": [],
-            "domains": ["@Vendor.com", "  Supplier.IO ", ""],
-            "subject_keywords": [],
-            "target_store": "active_archive",
-            "target_folder": "Vendors",
-        })
+        data["folders"]["Vendors"] = ["@Vendor.com", "  @Supplier.IO "]
         with open(self.config_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(data, f, sort_keys=False)
 
         mgr = YamlConfigManager(self.config_path)
-        self.assertEqual(mgr.groups["engineering"].domains, ["@techpartner.com", "@sub.vendor.org"])
-        dom_rule = next(r for r in mgr.rules if r.id == "rule_case_domain")
-        self.assertEqual(dom_rule.domains, ["@vendor.com", "@supplier.io"])
+        dom_rule = mgr.rule_for_folder("Vendors")
+        self.assertIsNotNone(dom_rule)
+        self.assertEqual(dom_rule.domains, ["@supplier.io", "@vendor.com"])
 
         # @Vendor.com in YAML matches x@vendor.com
         engine = SyncEngine(mgr, MockOutlookClient())
         matched, _ = engine.match_message("x@vendor.com", "Hello")
         self.assertIsNotNone(matched)
-        self.assertEqual(matched.id, "rule_case_domain")
+        self.assertEqual(matched.id, dom_rule.id)
 
         # add_sender_to_rule_or_group normalizes domains, skips empty, leaves emails unchanged
-        mgr.add_sender_to_rule_or_group("  Alice@NewCorp.COM ", "rule_case_domain", as_domain=True)
-        mgr.add_sender_to_rule_or_group("NoAtSign.ORG", "rule_case_domain", as_domain=True)
-        mgr.add_sender_to_rule_or_group("   ", "rule_case_domain", as_domain=True)
-        mgr.add_sender_to_rule_or_group("  Bob@ExactMail.COM ", "rule_case_domain", as_domain=False)
+        mgr.add_sender_to_rule_or_group("  Alice@NewCorp.COM ", dom_rule.id, as_domain=True)
+        mgr.add_sender_to_rule_or_group("NoAtSign.ORG", dom_rule.id, as_domain=True)
+        mgr.add_sender_to_rule_or_group("   ", dom_rule.id, as_domain=True)
+        mgr.add_sender_to_rule_or_group("  Bob@ExactMail.COM ", dom_rule.id, as_domain=False)
         self.assertIn("@newcorp.com", dom_rule.domains)
         self.assertIn("@noatsign.org", dom_rule.domains)
         self.assertEqual(dom_rule.emails, ["bob@exactmail.com"])
@@ -263,70 +175,6 @@ class TestPhase4GuiIntegration(unittest.TestCase):
             pass
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def test_rule_manager_add_rule_uses_unique_id_and_delete_group_askyesnocancel(self):
-        view = RuleManagerView(self.root, self.yaml_mgr, self.sync_engine)
-        view.pack()
-
-        # Creating a rule, deleting another, then creating again must never collide
-        view.selected_folder_path = r"Management\Executive_Board\Directors"
-        view._add_rule_in_selected_folder()
-        self.yaml_mgr.remove_rule_and_repool("rule_executive")
-        view._add_rule_in_selected_folder()
-        rule_ids = [r.id for r in self.yaml_mgr.rules]
-        self.assertEqual(len(rule_ids), len(set(rule_ids)))
-
-        # Group deletion askyesnocancel: Cancel (None) keeps group
-        view.selected_group = self.yaml_mgr.groups["engineering"]
-        with patch("gui.rule_manager_view.messagebox.askyesnocancel", return_value=None):
-            view._delete_selected_group()
-        self.assertIn("engineering", self.yaml_mgr.groups)
-
-        # No (False) deletes without repooling
-        view.selected_group = self.yaml_mgr.groups["engineering"]
-        with patch("gui.rule_manager_view.messagebox.askyesnocancel", return_value=False):
-            view._delete_selected_group()
-        self.assertNotIn("engineering", self.yaml_mgr.groups)
-        self.assertNotIn("eng1@company.com", self.yaml_mgr.unclassified_pool)
-
-        # Yes (True) deletes and repools emails
-        view.selected_group = self.yaml_mgr.groups["suppliers"]
-        with patch("gui.rule_manager_view.messagebox.askyesnocancel", return_value=True):
-            view._delete_selected_group()
-        self.assertNotIn("suppliers", self.yaml_mgr.groups)
-        self.assertIn("sales@vendor.com", self.yaml_mgr.unclassified_pool)
-
-    def test_triage_generates_unique_ids_at_commit_time_for_duplicate_staged_names(self):
-        view = TriageView(self.root, self.yaml_mgr, self.outlook, self.sync_engine)
-        msg1 = EmailMessage(
-            entry_id="M1",
-            subject="Sub 1",
-            sender_name="Alice",
-            sender_email="alice@omron.com",
-            received_time=datetime.now(),
-        )
-        msg2 = EmailMessage(
-            entry_id="M2",
-            subject="Sub 2",
-            sender_name="Bob",
-            sender_email="bob@omron.com",
-            received_time=datetime.now(),
-        )
-        view._stage_create_new_rule(msg1)
-        view._stage_create_new_rule(msg2)
-
-        # Both actions stage with deferred ID and identical suggested rule_name ("Omron")
-        self.assertEqual([a.rule_name for a in view.staged_actions], ["Omron", "Omron"])
-        self.assertEqual([a.rule_id for a in view.staged_actions], ["", ""])
-
-        with patch("gui.triage_view.messagebox.askyesno", return_value=True), \
-             patch("gui.triage_view.messagebox.showinfo"):
-            # Bypass conflict prompt by having no conflicts or answering No to inspector then Yes to apply
-            with patch.object(view.conflict_detector, "detect_conflicts", return_value=[]):
-                view._apply_all_staged()
-
-        omron_rules = [r for r in self.yaml_mgr.rules if "Omron" in r.known_names()]
-        self.assertEqual([r.id for r in omron_rules], ["rule_omron", "rule_omron_1"])
-
     def test_triage_commit_35_add_to_rule_actions_creates_only_one_backup(self):
         self.yaml_mgr.settings["backup_versions"] = 30
         self.yaml_mgr.save()
@@ -337,12 +185,13 @@ class TestPhase4GuiIntegration(unittest.TestCase):
         self.assertEqual(len(before_backups), 1)
         pre_commit_backup = before_backups[0]
 
+        exec_id = r"rule_management\executive_board\directors"
         view = TriageView(self.root, self.yaml_mgr, self.outlook, self.sync_engine)
         view.staged_actions = [
             StagedAction(
                 action_type="add_to_rule",
-                rule_name="Executive Board",
-                rule_id="rule_executive",
+                rule_name="Management_Executive_Board_Directors",
+                rule_id=exec_id,
                 target_folder=r"Management\Executive_Board\Directors",
                 sender_email=f"exec{i}@company.com",
                 sender_domain="@company.com",
@@ -365,38 +214,30 @@ class TestPhase4GuiIntegration(unittest.TestCase):
         self.assertEqual(len(after_backups), len(before_backups) + 1)
         self.assertTrue(os.path.exists(pre_commit_backup))
 
-        exec_rule = next(r for r in self.yaml_mgr.rules if r.id == "rule_executive")
+        exec_rule = next(r for r in self.yaml_mgr.rules if r.id == exec_id)
         all_exec_emails = self.yaml_mgr.get_all_emails_for_rule(exec_rule)
         for i in range(35):
             self.assertIn(f"exec{i}@company.com", all_exec_emails)
 
-    def test_rule_manager_save_rule_and_group_forms_normalize_domains(self):
+    def test_rule_manager_save_rule_form_normalizes_domains(self):
         view = RuleManagerView(self.root, self.yaml_mgr, self.sync_engine)
         view.pack()
 
+        exec_id = r"rule_management\executive_board\directors"
         # Select rule and enter unnormalized domains in single-mode inspector
-        view.tree.selection_set("rule_rule_executive")
+        view.tree.selection_set(f"rule_{exec_id}")
         view._on_tree_select()
         view.txt_domains.delete("1.0", tk.END)
         view.txt_domains.insert(tk.END, "Vendor.com\n  @Omron.COM \n\n   \n")
         view._save_rule_changes()
 
-        exec_rule = next(r for r in self.yaml_mgr.rules if r.id == "rule_executive")
+        exec_rule = next(r for r in self.yaml_mgr.rules if r.id == exec_id)
         self.assertEqual(exec_rule.domains, ["@omron.com", "@vendor.com"])
 
         # Save a second set of unnormalized domains via the same single-mode box
-        view.tree.selection_set("rule_rule_executive")
+        view.tree.selection_set(f"rule_{exec_id}")
         view._on_tree_select()
         view.txt_domains.delete("1.0", tk.END)
         view.txt_domains.insert(tk.END, "Partner.ORG\n  \n")
         view._save_rule_changes()
         self.assertEqual(exec_rule.domains, ["@partner.org"])
-
-        # Select group and enter unnormalized domains
-        view.tree.selection_set("grp_suppliers")
-        view._on_tree_select()
-        view.txt_group_domains.delete("1.0", tk.END)
-        view.txt_group_domains.insert(tk.END, "Vendor.com\n  @Omron.COM \n\n")
-        view._save_group_changes()
-
-        self.assertEqual(self.yaml_mgr.groups["suppliers"].domains, ["@omron.com", "@vendor.com"])

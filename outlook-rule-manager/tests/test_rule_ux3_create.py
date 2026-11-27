@@ -80,7 +80,7 @@ class TestCreateRulesFast(unittest.TestCase):
         msg = next(m for m in self.tv.messages if m.entry_id == "MSG_004")
         self.tv.drop_messages_on_target(self._folder_iid(folder), [msg])
         action = self.tv.staged_actions[0]
-        self.assertEqual((action.action_type, action.rule_id), ("add_to_rule", "rule_suppliers"))
+        self.assertEqual((action.action_type, action.rule_id), ("add_to_rule", r"rule_purchasing_team\vendor_part\omron_unit"))
 
     def test_drop_on_folder_reuses_rule_with_same_name(self):
         folder = "Management\\Executive_Board\\Directors"
@@ -88,7 +88,7 @@ class TestCreateRulesFast(unittest.TestCase):
         self.tv.messages.append(m)
         self.tv.drop_messages_on_target(self._folder_iid(folder), [m])
         action = self.tv.staged_actions[0]
-        self.assertEqual((action.action_type, action.rule_id), ("add_to_rule", "rule_executive"))
+        self.assertEqual((action.action_type, action.rule_id), ("add_to_rule", r"rule_management\executive_board\directors"))
 
     def test_drop_on_unclassified_folder_is_refused(self):
         msg = next(m for m in self.tv.messages if m.entry_id == "MSG_004")
@@ -122,30 +122,19 @@ class TestCreateRulesFast(unittest.TestCase):
         rv = self.win.tab_rules
         self.win.show_rule_details()
         self.win.update()
-        rv.selected_folder_path = "Management\Executive_Board\Directors"
+        # Folder already has a rule -> selects it and shows toast
+        rv.selected_folder_path = r"Management\Executive_Board\Directors"
+        before = len(self.y.rules)
         rv._add_rule_in_selected_folder()
         self.win.update()
-        # The folder already has a rule, so the new one gets _2
-        self.assertEqual(rv.var_rule_name.get(), "Management_Executive_Board_Directors_2")
-        self.assertEqual(str(rv.ent_rule_name.cget("state")), "readonly")
-        self.assertEqual(rv.lbl_rule_prefix.cget("text"), "[Companion]")
-        # A typed name never sticks: names always follow the folder
-        rv.selected_rule.name = "Board Secretary"
-        self.y.save()
-        self.assertFalse(any(r.name == "Board Secretary" for r in self.y.rules))
+        self.assertEqual(len(self.y.rules), before)
+        self.assertIn("already has a rule", rv.lbl_toast.cget("text"))
 
-    def test_rules_tab_manual_names_when_auto_naming_is_off(self):
-        self.y.settings["auto_rule_names"] = False
-        rv = self.win.tab_rules
-        rv.selected_folder_path = "Management\Executive_Board\Directors"
-        with patch.object(rv, "_focus_new_rule_name"):
-            rv._add_rule_in_selected_folder()
-        self.assertEqual(str(rv.ent_rule_name.cget("state")), "normal")
-        rv.ent_rule_name.delete(0, "end")
-        rv.ent_rule_name.insert(0, "Board Secretary")
-        self.assertTrue(rv.ent_rule_name.bind("<Return>"))
-        rv._save_rule_changes()
-        self.assertTrue(any(r.name == "Board Secretary" for r in self.y.rules))
+        # Empty folder -> creates rule named after folder with read-only label
+        rv.selected_folder_path = "Purchasing_Team"
+        rv._add_rule_in_selected_folder()
+        self.win.update()
+        self.assertEqual(rv.lbl_rule_name.cget("text"), "[Companion] Purchasing_Team")
 
     def test_rules_tab_new_rule_refused_inside_unclassified(self):
         rv = self.win.tab_rules
@@ -189,35 +178,27 @@ class TestQuickRuleDialog(unittest.TestCase):
 
     def test_auto_name_dialog_name_is_folder_and_locked(self):
         d = self._dialog(default_folder="Team\\A")
-        self.assertEqual(str(d.ent_name.cget("state")), "readonly")
-        self.assertEqual(d.var_name.get(), "Team_A")
         d.var_folder.set("Team\\B")
         d._on_folder_typed()
-        self.assertEqual(d.var_name.get(), "Team_B")
+        self.assertIn("[Companion] Team_B", d.lbl_folder_hint.cget("text"))
         d.ok()
         self.assertEqual(d.result, ("Team_B", "Team\\B", "email"))
 
-    def test_name_follows_folder_until_typed(self):
-        d = self._dialog(default_folder="Team\\A", auto_name=False)
-        self.assertEqual(d.var_name.get(), "Team_A")
-        d.var_folder.set("Team\\B\\Sub")
-        d._on_folder_typed()
-        self.assertEqual(d.var_name.get(), "Team_B_Sub")
-        d._on_name_typed(SimpleNamespace(keysym="x"))
-        d.var_name.set("Alice")
-        d.var_folder.set("Other")
-        d._on_folder_typed()
-        self.assertEqual(d.var_name.get(), "Alice")
-        d.destroy()
-
     def test_ok_returns_normalized_result_and_validates(self):
-        d = self._dialog(default_folder="Team\\A", auto_name=False)
-        d._on_name_typed(SimpleNamespace(keysym="x"))
-        d.var_name.set("Alice")
+        d = self._dialog(default_folder="Team\\A")
         d.var_scope.set("domain")
         d.var_folder.set(" Team / C ")
         d.ok()
-        self.assertEqual(d.result, ("Alice", "Team\\C", "domain"))
+        self.assertEqual(d.result, ("Team_C", "Team\\C", "domain"))
+
+    def test_underscore_folder_rejected(self):
+        d = self._dialog()
+        d.var_folder.set("_X")
+        d.ok()
+        self.assertIsNone(d.result)
+        self.assertTrue(d.winfo_exists())
+        self.assertIn("_", d.lbl_folder_hint.cget("text"))
+        d.destroy()
 
     def test_blocked_or_empty_folder_keeps_dialog_open(self):
         d = self._dialog()

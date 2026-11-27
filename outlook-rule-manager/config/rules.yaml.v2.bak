@@ -1,0 +1,85 @@
+version: '2.0'
+settings:
+  auto_split_threshold: 40
+  unclassified_folder: _Unclassified
+  backup_versions: 30
+  custom_folders: []
+stores:
+  active_archive:
+    name: Archive 2025
+    file_path: D:\Outlook_Data\longp_Archive_2025.pst
+groups:
+  executive:
+    name: Executive Board
+    domains: []
+    emails:
+    - ceo@company.com
+  engineering:
+    name: Engineering SCADA Team
+    domains:
+    - '@techpartner.com'
+    emails:
+    - eng1@company.com
+    - eng2@company.com
+  suppliers:
+    name: Equipment Suppliers
+    domains:
+    - '@omron.com'
+    - '@mitsubishi.com'
+    emails:
+    - coo@company.com
+    - lead.scada@company.com
+    - sales@vendor.com
+unclassified_pool:
+- former.contractor@vendor.com
+rules:
+- id: rule_executive
+  name: Executive_Board_Directors
+  enabled: true
+  groups:
+  - executive
+  emails: []
+  domains: []
+  subject_keywords: []
+  target_store: active_archive
+  target_folder: Executive_Board\Directors
+  former_names:
+  - Executive Board
+  - Management_Executive_Board_Directors
+- id: rule_engineering
+  name: Engineering_Team_SCADA_Part_PLC_Unit
+  enabled: true
+  groups:
+  - engineering
+  emails: []
+  domains: []
+  subject_keywords: []
+  target_store: active_archive
+  target_folder: Engineering_Team\SCADA_Part\PLC_Unit
+  former_names:
+  - SCADA PLC Maintenance
+- id: rule_suppliers
+  name: Executive_Board_Omron_Unit
+  enabled: true
+  groups:
+  - suppliers
+  emails: []
+  domains: []
+  subject_keywords: []
+  target_store: active_archive
+  target_folder: Executive_Board\Omron_Unit
+  former_names:
+  - Omron Equipment
+  - Purchasing_Team_Vendor_Part_Omron_Unit
+  - Purchasing_Team_Omron_Unit
+  - Engineering_Team_SCADA_Part_Omron_Unit
+  - Engineering_Team_Omron_Unit
+- id: rule_unclassified
+  name: '[Unclassified]'
+  enabled: true
+  groups: []
+  emails: []
+  domains: []
+  subject_keywords: []
+  target_store: active_archive
+  target_folder: _Unclassified

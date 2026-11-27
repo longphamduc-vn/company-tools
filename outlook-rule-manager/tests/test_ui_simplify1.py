@@ -105,7 +105,7 @@ class TestUiSimplifyPhaseS1(unittest.TestCase):
             stranger = next(
                 m for m in triage.messages if triage.sync_engine.match_message(m.sender_email, m.subject)[0] is None
             )
-            exec_rule = next(r for r in win.yaml_mgr.rules if r.id == "rule_executive")
+            exec_rule = next(r for r in win.yaml_mgr.rules if r.id == "rule_management\\executive_board\\directors")
             triage._stage_add_to_existing_rule(stranger, exec_rule.id, match_mode="email")
             win.update()
             staged_vals = triage.tree_inbox.item(stranger.entry_id, "values")
@@ -146,18 +146,18 @@ class TestUiSimplifyPhaseS1(unittest.TestCase):
                 controls["filter_var"].set("Directors")
                 win.update_idletasks()
                 self.assertEqual(len(controls["filtered_rules"]), 1)
-                self.assertEqual(controls["filtered_rules"][0].id, "rule_executive")
+                self.assertEqual(controls["filtered_rules"][0].id, "rule_management\\executive_board\\directors")
                 controls["scope_var"].set("domain")
                 controls["ok_button"].invoke()
             finally:
                 if dlg.winfo_exists():
                     dlg.destroy()
             self.assertIsNotNone(get_result())
-            self.assertEqual(get_result()[0].id, "rule_executive")
+            self.assertEqual(get_result()[0].id, "rule_management\\executive_board\\directors")
             self.assertEqual(get_result()[1], "domain")
 
             # 2. Full _menu_add_to_rule -> 1 action staged -> pending bar shows "1 pending change"
-            exec_rule = next(r for r in win.yaml_mgr.rules if r.id == "rule_executive")
+            exec_rule = next(r for r in win.yaml_mgr.rules if r.id == "rule_management\\executive_board\\directors")
             with patch.object(triage, "_prompt_rule_selection", return_value=(exec_rule, "domain")):
                 triage._menu_add_to_rule()
             win.update()
@@ -206,12 +206,12 @@ class TestUiSimplifyPhaseS1(unittest.TestCase):
 
             self.assertFalse(bool(triage.pending_bar.winfo_ismapped()))
             reloaded = YamlConfigManager(self.config_path)
-            saved_exec = next(r for r in reloaded.rules if r.id == "rule_executive")
+            saved_exec = next(r for r in reloaded.rules if r.id == "rule_management\\executive_board\\directors")
             self.assertIn("rep@acme.example", reloaded.get_all_emails_for_rule(saved_exec))
 
             # Clear button empties multiple pending changes and hides bar
-            triage._stage_add_to_existing_rule(triage.messages[0], "rule_engineering")
-            triage._stage_add_to_existing_rule(triage.messages[1], "rule_suppliers")
+            triage._stage_add_to_existing_rule(triage.messages[0], "rule_engineering_team\\scada_part\\plc_unit")
+            triage._stage_add_to_existing_rule(triage.messages[1], "rule_purchasing_team\\vendor_part\\omron_unit")
             win.update()
             self.assertEqual(triage.lbl_pending_status.cget("text"), "2 pending changes")
             triage.btn_pending_clear.invoke()
@@ -228,7 +228,7 @@ class TestUiSimplifyPhaseS1(unittest.TestCase):
             triage = win.tab_triage
             msg = triage.messages[0]
             triage.selected_message = msg
-            suppliers_rule = next(r for r in win.yaml_mgr.rules if r.id == "rule_suppliers")
+            suppliers_rule = next(r for r in win.yaml_mgr.rules if r.id == "rule_purchasing_team\\vendor_part\\omron_unit")
 
             with patch.object(triage, "_prompt_rule_selection", return_value=(suppliers_rule, "email")) as mock_pick, \
                  patch.object(triage.outlook, "move_message", return_value=True) as mock_move, \

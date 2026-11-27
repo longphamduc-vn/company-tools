@@ -1,0 +1,8 @@
+folders:
+  Management: {}
+  Engineering:
+    - em@company.com
+    Pol_Process:              # → thư mục Engineering\Pol_Process, rule [Companion] Engineering_Pol_Process
+      - employees1@company.com
+      - employees2@company.com
+      - "@techpartner.com"    # domain

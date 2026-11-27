@@ -5,10 +5,14 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from core.models import AddressGroup, RuleConfig
+from core.models import RuleConfig
 from core.outlook_client import MockOutlookClient
 from core.sync_engine import SyncEngine
 from core.yaml_manager import YamlConfigManager
+
+EXEC_ID = r"rule_management\executive_board\directors"
+ENG_ID = r"rule_engineering_team\scada_part\plc_unit"
+SUP_ID = r"rule_purchasing_team\vendor_part\omron_unit"
 
 
 class TestAssignSenderCore(unittest.TestCase):
@@ -28,64 +32,47 @@ class TestAssignSenderCore(unittest.TestCase):
     def _holders(self, email):
         return [r.id for r in self.y.rules if email in self.y.get_all_emails_for_rule(r)]
 
-    def test_move_sender_out_of_single_use_group(self):
-        # lead.scada@ is in group 'engineering', used only by rule_engineering
-        preview = self.y.preview_sender_move("lead.scada@company.com", "rule_suppliers")
+    def test_move_sender_between_rules_preview_and_result(self):
+        preview = self.y.preview_sender_move("lead.scada@company.com", SUP_ID)
         self.assertEqual(preview["from_rules"], ["Engineering_Team_SCADA_Part_PLC_Unit"])
-        self.assertEqual(preview["shared_groups"], [])
 
-        result = self.y.assign_sender("lead.scada@company.com", "rule_suppliers")
+        result = self.y.assign_sender("lead.scada@company.com", SUP_ID)
         self.assertEqual(result["moved_from"], ["Engineering_Team_SCADA_Part_PLC_Unit"])
-        self.assertEqual(self._holders("lead.scada@company.com"), ["rule_suppliers"])
+        self.assertEqual(self._holders("lead.scada@company.com"), [SUP_ID])
         matched, _ = self.engine.match_message("lead.scada@company.com", "x")
-        self.assertEqual(matched.id, "rule_suppliers")
+        self.assertEqual(matched.id, SUP_ID)
 
     def test_move_direct_email_between_rules(self):
-        self._rule("rule_executive").emails.append("boss@x.com")
-        self.y.assign_sender("boss@x.com", "rule_engineering")
-        self.assertNotIn("boss@x.com", self._rule("rule_executive").emails)
-        self.assertEqual(self._holders("boss@x.com"), ["rule_engineering"])
+        self._rule(EXEC_ID).emails.append("boss@x.com")
+        self.y.assign_sender("boss@x.com", ENG_ID)
+        self.assertNotIn("boss@x.com", self._rule(EXEC_ID).emails)
+        self.assertEqual(self._holders("boss@x.com"), [ENG_ID])
 
     def test_move_domain_removes_domain_from_old_rule_only(self):
-        self.y.assign_sender("@omron.com", "rule_engineering", as_domain=True)
-        self.assertNotIn("@omron.com", self.y.get_all_domains_for_rule(self._rule("rule_suppliers")))
-        self.assertIn("@omron.com", self.y.get_all_domains_for_rule(self._rule("rule_engineering")))
-        # emails in the old rule are untouched
-        self.assertIn("sales@vendor.com", self.y.get_all_emails_for_rule(self._rule("rule_suppliers")))
+        self.y.assign_sender("@omron.com", ENG_ID, as_domain=True)
+        self.assertNotIn("@omron.com", self.y.get_all_domains_for_rule(self._rule(SUP_ID)))
+        self.assertIn("@omron.com", self.y.get_all_domains_for_rule(self._rule(ENG_ID)))
+        self.assertIn("sales@vendor.com", self.y.get_all_emails_for_rule(self._rule(SUP_ID)))
 
     def test_exact_email_beats_domain_without_removing_domain(self):
-        self.y.assign_sender("ha.pham@omron.com", "rule_engineering")
-        self.assertIn("@omron.com", self.y.get_all_domains_for_rule(self._rule("rule_suppliers")))
+        self.y.assign_sender("ha.pham@omron.com", ENG_ID)
+        self.assertIn("@omron.com", self.y.get_all_domains_for_rule(self._rule(SUP_ID)))
         matched, _ = self.engine.match_message("ha.pham@omron.com", "x")
-        self.assertEqual(matched.id, "rule_engineering")
+        self.assertEqual(matched.id, ENG_ID)
         other, _ = self.engine.match_message("other@omron.com", "x")
-        self.assertEqual(other.id, "rule_suppliers")
-
-    def test_shared_group_is_untouched_unless_allowed(self):
-        self._rule("rule_unclassified").groups.append("executive")  # 'executive' now shared by 2 rules
-        preview = self.y.preview_sender_move("ceo@company.com", "rule_engineering")
-        self.assertEqual(preview["shared_groups"], [("Executive Board", ["Management_Executive_Board_Directors", "[Unclassified]"])])
-
-        result = self.y.assign_sender("ceo@company.com", "rule_engineering")
-        self.assertEqual(result["blocked_by_groups"], [("Executive Board", ["Management_Executive_Board_Directors", "[Unclassified]"])])
-        self.assertIn("ceo@company.com", self.y.groups["executive"].emails)
-
-        result = self.y.assign_sender("ceo@company.com", "rule_engineering", remove_from_shared_groups=True)
-        self.assertNotIn("ceo@company.com", self.y.groups["executive"].emails)
-        self.assertEqual(self._holders("ceo@company.com"), ["rule_engineering"])
+        self.assertEqual(other.id, SUP_ID)
 
     def test_assign_removes_from_unclassified_pool_and_is_idempotent(self):
-        self.y.assign_sender("former.contractor@vendor.com", "rule_engineering")
+        self.y.assign_sender("former.contractor@vendor.com", ENG_ID)
         self.assertNotIn("former.contractor@vendor.com", self.y.unclassified_pool)
-        self.y.assign_sender("former.contractor@vendor.com", "rule_engineering")
-        self.assertEqual(self.y.groups["engineering"].emails.count("former.contractor@vendor.com"), 1)
+        self.y.assign_sender("former.contractor@vendor.com", ENG_ID)
+        self.assertEqual(self._rule(ENG_ID).emails.count("former.contractor@vendor.com"), 1)
 
     def test_detach_for_new_rule(self):
-        self.y.rules.append(RuleConfig(id="rule_new", name="New", emails=["eng1@company.com"], target_folder="X"))
-        moved, blocked = self.y.detach_sender("eng1@company.com", except_rule_id="rule_new")
+        self.y.rules.append(RuleConfig(id="rule_x", name="X", emails=["eng1@company.com"], target_folder="X"))
+        moved = self.y.detach_sender("eng1@company.com", except_rule_id="rule_x")
         self.assertEqual(moved, ["Engineering_Team_SCADA_Part_PLC_Unit"])
-        self.assertEqual(blocked, [])
-        self.assertEqual(self._holders("eng1@company.com"), ["rule_new"])
+        self.assertEqual(self._holders("eng1@company.com"), ["rule_x"])
 
 
 class TestMoveSenderThroughInbox(unittest.TestCase):
@@ -109,20 +96,15 @@ class TestMoveSenderThroughInbox(unittest.TestCase):
             pass
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def _apply(self, shared_answer=False):
-        def _answer(title, *_a, **_k):
-            if title == "Shared Address Groups":
-                return shared_answer
-            return title == "Apply Batch Changes"
-
-        with patch("gui.triage_view.messagebox.askyesno", side_effect=_answer) as ask, \
+    def _apply(self):
+        with patch("gui.triage_view.messagebox.askyesno", return_value=True) as ask, \
                 patch("gui.triage_view.messagebox.showinfo"), patch("gui.triage_view.messagebox.showwarning"):
             self.tv._apply_all_staged()
         return ask
 
     def test_preview_then_apply_moves_sender(self):
         msg = next(m for m in self.tv.messages if m.entry_id == "MSG_001")  # lead.scada@ -> SCADA rule today
-        self.tv.drop_messages_on_target("rule_rule_suppliers", [msg])
+        self.tv.drop_messages_on_target(f"rule_{SUP_ID}", [msg])
         self.assertEqual(self.tv.staged_actions[0].moved_from, ["Engineering_Team_SCADA_Part_PLC_Unit"])
         self.assertIn("(from Engineering_Team_SCADA_Part_PLC_Unit)", self.tv.tree_inbox.set("MSG_001", "WillGoTo"))
         promised = self.tv.staged_actions[0].target_folder
@@ -130,25 +112,6 @@ class TestMoveSenderThroughInbox(unittest.TestCase):
         self._apply()
         matched, _ = self.win.sync_engine.match_message(msg.sender_email, msg.subject)
         self.assertEqual(matched.target_folder, promised)
-        self.assertEqual(self.tv.last_apply_mismatches, [])
-
-    def test_shared_group_answer_no_reports_mismatch(self):
-        y = self.win.yaml_mgr
-        next(r for r in y.rules if r.id == "rule_unclassified").groups.append("executive")
-        msg = next(m for m in self.tv.messages if m.entry_id == "MSG_003")  # coo@company.com
-        self.tv.drop_messages_on_target("rule_rule_engineering", [msg])
-        ask = self._apply(shared_answer=False)
-        titles = [c.args[0] for c in ask.call_args_list]
-        self.assertEqual(titles.count("Shared Address Groups"), 1)
-        self.assertEqual(len(self.tv.last_apply_mismatches), 1)
-        self.assertIn("coo@company.com", self.tv.last_apply_mismatches[0])
-
-    def test_shared_group_answer_yes_moves(self):
-        y = self.win.yaml_mgr
-        next(r for r in y.rules if r.id == "rule_unclassified").groups.append("executive")
-        msg = next(m for m in self.tv.messages if m.entry_id == "MSG_003")
-        self.tv.drop_messages_on_target("rule_rule_engineering", [msg])
-        self._apply(shared_answer=True)
         self.assertEqual(self.tv.last_apply_mismatches, [])
 
 

@@ -49,6 +49,7 @@ class MainWindow(tk.Tk):
         self.bind_all("<Control-z>", self._on_ctrl_z, add="+")
         self.bind_all("<Control-Z>", self._on_ctrl_z, add="+")
         self._refresh_undo_buttons()
+        self._report_load_warnings()
 
     def _apply_style(self):
         styles.apply_styles(self)
@@ -192,7 +193,7 @@ class MainWindow(tk.Tk):
         return "break"
 
     def undo_last(self) -> Optional[str]:
-        """Undo the last saved change to rules.yaml (rules, folders, groups, pool)."""
+        """Undo the last saved change to rules.yaml (rules, folders, pool)."""
         if not self.yaml_mgr.can_undo():
             self.tab_rules._show_toast("Nothing to undo.")
             return None
@@ -229,7 +230,7 @@ class MainWindow(tk.Tk):
             )
 
     def _build_workspace(self):
-        """Single screen: Rules navigator | Mail list | Details (mail reader OR rule/folder/group editor)."""
+        """Single screen: Rules navigator | Mail list | Details (mail reader OR rule/folder editor)."""
         self.workspace = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
         self.workspace.pack(fill=tk.BOTH, expand=True, padx=4, pady=(4, 0))
 
@@ -298,7 +299,7 @@ class MainWindow(tk.Tk):
             pass
 
     def show_mail_details(self):
-        """Right pane: the selected mail (asks first if a rule/group form has unsaved edits)."""
+        """Right pane: the selected mail (asks first if a rule form has unsaved edits)."""
         if self.details_mode == "mail":
             return
         if self.details_mode == "rule" and not self.tab_rules.confirm_pending_changes(reset_if_discard=True):
@@ -308,7 +309,7 @@ class MainWindow(tk.Tk):
         self.details_mode = "mail"
 
     def show_rule_details(self):
-        """Right pane: the editor for the rule/folder/group selected in the navigator."""
+        """Right pane: the editor for the rule/folder selected in the navigator."""
         if self.details_mode == "rule":
             return
         self.reader_host.pack_forget()
@@ -415,13 +416,33 @@ class MainWindow(tk.Tk):
             return
         self.destroy()
 
+    def _report_load_warnings(self):
+        warnings = getattr(self.yaml_mgr, "load_warnings", []) or []
+        if not warnings:
+            return
+        for w in warnings:
+            print(f"[WARN] {w}")
+        shown = warnings[:3]
+        more = len(warnings) - len(shown)
+        summary = "; ".join(shown)
+        if more > 0:
+            summary += f" (+{more} more)"
+        if hasattr(self, "tab_rules"):
+            self.tab_rules._show_toast(f"Config warnings: {summary}", error=True)
+
     def _reload_yaml(self):
         if not self.tab_rules.confirm_pending_changes(reset_if_discard=True):
             return
-        self.yaml_mgr.load()
+        try:
+            self.yaml_mgr.load()
+        except ValueError as exc:
+            # The file is left as it is and the rules already loaded stay in use
+            messagebox.showerror("rules.yaml has an error", f"{exc}\n\nFix the file and reload again.")
+            return
         self._refresh_footer()
         self.tab_triage.refresh_inbox()
         self.tab_rules.refresh_all()
+        self._report_load_warnings()
         messagebox.showinfo("Reloaded", "Successfully reloaded configuration from rules.yaml.")
 
     # --- sharing --------------------------------------------------------
@@ -452,10 +473,9 @@ class MainWindow(tk.Tk):
         frm.pack(fill=tk.BOTH, expand=True)
         ttk.Label(
             frm,
-            text=(f"'{filename}' has {pluralize_count(len(preview['rules']), 'rule')} and "
-                  f"{pluralize_count(len(preview['groups']), 'group')}.\n\n"
-                  "Merge: add its rules and senders to yours (same name + folder = merged).\n"
-                  "Replace: your rules, groups and folders become exactly the file's.\n\n"
+            text=(f"'{filename}' has {pluralize_count(len(preview['rules']), 'rule')}.\n\n"
+                  "Merge: add its rules and senders to yours (same folder = merged).\n"
+                  "Replace: your rules and folders become exactly the file's.\n\n"
                   "Your PST paths are kept either way. Undo (Ctrl+Z) reverts the import."),
             justify=tk.LEFT,
         ).pack(anchor=tk.W)
@@ -525,7 +545,7 @@ class MainWindow(tk.Tk):
             return
         confirm = messagebox.askyesno(
             "Sync to Outlook",
-            "This will apply all rules and groups from rules.yaml directly into Outlook native rules.\n\n"
+            "This will apply all rules from rules.yaml directly into Outlook native rules.\n\n"
             "Proceed?",
             icon=messagebox.QUESTION
         )

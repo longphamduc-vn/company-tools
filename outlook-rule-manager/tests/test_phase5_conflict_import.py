@@ -154,7 +154,8 @@ class TestPhase5NativeRuleInspectionAndResolveWarnings(unittest.TestCase):
         self.assertTrue(res.has_unsupported_conditions)
         self.assertEqual(res.unresolved_recipients, ["Old User"])
 
-        imported = next(r for r in self.yaml_mgr.rules if "Imported Multi" in r.known_names())
+        imported = self.yaml_mgr.rule_for_folder(r"Team\Part\Unit")
+        self.assertIsNotNone(imported)
         self.assertFalse(imported.enabled)
         self.assertEqual(imported.target_folder, r"Team\Part\Unit")
         self.assertEqual(imported.emails, ["a@vendor.com"])
@@ -177,14 +178,47 @@ class TestPhase5NativeRuleInspectionAndResolveWarnings(unittest.TestCase):
         res = detector.resolve_import_to_yaml(combo_conflict)
         self.assertTrue(res.has_unsupported_conditions)
 
-        imported = next(r for r in self.yaml_mgr.rules if "Combo Import" in r.known_names())
+        imported = self.yaml_mgr.rule_for_folder("Partner")
         self.assertFalse(imported.enabled)
 
         ok, msg = self.sync_engine.push_to_outlook()
         self.assertTrue(ok, msg)
         by_name = {r.Name: r for r in self.default_store.GetRules()}
-        self.assertFalse(by_name[managed_name(self.yaml_mgr, "Combo Import")].Enabled)
-        self.assertFalse(by_name[managed_name(self.yaml_mgr, "Combo Import", " (Keywords)")].Enabled)
+        self.assertFalse(by_name[f"{MANAGED_PREFIX}Partner"].Enabled)
+        self.assertFalse(by_name[f"{MANAGED_PREFIX}Partner (Keywords)"].Enabled)
+
+    def test_import_never_disables_a_rule_already_in_use(self):
+        folder = next(r.target_folder for r in self.yaml_mgr.rules if r.id != "rule_unclassified")
+        existing = self.yaml_mgr.rule_for_folder(folder)
+        self.assertTrue(existing.enabled)
+        detector = ConflictDetector(self.yaml_mgr, self.outlook)
+        conflict = RuleConflict(
+            conflict_type="LEGACY_RULE", rule_name="Partly supported", yaml_rule=None,
+            outlook_rule_info={
+                "name": "Partly supported", "enabled": True,
+                "target_folder": "\\\\Archive 2025\\" + folder,
+                "emails": ["extra@vendor.com"], "has_unsupported_conditions": True,
+            },
+        )
+        res = detector.resolve_import_to_yaml(conflict)
+        self.assertTrue(res.imported)
+        merged = self.yaml_mgr.rule_for_folder(folder)
+        self.assertIs(merged, existing)
+        self.assertTrue(merged.enabled)
+        self.assertIn("extra@vendor.com", merged.emails)
+
+    def test_old_copy_of_a_rule_is_not_reported_as_sender_overlap(self):
+        rule = next(r for r in self.yaml_mgr.rules if r.emails and r.id != "rule_unclassified")
+        self.yaml_mgr.legacy_rule_names.append("My Old Hand Rule")
+        old = FakeRule("My Old Hand Rule", enabled=True)
+        old.Conditions.From.Enabled = True
+        old.Conditions.From.Recipients.Add(rule.emails[0])
+        old.Actions.MoveToFolder.Enabled = True
+        old.Actions.MoveToFolder.Folder = FakeFolder("X", FolderPath=r"\\Archive 2025\X")
+        self.default_store.GetRules()._rules.append(old)
+        conflicts = ConflictDetector(self.yaml_mgr, self.outlook).detect_conflicts()
+        self.assertFalse([c for c in conflicts if c.conflict_type == "SENDER_OVERLAP"
+                          and "My Old Hand Rule" in c.rule_name])
 
     def test_save_native_rules_collects_unresolved_recipient_warnings(self):
         # Case 1: ResolveAll returns False with unresolved recipient
@@ -355,7 +389,7 @@ class TestPhase5ConflictDialogExecution(unittest.TestCase):
         self.assertIn("Clean Legacy", mock_ask.call_args[0][1])
         remaining_names = {r.Name for r in self.default_store.GetRules()}
         self.assertNotIn("Clean Legacy", remaining_names)
-        self.assertIn(managed_name(self.yaml_mgr, "Clean Legacy"), remaining_names)
+        self.assertIn(managed_name(self.yaml_mgr, "Vendors_Clean"), remaining_names)
         self.assertIn("Imported to YAML: 1", mock_info.call_args[0][1])
 
     def test_all_problematic_imports_do_not_ask_to_delete_and_warn_user(self):
@@ -471,9 +505,9 @@ class TestPhase5ConflictDialogExecution(unittest.TestCase):
         self.assertIn("Problem Import Rule", remaining)
         self.assertIn("Executive Board", remaining)
         # Managed rules: Clean Import Rule enabled, Problem Import Rule disabled
-        self.assertTrue(remaining[managed_name(self.yaml_mgr, "Clean Import Rule")].Enabled)
-        self.assertFalse(remaining[managed_name(self.yaml_mgr, "Problem Import Rule")].Enabled)
-        self.assertFalse(remaining[managed_name(self.yaml_mgr, "Problem Import Rule", " (Keywords)")].Enabled)
+        self.assertTrue(remaining[managed_name(self.yaml_mgr, "Vendors_Clean")].Enabled)
+        self.assertFalse(remaining[managed_name(self.yaml_mgr, "Vendors_Prob")].Enabled)
+        self.assertFalse(remaining[managed_name(self.yaml_mgr, "Vendors_Prob", " (Keywords)")].Enabled)
 
         # Verify MockOutlookClient also respects remove_legacy_names
         mock = MockOutlookClient()

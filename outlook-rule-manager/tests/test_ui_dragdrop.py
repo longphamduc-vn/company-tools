@@ -10,6 +10,8 @@ from core.outlook_client import MockOutlookClient
 from gui.main_window import MainWindow
 
 CTRL = 0x0004
+EXEC_ID = r"rule_management\executive_board\directors"
+SUP_ID = r"rule_purchasing_team\vendor_part\omron_unit"
 
 
 class TestInboxDragDrop(unittest.TestCase):
@@ -43,8 +45,6 @@ class TestInboxDragDrop(unittest.TestCase):
         x_root, y_root, y_local = self._row_root_xy(tree, inbox_iid)
         current = tree.selection()
         self.tv._on_drag_press(SimpleNamespace(x=5, y=y_local, x_root=x_root, y_root=y_root, state=state))
-        # Mimic Treeview's class binding: a plain press selects only the pressed row
-        # (our handler restores a multi-selection when the drag actually starts)
         if inbox_iid not in current or len(current) > 1:
             tree.selection_set(inbox_iid)
             self.win.update()
@@ -62,17 +62,17 @@ class TestInboxDragDrop(unittest.TestCase):
 
     # tests ---------------------------------------------------------------
     def test_navigator_resolves_rules_folders_and_root(self):
-        self.assertEqual(self.rv.resolve_drop_iid("rule_rule_suppliers"), ("rule", "rule_suppliers"))
+        self.assertEqual(self.rv.resolve_drop_iid(f"rule_{SUP_ID}"), ("rule", SUP_ID))
         fld = next(i for i, p in self.rv.folder_nodes_map.items() if p == "Purchasing_Team")
         self.assertEqual(self.rv.resolve_drop_iid(fld), ("folder", "Purchasing_Team"))
         self.assertEqual(self.rv.resolve_drop_iid("__HIERARCHY__"), ("new", None))
-        self.assertIsNone(self.rv.resolve_drop_iid("grp_engineering"))
+        self.assertIsNone(self.rv.resolve_drop_iid("__POOL__"))
 
     def test_drag_one_email_onto_rule_stages_sender(self):
-        self._drag("MSG_004", self._rule_xy("rule_suppliers"))
+        self._drag("MSG_004", self._rule_xy(SUP_ID))
         self.assertEqual(len(self.tv.staged_actions), 1)
         action = self.tv.staged_actions[0]
-        self.assertEqual((action.action_type, action.rule_id, action.match_mode), ("add_to_rule", "rule_suppliers", "email"))
+        self.assertEqual((action.action_type, action.rule_id, action.match_mode), ("add_to_rule", SUP_ID, "email"))
         self.assertEqual(action.sender_email, "sato@sato-automation.jp")
         self.assertTrue(self.tv.pending_bar.winfo_ismapped())
         self.assertTrue(str(self.tv.tree_inbox.set("MSG_004", "WillGoTo")).startswith("* "))
@@ -80,17 +80,17 @@ class TestInboxDragDrop(unittest.TestCase):
         # Ghost window and hover cleaned up
         self.assertIsNone(self.tv._drag_ghost)
         self.assertFalse(self.tv._drag_active)
-        self.assertNotIn("drop_hover", self.rv.tree.item("rule_rule_suppliers", "tags"))
+        self.assertNotIn("drop_hover", self.rv.tree.item(f"rule_{SUP_ID}", "tags"))
 
     def test_ctrl_drop_stages_whole_domain(self):
-        self._drag("MSG_004", self._rule_xy("rule_suppliers"), state=CTRL)
+        self._drag("MSG_004", self._rule_xy(SUP_ID), state=CTRL)
         self.assertEqual(self.tv.staged_actions[0].match_mode, "domain")
         self.assertEqual(self.tv.staged_actions[0].sender_domain, "@sato-automation.jp")
 
     def test_drag_multi_selection_stages_all_and_keeps_selection(self):
         self.tv.tree_inbox.selection_set(("MSG_004", "MSG_005"))
         self.win.update()
-        self._drag("MSG_005", self._rule_xy("rule_executive"))
+        self._drag("MSG_005", self._rule_xy(EXEC_ID))
         staged = sorted(a.message_id for a in self.tv.staged_actions)
         self.assertEqual(staged, ["MSG_004", "MSG_005"])
         self.assertEqual(set(self.tv.tree_inbox.selection()), {"MSG_004", "MSG_005"})
@@ -115,13 +115,8 @@ class TestInboxDragDrop(unittest.TestCase):
         self.assertEqual(self.tv.staged_actions, [])
         self.assertIsNone(self.tv._drag_ghost)
 
-    def test_drop_on_group_node_is_ignored(self):
-        grp_xy = self._row_root_xy(self.rv.tree, "grp_engineering", "#0")[:2]
-        self._drag("MSG_004", grp_xy)
-        self.assertEqual(self.tv.staged_actions, [])
-
     def test_apply_after_drop_writes_sender_into_yaml_and_refreshes_tree(self):
-        self._drag("MSG_004", self._rule_xy("rule_suppliers"))
+        self._drag("MSG_004", self._rule_xy(SUP_ID))
 
         def _answer(title, *_args, **_kwargs):
             return title == "Apply Batch Changes"
@@ -129,13 +124,13 @@ class TestInboxDragDrop(unittest.TestCase):
         with patch("gui.triage_view.messagebox.askyesno", side_effect=_answer), \
                 patch("gui.triage_view.messagebox.showinfo"):
             self.tv._apply_all_staged()
-        rule = next(r for r in self.win.yaml_mgr.rules if r.id == "rule_suppliers")
+        rule = next(r for r in self.win.yaml_mgr.rules if r.id == SUP_ID)
         self.assertIn("sato@sato-automation.jp", self.win.yaml_mgr.get_all_emails_for_rule(rule))
-        self.assertEqual(self.rv.tree.set("rule_rule_suppliers", "Details"), "2 senders, 2 domains")
+        self.assertEqual(self.rv.tree.set(f"rule_{SUP_ID}", "Details"), "2 senders, 2 domains")
 
     def test_clicks_switch_right_pane_between_mail_and_rule(self):
         self.assertEqual(self.win.details_mode, "mail")
-        self.rv.tree.selection_set("rule_rule_suppliers")
+        self.rv.tree.selection_set(f"rule_{SUP_ID}")
         self.rv._on_tree_select()
         self.rv._notify_item_activated()
         self.win.update()

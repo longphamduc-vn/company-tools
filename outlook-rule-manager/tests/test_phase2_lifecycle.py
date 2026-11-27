@@ -288,7 +288,7 @@ class TestPhase2LifecycleAndReconcile(unittest.TestCase):
         self.assertTrue(rules_by_name["SCADA PLC Maintenance (Part 1)"].Enabled)
         self.assertIn("SCADA PLC Maintenance (Part 1)", msg)
 
-        self.assertIn(managed_name(self.yaml_mgr, "Executive Board"), rules_by_name)
+        self.assertIn(managed_name(self.yaml_mgr, "Management_Executive_Board_Directors"), rules_by_name)
 
         # find_legacy_rules lists both unprefixed legacy rules matching YAML
         self.assertEqual(
@@ -302,7 +302,7 @@ class TestPhase2LifecycleAndReconcile(unittest.TestCase):
         remaining_names = {r.Name for r in self.default_store.GetRules()}
         self.assertNotIn("Executive Board", remaining_names)
         self.assertNotIn("SCADA PLC Maintenance (Part 1)", remaining_names)
-        self.assertIn(managed_name(self.yaml_mgr, "Executive Board"), remaining_names)
+        self.assertIn(managed_name(self.yaml_mgr, "Management_Executive_Board_Directors"), remaining_names)
 
     def test_conflict_detector_does_not_flag_split_rules_as_legacy_or_overlap(self):
         # Push managed rules including a split rule (> 40 emails)
@@ -369,7 +369,7 @@ class TestPhase2LifecycleAndReconcile(unittest.TestCase):
         self.assertIn("Executive Board", second_prompt)
         mock_info.assert_called_once()
         self.assertNotIn("Executive Board", {r.Name for r in self.default_store.GetRules()})
-        self.assertIn(managed_name(self.yaml_mgr, "Executive Board"), {r.Name for r in self.default_store.GetRules()})
+        self.assertIn(managed_name(self.yaml_mgr, "Management_Executive_Board_Directors"), {r.Name for r in self.default_store.GetRules()})
 
     def test_duplicate_managed_rules_keep_first_and_remove_extras_without_touching_duplicate_user_rules(self):
         # Two managed rules with same name + two unprefixed user rules with same name

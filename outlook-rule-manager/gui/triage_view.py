@@ -533,13 +533,11 @@ class TriageView(ttk.Frame):
             if not folder or self.yaml_mgr.is_inside_unclassified(folder):
                 self.show_panel_status("New rules cannot be created in this folder.", error=True)
                 return 0
-            in_folder = [r for r in self.yaml_mgr.rules
-                         if (r.target_folder or "").lower() == folder.lower()]
+            existing = self.yaml_mgr.rule_for_folder(folder)
+            mode = "domain" if whole_domain else "email"
             for msg in messages:
-                if len(in_folder) == 1:
-                    self._stage_add_to_existing_rule(
-                        msg, in_folder[0].id, match_mode="domain" if whole_domain else "email", refresh=False
-                    )
+                if existing is not None:
+                    self._stage_add_to_existing_rule(msg, existing.id, match_mode=mode, refresh=False)
                 else:
                     self._stage_new_rule_in_folder(msg, rule_name_from_folder(folder), folder, whole_domain)
             self._populate_inbox_table()
@@ -986,7 +984,6 @@ class TriageView(ttk.Frame):
             sender_domain=sender_domain,
             blocked_folder=self.yaml_mgr.unclassified_folder(),
             title="New Rule",
-            auto_name=self.yaml_mgr.auto_rule_names,
         )
         if not result:
             return
@@ -1167,78 +1164,22 @@ class TriageView(ttk.Frame):
         store = self.yaml_mgr.stores.get("active_archive")
         store_path = store.file_path if store else ""
 
-        # Senders that also sit in address groups shared by several rules: ask once for the whole batch
-        shared_lines = []
-        for action in self.staged_actions:
-            preview = self.yaml_mgr.preview_sender_move(
-                action.sender_value, action.rule_id or None, as_domain=(action.match_mode == "domain")
-            )
-            for grp_name, users in preview["shared_groups"]:
-                shared_lines.append(f"• {action.sender_value} — group '{grp_name}' (used by {', '.join(users)})")
-        remove_from_shared = False
-        if shared_lines:
-            remove_from_shared = bool(messagebox.askyesno(
-                "Shared Address Groups",
-                "These senders are also in groups shared by several rules:\n\n"
-                + "\n".join(shared_lines)
-                + "\n\nRemove them from those groups too?\n"
-                "(No = keep them there; they may keep going to the old rule.)",
-            ))
-
         # 1. Update YAML (one Undo step for the whole batch)
         self.yaml_mgr.next_change_label = f"Apply {pluralize_count(count, 'inbox change')}"
         for action in self.staged_actions:
-            if action.action_type == "create_rule" and action.merge_same_name:
-                # Several emails dropped on the same folder/name -> one rule, not duplicates
-                same = next(
-                    (r for r in self.yaml_mgr.rules
-                     if r.name.strip().lower() == action.rule_name.strip().lower()
-                     and (r.target_folder or "").lower() == (action.target_folder or "").lower()),
-                    None,
-                )
-                if same is not None:
-                    self.yaml_mgr.assign_sender(
-                        action.sender_value, same.id, as_domain=(action.match_mode == "domain"),
-                        remove_from_shared_groups=remove_from_shared, save=False,
-                    )
-                    if action.message_id and action.target_folder:
-                        self.outlook.move_message(action.message_id, action.target_folder, store_path)
-                    continue
-
             if action.action_type == "create_rule":
-                new_id = self.yaml_mgr.generate_rule_id(action.rule_name)
-
-                emails = [action.sender_email] if action.match_mode == "email" else []
-                domains = [action.sender_domain] if action.match_mode == "domain" else []
-
-                new_r = RuleConfig(
-                    id=new_id,
-                    name=action.rule_name,
-                    enabled=True,
-                    groups=[],
-                    emails=emails,
-                    domains=domains,
-                    subject_keywords=[],
-                    target_store="active_archive",
-                    target_folder=action.target_folder
-                )
-                self.yaml_mgr.rules.append(new_r)
-                # A sender lives in one rule: take it out of the rules that held it before
-                self.yaml_mgr.detach_sender(
+                rule = self.yaml_mgr.ensure_rule_for_folder(action.target_folder)
+                self.yaml_mgr.assign_sender(
                     action.sender_value,
+                    rule.id,
                     as_domain=(action.match_mode == "domain"),
-                    except_rule_id=new_id,
-                    remove_from_shared_groups=remove_from_shared,
+                    save=False,
                 )
-                if action.sender_email in self.yaml_mgr.unclassified_pool:
-                    self.yaml_mgr.unclassified_pool.remove(action.sender_email)
-
             elif action.action_type == "add_to_rule":
                 self.yaml_mgr.assign_sender(
                     action.sender_value,
                     action.rule_id,
                     as_domain=(action.match_mode == "domain"),
-                    remove_from_shared_groups=remove_from_shared,
                     save=False,
                 )
 
