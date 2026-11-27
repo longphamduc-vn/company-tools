@@ -540,8 +540,35 @@ class MainWindow(tk.Tk):
             text += f" {pluralize_count(summary['duplicate_senders'], 'sender')} in more than one rule - see Check Rule Conflicts."
         self.tab_rules._show_toast(text, error=bool(summary["duplicate_senders"]))
 
+    def _ensure_active_store_ready(self) -> bool:
+        """Check the active archive before syncing; offer to open it or to go to Rollover."""
+        ok, msg = self.sync_engine.check_active_store()
+        if ok:
+            return True
+        info = self.sync_engine.active_store_status()
+        if info.get("status") == "not_open":
+            if not messagebox.askyesno(
+                "Archive PST Not Open", msg + "\n\nOpen it now?", icon=messagebox.WARNING
+            ):
+                return False
+            opened, result = self.outlook.open_pst(info.get("path", ""))
+            if not opened:
+                messagebox.showerror("Could Not Open PST", result)
+                return False
+            self._refresh_footer()
+            return True
+        if messagebox.askyesno(
+            "Archive PST Not Found",
+            msg + "\n\nOpen Yearly Rollover to choose another store?",
+            icon=messagebox.WARNING,
+        ):
+            self._open_rollover_dialog()
+        return False
+
     def _sync_to_outlook(self):
         if not self.tab_rules.confirm_pending_changes(reset_if_discard=True):
+            return
+        if not self._ensure_active_store_ready():
             return
         confirm = messagebox.askyesno(
             "Sync to Outlook",

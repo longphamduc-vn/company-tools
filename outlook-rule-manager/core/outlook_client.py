@@ -50,6 +50,20 @@ def _match_store_exact(stores, identifier: str, get_path, get_name):
     return None
 
 
+def _diagnose_store(found: bool, identifier: str, mounted: List[Dict[str, str]]) -> Dict[str, Any]:
+    """Classify why a store identifier does or does not resolve (see BaseOutlookClient.diagnose_store)."""
+    ident = (identifier or "").strip()
+    if not ident:
+        status = "default"
+    elif found:
+        status = "ok"
+    elif os.path.isfile(ident):
+        status = "not_open"
+    else:
+        status = "missing_file"
+    return {"status": status, "path": ident, "mounted": mounted}
+
+
 class BaseOutlookClient:
     """Interface for Outlook operations."""
     def is_connected(self) -> bool:
@@ -81,6 +95,13 @@ class BaseOutlookClient:
         raise NotImplementedError
     def create_pst(self, file_path: str, display_name: str = "") -> Tuple[bool, str]:
         """Create a new empty PST and open it in Outlook. Returns (ok, file path or error)."""
+        raise NotImplementedError
+    def diagnose_store(self, identifier: str) -> Dict[str, Any]:
+        """{'status': 'ok' | 'default' | 'not_open' | 'missing_file', 'path': str,
+        'mounted': [{'name', 'file_path'}]} - why a store identifier does or does not resolve."""
+        raise NotImplementedError
+    def open_pst(self, file_path: str) -> Tuple[bool, str]:
+        """Open an existing PST in Outlook (never creates one). Returns (ok, file path or error)."""
         raise NotImplementedError
 
 
@@ -194,6 +215,47 @@ class WindowsOutlookClient(BaseOutlookClient):
         if not self._connected or not (identifier or "").strip():
             return False
         return self._find_store(identifier) is not None
+
+    def _mounted_stores(self) -> List[Dict[str, str]]:
+        """Lightweight list of open stores (name + file path) without folder/size scans."""
+        mounted: List[Dict[str, str]] = []
+        if not self._connected:
+            return mounted
+        try:
+            for store in self.namespace.Stores:
+                try:
+                    mounted.append({
+                        "name": str(getattr(store, "DisplayName", "") or ""),
+                        "file_path": str(getattr(store, "FilePath", "") or ""),
+                    })
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return mounted
+
+    def diagnose_store(self, identifier: str) -> Dict[str, Any]:
+        found = bool((identifier or "").strip()) and self._find_store(identifier) is not None
+        return _diagnose_store(found, identifier, self._mounted_stores())
+
+    def open_pst(self, file_path: str) -> Tuple[bool, str]:
+        """Open an existing PST with Namespace.AddStore. Refuses missing files so nothing is created."""
+        if not self._connected:
+            return False, "Outlook is not connected."
+        path = (file_path or "").strip()
+        if not path:
+            return False, "No PST file path given."
+        if self._find_store(path) is not None:
+            return True, path
+        if not os.path.isfile(path):
+            return False, f"The PST file does not exist: {path}"
+        try:
+            self.namespace.AddStore(path)
+        except Exception as ex:
+            return False, f"Outlook could not open the PST: {ex}"
+        if self._find_store(path) is None:
+            return False, f"Outlook did not open the PST: {path}"
+        return True, path
 
     def create_pst(self, file_path: str, display_name: str = "") -> Tuple[bool, str]:
         """Create a new Unicode PST with Namespace.AddStoreEx (creates + opens it). Never overwrites."""
@@ -434,7 +496,7 @@ class WindowsOutlookClient(BaseOutlookClient):
             store = self.namespace.DefaultStore
             target_store = self._find_store(target_store_path)
             if target_store is None:
-                return False, f"Target store not found: {target_store_path}"
+                return False, f"Target store not found in Outlook: {target_store_path}"
             rules_col = store.GetRules()
 
             # Snapshot existing rules grouped by name (1-based index, rule) before any mutation
@@ -451,6 +513,7 @@ class WindowsOutlookClient(BaseOutlookClient):
             removed_count = 0
             warnings: List[str] = []
             unresolved_warnings: List[str] = []
+            dropped_rules: List[str] = []
             valid_rules: List[Tuple[Dict[str, Any], List[str], List[str], List[str]]] = []
             compiled_names = set()
 
@@ -534,6 +597,7 @@ class WindowsOutlookClient(BaseOutlookClient):
                 target_folder_path = r_info.get("target_folder", "")
 
                 rule = existing_rules.get(r_name)
+                rule_was_created = rule is None
                 if not rule:
                     rule = rules_col.Create(r_name, 0)
                     existing_rules[r_name] = rule
@@ -569,6 +633,21 @@ class WindowsOutlookClient(BaseOutlookClient):
                     if resolved_ok is False or bad_addrs:
                         detail = ", ".join(bad_addrs) if bad_addrs else ", ".join(emails)
                         unresolved_warnings.append(f"{r_name}: {detail}")
+                    # Outlook refuses to save ANY rule while one holds an unresolved sender: take them out
+                    self._drop_unresolved_recipients(from_cond.Recipients)
+                    if from_cond.Recipients.Count == 0:
+                        from_cond.Enabled = False
+                        if not domains and not keywords:
+                            # Nothing left to match on: a rule without conditions would move every mail
+                            rules_col.Remove(r_name)
+                            existing_rules.pop(r_name, None)
+                            if rule_was_created:
+                                created_count -= 1
+                            else:
+                                updated_count -= 1
+                                removed_count += 1
+                            dropped_rules.append(r_name)
+                            continue
                 else:
                     from_cond.Enabled = False
 
@@ -611,7 +690,10 @@ class WindowsOutlookClient(BaseOutlookClient):
                         pass
                     managed_order += 1
 
-            rules_col.Save(ShowProgress=False)
+            try:
+                rules_col.Save(ShowProgress=False)
+            except Exception as save_ex:
+                return False, self._explain_save_failure(rules_col, save_ex)
             msg = (
                 f"Successfully synced rules to Outlook "
                 f"(Created: {created_count}, Updated: {updated_count}, "
@@ -624,10 +706,89 @@ class WindowsOutlookClient(BaseOutlookClient):
             if warnings:
                 msg += f"\nWarning - skipped rules with no conditions: {', '.join(warnings)}"
             if unresolved_warnings:
-                msg += f"\nWarning - unresolved recipients: {'; '.join(unresolved_warnings)}"
+                msg += f"\nWarning - unresolved recipients (left out): {'; '.join(unresolved_warnings)}"
+            if dropped_rules:
+                msg += f"\nWarning - not created, no sender could be resolved: {', '.join(dropped_rules)}"
             return True, msg
         except Exception as ex:
             return False, f"Failed to sync rules to Outlook: {str(ex)}"
+
+    @staticmethod
+    def _drop_unresolved_recipients(recipients) -> None:
+        """Remove recipients Outlook could not resolve (highest index first)."""
+        try:
+            bad = [i for i, rec in enumerate(recipients, start=1) if not getattr(rec, "Resolved", True)]
+        except Exception:
+            return
+        for idx in reversed(bad):
+            try:
+                recipients.Remove(idx)
+            except Exception:
+                pass
+
+    @staticmethod
+    def rule_problem(rule) -> str:
+        """Best-effort reason why Outlook would refuse to save `rule` ('' if none found)."""
+        try:
+            actions = rule.Actions
+            for act_name, label in (("MoveToFolder", "Move to folder"), ("CopyToFolder", "Copy to folder")):
+                act = getattr(actions, act_name, None)
+                if act is None or not getattr(act, "Enabled", False):
+                    continue
+                folder = getattr(act, "Folder", None)
+                if folder is None:
+                    return f"{label}: the target folder no longer exists (deleted, or its PST is closed)"
+                try:
+                    _ = folder.FolderPath
+                except Exception:
+                    return f"{label}: the target folder cannot be opened (its PST is closed or missing)"
+            conds = rule.Conditions
+            from_c = getattr(conds, "From", None)
+            if from_c is not None and getattr(from_c, "Enabled", False):
+                recips = from_c.Recipients
+                if recips.Count == 0:
+                    return "From: the condition has no senders"
+                for rec in recips:
+                    if not getattr(rec, "Resolved", True):
+                        who = (getattr(rec, "Address", "") or getattr(rec, "Name", "") or "?").strip()
+                        return f"From: Outlook cannot resolve '{who}'"
+            for cond_name, attr, label in (("SenderAddress", "Address", "Sender address contains"),
+                                           ("Subject", "Text", "Subject contains")):
+                cond = getattr(conds, cond_name, None)
+                if cond is not None and getattr(cond, "Enabled", False):
+                    values = [v for v in (getattr(cond, attr, None) or []) if str(v).strip()]
+                    if not values:
+                        return f"{label}: the condition is empty"
+        except Exception as ex:
+            return f"Outlook cannot read this rule ({ex})"
+        return ""
+
+    def _explain_save_failure(self, rules_col, ex: Exception) -> str:
+        """Outlook saves all rules at once; name the ones it most likely refuses."""
+        own, managed = [], []
+        try:
+            for rule in rules_col:
+                problem = self.rule_problem(rule)
+                if problem:
+                    name = getattr(rule, "Name", "?")
+                    (managed if name.startswith(MANAGED_PREFIX) else own).append(f"  - {name}: {problem}")
+        except Exception:
+            pass
+        lines = [
+            "Outlook refused to save the rules (it saves all rules at once, so one broken rule blocks everything).",
+            "Nothing was changed in Outlook.",
+        ]
+        if own:
+            lines += ["", "Your own Outlook rules that look broken - fix or delete them in Outlook "
+                          "(File > Manage Rules & Alerts), then try again:"] + own
+        if managed:
+            lines += ["", "Companion rules that look broken (check these senders / folders in the app):"] + managed
+        if not own and not managed:
+            lines += ["", "No broken rule could be identified automatically. Open Outlook > File > "
+                          "Manage Rules & Alerts and look for rules marked '(error)' or ones that move mail "
+                          "to a PST that is no longer open; fix or delete them, then try again."]
+        lines += ["", f"Outlook said: {ex}"]
+        return "\n".join(lines)
 
     @staticmethod
     def _is_conditionless_move_rule(rule) -> bool:
@@ -826,6 +987,27 @@ class MockOutlookClient(BaseOutlookClient):
         if not (identifier or "").strip():
             return False
         return self._find_store(identifier) is not None
+
+    def diagnose_store(self, identifier: str) -> Dict[str, Any]:
+        found = bool((identifier or "").strip()) and self._find_store(identifier) is not None
+        mounted = [{"name": s.get("name", ""), "file_path": s.get("file_path", "")} for s in self._stores]
+        return _diagnose_store(found, identifier, mounted)
+
+    def open_pst(self, file_path: str) -> Tuple[bool, str]:
+        """Simulated: an existing PST file is added to this session's store list."""
+        path = (file_path or "").strip()
+        if not path:
+            return False, "No PST file path given."
+        if self._find_store(path) is not None:
+            return True, path
+        if not os.path.isfile(path):
+            return False, f"The PST file does not exist: {path}"
+        name = os.path.splitext(os.path.basename(path))[0]
+        self._stores.insert(len([s for s in self._stores if s.get("file_path")]), {
+            "name": name, "file_path": path, "store_id": f"STORE_{name}",
+            "is_data_file": True, "size_gb": 0.0, "folders": [],
+        })
+        return True, path
 
     def create_pst(self, file_path: str, display_name: str = "") -> Tuple[bool, str]:
         """Simulated: the new store only appears in this session's store list (no file is written)."""

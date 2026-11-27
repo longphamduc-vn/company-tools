@@ -161,10 +161,16 @@ class SyncEngine:
         skipped_empty_rules: List[str] = []
         skipped_no_folder_rules: List[str] = []
 
+        store_ok, store_msg = self.check_active_store()
+        if not store_ok:
+            return False, store_msg
+
         for rule in self.yaml_mgr.rules:
             entries, skip_reason = self._compile_single_rule(rule, threshold=threshold)
             if skip_reason == "no_conditions":
-                skipped_empty_rules.append(rule.name)
+                # An empty unclassified pool is the normal state, not something to warn about
+                if not self._is_unclassified_rule(rule):
+                    skipped_empty_rules.append(rule.name)
                 continue
             if skip_reason == "no_target_folder":
                 skipped_no_folder_rules.append(rule.name)
@@ -195,11 +201,47 @@ class SyncEngine:
         )
         if success and not self.outlook.is_simulated():
             self.yaml_mgr.mark_synced()
+        if not success:
+            return success, msg
         if skipped_empty_rules:
             msg += f"\nWarning - skipped rules with no conditions: {', '.join(skipped_empty_rules)}"
         if skipped_no_folder_rules:
             msg += f"\nWarning - skipped rules without target folder: {', '.join(skipped_no_folder_rules)}"
         return success, msg
+
+    def active_store_status(self) -> Dict[str, Any]:
+        """Diagnose the active archive store (see BaseOutlookClient.diagnose_store)."""
+        active_store = self.yaml_mgr.stores.get("active_archive")
+        store_path = (active_store.file_path or "").strip() if active_store else ""
+        return self.outlook.diagnose_store(store_path)
+
+    def check_active_store(self) -> Tuple[bool, str]:
+        """Return (True, "") if sync can reach the active archive, else (False, how-to-fix message).
+
+        Simulation mode never touches a real store, so it always passes.
+        """
+        if self.outlook.is_simulated():
+            return True, ""
+        info = self.active_store_status()
+        status = info.get("status")
+        path = info.get("path", "")
+        if status in ("ok", "default"):
+            return True, ""
+        if status == "not_open":
+            return False, (
+                f"The active archive PST exists but is not open in Outlook:\n{path}\n\n"
+                "Open it in Outlook (File > Open & Export > Open Outlook Data File), "
+                "then sync again."
+            )
+        msg = (
+            f"The active archive PST was not found on disk:\n{path}\n\n"
+            "Use 'Yearly Rollover...' to pick an open store or create a new PST."
+        )
+        mounted = [m for m in (info.get("mounted") or []) if m.get("file_path")]
+        if mounted:
+            listed = "\n".join(f"  - {m.get('name', '')}: {m.get('file_path', '')}" for m in mounted[:5])
+            msg += f"\n\nPST files open in Outlook:\n{listed}"
+        return False, msg
 
     def perform_rollover(self, new_store_name: str, new_store_path: str) -> Tuple[bool, str]:
         """Perform 1-Click Rollover to new yearly PST store safely.

@@ -321,6 +321,16 @@ class FakeNamespace:
     def GetItemFromID(self, entry_id: str):
         return self._items[entry_id]
 
+    def AddStore(self, path: str):
+        """Like Outlook: open the PST at `path` (tests only call it for files that exist)."""
+        import os
+
+        self.add_store_calls = getattr(self, "add_store_calls", []) + [path]
+        if not os.path.exists(path):
+            raise OSError(f"Fake AddStore: file not found {path}")
+        name = os.path.splitext(os.path.basename(path))[0]
+        self.Stores.append(FakeStore(name, path, root_folder=FakeFolder(Name=name, FolderPath=f"\\\\{name}")))
+
     def AddStoreEx(self, path: str, store_type: int = 3):
         """Like Outlook: open the PST at `path`, creating an empty one if it does not exist."""
         import os

@@ -148,6 +148,10 @@ Mọi thay đổi ở mục 3–5 mới chỉ nằm trong file `rules.yaml`. Out
 
 App chỉ tạo, sửa và xóa các rule có tiền tố `[Companion]`. Các rule khác của bạn được giữ nguyên.
 
+**Nếu app báo PST lưu trữ chưa mở hoặc không tìm thấy:** Trước khi Sync, app kiểm tra file PST đang dùng (mục *Active archive* ở chân cửa sổ).
+- **Archive PST Not Open**: file PST vẫn còn trên ổ đĩa nhưng Outlook chưa mở nó. Chọn **Yes** để app mở file, rồi Sync chạy tiếp. Bạn cũng có thể tự mở trong Outlook bằng **File › Open & Export › Open Outlook Data File**.
+- **Archive PST Not Found**: không còn file ở đường dẫn đó, có thể do bị đổi tên, bị chuyển chỗ hoặc bị xóa. Chọn **Yes** để mở **Yearly Rollover**, rồi chọn một PST đang mở hoặc tạo PST mới.
+
 **Nên bấm Check Rule Conflicts trước khi Sync lần đầu** để xem:
 - Rule trùng tên nhưng đi vào thư mục khác.
 - Một người gửi bị hai rule cùng bắt.

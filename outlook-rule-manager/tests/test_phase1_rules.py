@@ -121,14 +121,22 @@ class TestSaveNativeRulesWithFakes(unittest.TestCase):
                 name="[Unclassified]",
                 enabled=True,
                 target_folder="_Unclassified",
-            )
+            ),
+            RuleConfig(
+                id="rule_empty",
+                name="Empty_Folder",
+                enabled=True,
+                target_folder="Empty_Folder",
+            ),
         ]
         self.yaml_mgr.unclassified_pool = []
 
         ok, msg = self.sync_engine.push_to_outlook()
         self.assertTrue(ok, msg)
         self.assertEqual(self.default_store.GetRules().Count, 0)
-        self.assertIn("[Unclassified]", msg)
+        self.assertIn("skipped rules with no conditions: Empty_Folder", msg)
+        # An empty unclassified pool is normal and must not be reported
+        self.assertNotIn("[Unclassified]", msg)
 
     def test_save_native_rules_defensive_empty_rule_disables_existing_and_warns(self):
         existing = FakeRule("OrphanRule", enabled=True)
