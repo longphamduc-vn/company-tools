@@ -1,4 +1,5 @@
 """YAML Configuration Manager with Versioned Backups."""
+import copy
 import os
 import shutil
 import glob
@@ -32,6 +33,12 @@ class YamlConfigManager:
         self.unsynced_changes: int = 0
         self.has_synced: bool = False
         self._change_listeners: List[Callable[[], Any]] = []
+
+        # In-memory undo: the state before each save, newest last
+        self._undo_stack: List[Tuple[str, Dict[str, Any]]] = []
+        self._last_saved_state: Optional[Dict[str, Any]] = None
+        self._restoring_undo: bool = False
+        self.next_change_label: Optional[str] = None
 
         self.load()
 
@@ -89,7 +96,58 @@ class YamlConfigManager:
                 target_folder=r_data.get("target_folder", "")
             ))
 
+        # A (re)load starts a fresh undo history
+        self._undo_stack = []
+        self._last_saved_state = self._capture_state()
         return True
+
+    # -----------------------------------------------------------------
+    # Undo (in memory, last UNDO_LIMIT saves)
+    # -----------------------------------------------------------------
+    UNDO_LIMIT = 20
+
+    def _capture_state(self) -> Dict[str, Any]:
+        return copy.deepcopy({
+            "settings": self.settings,
+            "stores": self.stores,
+            "groups": self.groups,
+            "rules": self.rules,
+            "unclassified_pool": self.unclassified_pool,
+        })
+
+    def can_undo(self) -> bool:
+        return bool(self._undo_stack)
+
+    def undo_label(self) -> Optional[str]:
+        return self._undo_stack[-1][0] if self._undo_stack else None
+
+    def undo(self) -> Optional[str]:
+        """Restore the state before the last save and write it. Returns the undone label or None."""
+        if not self._undo_stack:
+            return None
+        label, state = self._undo_stack.pop()
+        state = copy.deepcopy(state)
+        self.settings = state["settings"]
+        self.stores = state["stores"]
+        self.groups = state["groups"]
+        self.rules = state["rules"]
+        self.unclassified_pool = state["unclassified_pool"]
+        self._restoring_undo = True
+        try:
+            self.save()
+        finally:
+            self._restoring_undo = False
+        return label
+
+    def _record_undo_point(self) -> None:
+        """Called after a successful write: remember the previous state unless nothing changed."""
+        label = self.next_change_label or "Last change"
+        self.next_change_label = None
+        current = self._capture_state()
+        if not self._restoring_undo and self._last_saved_state is not None and current != self._last_saved_state:
+            self._undo_stack.append((label, self._last_saved_state))
+            del self._undo_stack[:-self.UNDO_LIMIT]
+        self._last_saved_state = current
 
     @staticmethod
     def normalize_domain(domain_str: str) -> str:
@@ -198,6 +256,7 @@ class YamlConfigManager:
                 f"Failed to save configuration atomically to '{self.config_path}': {exc}"
             ) from exc
 
+        self._record_undo_point()
         self.unsynced_changes += 1
         self._notify_change_listeners()
         return True
@@ -266,6 +325,9 @@ class YamlConfigManager:
 
     def remove_rule_and_repool(self, rule_id: str):
         """Remove a rule and automatically add its addresses to unclassified_pool."""
+        rule = next((r for r in self.rules if r.id == rule_id), None)
+        if rule:
+            self._set_change_label(f"Delete rule '{rule.name}'")
         if self._remove_rule_no_save(rule_id):
             self.save()
 
@@ -275,6 +337,7 @@ class YamlConfigManager:
             return False
 
         group = self.groups.pop(g_id)
+        self._set_change_label(f"Delete group '{group.name}'")
         for rule in self.rules:
             if g_id in rule.groups:
                 rule.groups = [gid for gid in rule.groups if gid != g_id]
@@ -325,6 +388,130 @@ class YamlConfigManager:
         if save:
             self.save()
 
+    # -----------------------------------------------------------------
+    # Moving a sender between rules (one sender lives in one rule per match level)
+    # -----------------------------------------------------------------
+    def _normalize_sender_value(self, value: str, as_domain: bool) -> str:
+        raw = (value or "").lower().strip()
+        return self.normalize_domain(raw) if as_domain else raw
+
+    def _sender_holders(
+        self, value: str, as_domain: bool, target_rule_id: Optional[str]
+    ) -> Tuple[List[RuleConfig], List[Tuple[AddressGroup, List[RuleConfig]]]]:
+        """Find other rules holding `value` at the same match level.
+
+        Returns (rules holding it directly, [(group holding it, rules using that group)]).
+        Groups linked to the target rule are ignored (the value stays reachable from the target).
+        """
+        target = next((r for r in self.rules if r.id == target_rule_id), None)
+        target_groups = set(target.groups) if target else set()
+        direct: List[RuleConfig] = []
+        group_hits: Dict[str, Tuple[AddressGroup, List[RuleConfig]]] = {}
+        for r in self.rules:
+            if r.id == target_rule_id:
+                continue
+            own = r.domains if as_domain else r.emails
+            if value in own:
+                direct.append(r)
+            for g_id in r.groups:
+                grp = self.groups.get(g_id)
+                if grp is None or g_id in target_groups:
+                    continue
+                members = grp.domains if as_domain else grp.emails
+                if value in members and g_id not in group_hits:
+                    users = [u for u in self.rules if g_id in u.groups]
+                    group_hits[g_id] = (grp, users)
+        return direct, list(group_hits.values())
+
+    def preview_sender_move(self, value: str, rule_id: Optional[str], as_domain: bool = False) -> Dict[str, Any]:
+        """Describe what assigning `value` to `rule_id` would move, without changing anything.
+
+        from_rules: names of rules that currently hold the value and would lose it.
+        shared_groups: [(group name, [rule names])] for groups used by several rules (needs confirmation).
+        """
+        value = self._normalize_sender_value(value, as_domain)
+        direct, group_hits = self._sender_holders(value, as_domain, rule_id)
+        from_rules: List[str] = [r.name for r in direct]
+        shared: List[Tuple[str, List[str]]] = []
+        for grp, users in group_hits:
+            if len(users) <= 1:
+                from_rules.extend(u.name for u in users if u.name not in from_rules)
+            else:
+                shared.append((grp.name, [u.name for u in users]))
+        return {"from_rules": from_rules, "shared_groups": shared}
+
+    def detach_sender(
+        self,
+        value: str,
+        as_domain: bool = False,
+        except_rule_id: Optional[str] = None,
+        remove_from_shared_groups: bool = False,
+    ) -> Tuple[List[str], List[Tuple[str, List[str]]]]:
+        """Remove `value` from every rule (and single-use group) other than `except_rule_id`.
+
+        Groups shared by several rules are only changed when remove_from_shared_groups is True.
+        Returns (names of rules it was removed from, shared groups left untouched).
+        """
+        value = self._normalize_sender_value(value, as_domain)
+        if not value:
+            return [], []
+        direct, group_hits = self._sender_holders(value, as_domain, except_rule_id)
+        moved_from: List[str] = []
+        blocked: List[Tuple[str, List[str]]] = []
+        for r in direct:
+            own = r.domains if as_domain else r.emails
+            while value in own:
+                own.remove(value)
+            moved_from.append(r.name)
+        for grp, users in group_hits:
+            if len(users) > 1 and not remove_from_shared_groups:
+                blocked.append((grp.name, [u.name for u in users]))
+                continue
+            members = grp.domains if as_domain else grp.emails
+            while value in members:
+                members.remove(value)
+            moved_from.extend(u.name for u in users if u.name not in moved_from)
+        if not as_domain and value in self.unclassified_pool:
+            self.unclassified_pool.remove(value)
+        return moved_from, blocked
+
+    def assign_sender(
+        self,
+        value: str,
+        rule_id: str,
+        as_domain: bool = False,
+        remove_from_shared_groups: bool = False,
+        save: bool = True,
+    ) -> Dict[str, Any]:
+        """Move a sender email (or domain) into `rule_id`, removing it from other rules at the same level.
+
+        An exact email in one rule already beats a domain in another, so moving an email never
+        touches domains (and vice versa).
+        """
+        rule = next((r for r in self.rules if r.id == rule_id), None)
+        value = self._normalize_sender_value(value, as_domain)
+        if not rule or not value:
+            return {"added": False, "moved_from": [], "blocked_by_groups": []}
+
+        moved_from, blocked = self.detach_sender(
+            value, as_domain=as_domain, except_rule_id=rule_id,
+            remove_from_shared_groups=remove_from_shared_groups,
+        )
+        target_group = next((self.groups[g] for g in rule.groups if g in self.groups), None)
+        if as_domain:
+            target_list = target_group.domains if target_group is not None else rule.domains
+        else:
+            target_list = target_group.emails if target_group is not None else rule.emails
+        already = value in target_list or (
+            value in (self.get_all_domains_for_rule(rule) if as_domain else self.get_all_emails_for_rule(rule))
+        )
+        if not already:
+            target_list.append(value)
+        self._set_change_label(f"Move '{value}' to rule '{rule.name}'")
+        if save:
+            self.save()
+        return {"added": True, "moved_from": moved_from, "blocked_by_groups": blocked}
+
     def get_existing_hierarchy(self) -> Tuple[List[str], List[str], List[str]]:
         """Collect all distinct Teams, Parts, and Units from current rules and custom folders."""
         teams = set()
@@ -363,14 +550,34 @@ class YamlConfigManager:
         custom_folders = self.settings.setdefault("custom_folders", [])
         if folder_path not in custom_folders:
             custom_folders.append(folder_path)
+            self._set_change_label(f"Create folder '{folder_path}'")
             self.save()
         return True
 
+    def _set_change_label(self, text: str) -> None:
+        """Describe the next save for Undo, unless the caller (GUI) already set a label."""
+        if self.next_change_label is None:
+            self.next_change_label = text
+
+    def unclassified_folder(self) -> str:
+        return self.settings.get("unclassified_folder", "_Unclassified") or "_Unclassified"
+
+    def is_inside_unclassified(self, path: str) -> bool:
+        """True if `path` is the Unclassified folder or anything below it."""
+        norm = "\\".join(s.strip() for s in re.split(r'[\\/]', path or "") if s.strip()).lower()
+        unc = self.unclassified_folder().lower()
+        return norm == unc or norm.startswith(unc + "\\")
+
     def move_rule_to_folder(self, rule_id: str, new_folder_path: str) -> bool:
-        """Move a rule to a target folder hierarchy."""
+        """Move a rule to a target folder hierarchy (never into the Unclassified folder)."""
         new_folder_path = "\\".join([s.strip() for s in re.split(r'[\\/]', new_folder_path) if s.strip()])
         for r in self.rules:
             if r.id == rule_id:
+                if r.id != "rule_unclassified" and self.is_inside_unclassified(new_folder_path):
+                    return False
+                if r.target_folder == new_folder_path:
+                    return True
+                self._set_change_label(f"Move rule '{r.name}' to '{new_folder_path}'")
                 r.target_folder = new_folder_path
                 self.save()
                 return True
@@ -387,6 +594,10 @@ class YamlConfigManager:
 
         if not source_path:
             return False, "Source folder cannot be empty."
+        if source_path.lower() == self.unclassified_folder().lower():
+            return False, f"The '{self.unclassified_folder()}' folder cannot be moved."
+        if self.is_inside_unclassified(dest_parent_path):
+            return False, f"Folders cannot be moved into '{self.unclassified_folder()}'."
 
         # Prevent circular nesting
         if dest_parent_path == source_path or dest_parent_path.startswith(source_path + "\\"):
@@ -424,6 +635,7 @@ class YamlConfigManager:
                 new_custom.append(cf)
         self.settings["custom_folders"] = new_custom
 
+        self._set_change_label(f"Move folder '{source_path}' to '{new_base_path}'")
         self.save()
         return True, new_base_path
 
@@ -478,6 +690,7 @@ class YamlConfigManager:
                 new_custom.append(cf)
         self.settings["custom_folders"] = new_custom
 
+        self._set_change_label(f"Rename folder '{old_path}' to '{new_path}'")
         self.save()
         return True, new_path
 
@@ -508,6 +721,7 @@ class YamlConfigManager:
             if cf != folder_path and not cf.startswith(folder_path + "\\")
         ]
 
+        self._set_change_label(f"Delete folder '{folder_path}'")
         self.save()
         return len(affected_rules)
 
@@ -558,6 +772,7 @@ class YamlConfigManager:
             target_folder=rule.target_folder
         )
         self.rules.append(new_rule)
+        self._set_change_label(f"Duplicate rule '{rule.name}'")
         self.save()
         return new_rule
 

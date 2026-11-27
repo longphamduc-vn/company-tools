@@ -13,10 +13,23 @@ from core.sync_engine import SyncEngine
 class RuleManagerView(ttk.Frame):
     r"""Intuitive Studio for Outlook Rules, Dynamic Folders (arbitrary levels), and Address Groups with Drag-and-Drop."""
 
-    def __init__(self, parent, yaml_mgr: YamlConfigManager, sync_engine: SyncEngine):
+    def __init__(
+        self,
+        parent,
+        yaml_mgr: YamlConfigManager,
+        sync_engine: SyncEngine,
+        nav_host: Optional[tk.Misc] = None,
+        inspector_host: Optional[tk.Misc] = None,
+    ):
         super().__init__(parent)
         self.yaml_mgr = yaml_mgr
         self.sync_engine = sync_engine
+        # Integrated (single-screen) mode: the navigator and the inspector are built into
+        # containers owned by the main window instead of this frame's own 2-pane layout.
+        self.nav_host = nav_host
+        self.inspector_host = inspector_host
+        self.integrated = nav_host is not None and inspector_host is not None
+        self.on_item_activated = None  # integrated mode: called when the user picks a tree item
 
         # Selection state
         self.selected_rule: Optional[RuleConfig] = None
@@ -68,7 +81,8 @@ class RuleManagerView(ttk.Frame):
         # -------------------------------------------------------------
         # TOP TOOLBAR: Dynamic Actions, Search, & Drag Hint
         # -------------------------------------------------------------
-        toolbar = tk.Frame(self, bg="#ffffff", highlightbackground="#e2e8f0", highlightthickness=1, padx=10, pady=6)
+        host = self.nav_host if self.integrated else self
+        toolbar = tk.Frame(host, bg="#ffffff", highlightbackground="#e2e8f0", highlightthickness=1, padx=10, pady=6)
         toolbar.pack(fill=tk.X, side=tk.TOP)
 
         # Merged creation menu + tree controls
@@ -86,18 +100,26 @@ class RuleManagerView(ttk.Frame):
         ttk.Button(toolbar, text="Expand", command=self._expand_all).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="Collapse", command=self._collapse_all).pack(side=tk.LEFT, padx=2)
 
-        # Search filter entry
-        self.ent_search = ttk.Entry(toolbar, width=22)
-        self.ent_search.pack(side=tk.RIGHT, padx=4)
+        # Search filter entry (own row in the narrow integrated navigator)
+        filter_parent = toolbar
+        if self.integrated:
+            filter_parent = tk.Frame(host, bg="#ffffff", padx=10, pady=4)
+            filter_parent.pack(fill=tk.X, side=tk.TOP)
+        self.ent_search = ttk.Entry(filter_parent, width=22)
+        self.ent_search.pack(side=tk.RIGHT, padx=4, fill=tk.X, expand=self.integrated)
         self.ent_search.bind("<KeyRelease>", lambda e: self._on_search_change())
-        tk.Label(toolbar, text="Filter:", bg="#ffffff", fg="#475569", font=("", 9, "bold")).pack(side=tk.RIGHT, padx=2)
+        tk.Label(filter_parent, text="Filter:", bg="#ffffff", fg="#475569", font=("", 9, "bold")).pack(side=tk.RIGHT, padx=2)
 
         # Bottom tip / status bar packed BEFORE paned so text is never clipped at 1120x720
         self._default_tip_text = (
             "Tip: drag rules or folders to reorganize. Right-click for more actions."
         )
-        tip_bar = tk.Frame(self, bg="#f8fafc", highlightbackground="#e2e8f0", highlightthickness=1, padx=8, pady=4)
+        tip_bar = tk.Frame(host, bg="#f8fafc", highlightbackground="#e2e8f0", highlightthickness=1, padx=8, pady=4)
         tip_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=6, pady=(0, 6))
+        # Undo lives next to the status text so the "Moved …" message and its Undo sit together
+        self.btn_undo = ttk.Button(tip_bar, text="Undo (Ctrl+Z)", state=tk.DISABLED, command=self._request_undo)
+        self.btn_undo.pack(side=tk.RIGHT, padx=(8, 0))
+        self.on_undo_request = None  # set by MainWindow
         self.lbl_toast = tk.Label(
             tip_bar,
             text=self._default_tip_text,
@@ -106,20 +128,25 @@ class RuleManagerView(ttk.Frame):
             font=("", 8, "italic"),
             anchor=tk.W,
             justify=tk.LEFT,
-            wraplength=1080,
+            wraplength=200 if self.integrated else 1080,
         )
-        self.lbl_toast.pack(fill=tk.X)
-        tip_bar.bind("<Configure>", lambda e: self.lbl_toast.config(wraplength=max(200, e.width - 20)))
+        self.lbl_toast.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tip_bar.bind("<Configure>", lambda e: self.lbl_toast.config(wraplength=max(200, e.width - 140)))
 
         # -------------------------------------------------------------
         # MAIN 2-PANE WORKSPACE: Tree (Left) + Studio Inspector (Right)
         # -------------------------------------------------------------
-        paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        paned.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        if self.integrated:
+            paned = None
+            self.frame_left = tk.Frame(host, bg="#f8fafc", highlightbackground="#cbd5e1", highlightthickness=1)
+            self.frame_left.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
+        else:
+            paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
+            paned.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
-        # Left Pane: Visual Dynamic Folder & Rule Tree
-        self.frame_left = tk.Frame(paned, bg="#f8fafc", highlightbackground="#cbd5e1", highlightthickness=1)
-        paned.add(self.frame_left, weight=4)
+            # Left Pane: Visual Dynamic Folder & Rule Tree
+            self.frame_left = tk.Frame(paned, bg="#f8fafc", highlightbackground="#cbd5e1", highlightthickness=1)
+            paned.add(self.frame_left, weight=4)
 
         # Left header banner
         tree_header = tk.Frame(self.frame_left, bg="#f1f5f9", padx=8, pady=6)
@@ -161,12 +188,27 @@ class RuleManagerView(ttk.Frame):
         self.tree.bind("<ButtonRelease-1>", self._on_drag_release)
         self.tree.bind("<Button-3>", self._show_context_menu)
         self.tree.bind("<Double-Button-1>", self._on_tree_double_click)
+        self.tree.bind("<Delete>", lambda e: self._on_delete_key())
+        self.tree.bind("<F2>", lambda e: self._on_rename_key())
+        # Integrated mode: clicking/keying through the tree shows the inspector in the shared right pane
+        self.tree.bind("<ButtonRelease-1>", self._notify_item_activated, add="+")
+        self.tree.bind("<KeyRelease-Up>", self._notify_item_activated, add="+")
+        self.tree.bind("<KeyRelease-Down>", self._notify_item_activated, add="+")
+        if self.integrated:
+            self.tree.column("#0", width=200)
+            self.tree.column("Details", width=80)
+            self.tree.heading("#0", text="Folders & Rules")
+            self.tree.heading("Details", text="Info")
 
         # -------------------------------------------------------------
         # Right Pane: Studio Inspector Card
         # -------------------------------------------------------------
-        self.frame_right = tk.Frame(paned, bg="#ffffff", highlightbackground="#cbd5e1", highlightthickness=1)
-        paned.add(self.frame_right, weight=6)
+        if self.integrated:
+            self.frame_right = tk.Frame(self.inspector_host, bg="#ffffff", highlightbackground="#cbd5e1", highlightthickness=1)
+            self.frame_right.pack(fill=tk.BOTH, expand=True)
+        else:
+            self.frame_right = tk.Frame(paned, bg="#ffffff", highlightbackground="#cbd5e1", highlightthickness=1)
+            paned.add(self.frame_right, weight=6)
 
         self.inspector_container = tk.Frame(self.frame_right, bg="#ffffff")
         self.inspector_container.pack(fill=tk.BOTH, expand=True, padx=8, pady=5)
@@ -290,8 +332,11 @@ class RuleManagerView(ttk.Frame):
         row1.pack(fill=tk.X)
 
         tk.Label(row1, text="Rule Name:", bg="#ffffff", font=("", 9, "bold"), fg="#334155").pack(side=tk.LEFT, padx=(0, 6))
-        self.ent_rule_name = ttk.Entry(row1, font=("", 9), width=26, textvariable=self.var_rule_name)
+        self.ent_rule_name = ttk.Entry(
+            row1, font=("", 9), width=26, textvariable=self.var_rule_name, exportselection=False
+        )
         self.ent_rule_name.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        self.ent_rule_name.bind("<Return>", lambda e: self._save_rule_changes())
 
         enabled_box = tk.Frame(row1, bg="#ffffff")
         enabled_box.pack(side=tk.RIGHT)
@@ -1156,7 +1201,9 @@ class RuleManagerView(ttk.Frame):
                     return
 
             if dest_folder:
-                self.yaml_mgr.move_rule_to_folder(rule_id, dest_folder)
+                if not self.yaml_mgr.move_rule_to_folder(rule_id, dest_folder):
+                    self._show_toast(f"Rules cannot be moved into '{self.yaml_mgr.unclassified_folder()}'.", error=True)
+                    return
                 self._show_toast(f"Moved rule '{rule.name}' -> '{dest_folder}'")
                 self.refresh_all()
                 new_iid = f"rule_{rule_id}"
@@ -1212,7 +1259,7 @@ class RuleManagerView(ttk.Frame):
                     self.tree.selection_set(new_fld_iid)
                     self._on_tree_select()
             else:
-                messagebox.showwarning("Move Folder", res)
+                self._show_toast(res, error=True)
             return
 
         # -------------------------------------------------------------
@@ -1267,9 +1314,65 @@ class RuleManagerView(ttk.Frame):
                 pass
             self._toast_after_id = None
 
-    def _show_toast(self, message: str):
+    # --- integrated-mode helpers --------------------------------------
+    def resolve_drop_iid(self, iid: Optional[str]):
+        """What a mail dropped on tree item `iid` means: ('rule', id) / ('folder', path) / ('new', None)."""
+        if not iid:
+            return None
+        if iid in self.rule_nodes_map:
+            return ("rule", self.rule_nodes_map[iid])
+        if iid in self.folder_nodes_map:
+            return ("folder", self.folder_nodes_map[iid])
+        if iid == "__HIERARCHY__":
+            return ("new", None)
+        return None
+
+    def _notify_item_activated(self, event=None):
+        if callable(self.on_item_activated) and self.tree.selection():
+            self.after_idle(self.on_item_activated)
+
+    def _on_delete_key(self):
+        if self.selected_rule:
+            self._delete_selected(ask=False)
+        elif self.selected_folder_path:
+            self._delete_selected_folder()
+        elif self.selected_group:
+            self._delete_selected_group()
+        return "break"
+
+    def _on_rename_key(self):
+        if self.selected_rule:
+            self._focus_new_rule_name()
+        elif self.selected_folder_path:
+            self._rename_selected_folder()
+        elif self.selected_group:
+            self._rename_selected_group()
+        return "break"
+
+    def _request_undo(self):
+        if callable(self.on_undo_request):
+            self.on_undo_request()
+
+    def refresh_undo_button(self):
+        label = self.yaml_mgr.undo_label()
+        if label:
+            short = label if len(label) <= 40 else label[:37] + "..."
+            self.btn_undo.config(state=tk.NORMAL, text=f"Undo: {short}")
+        else:
+            self.btn_undo.config(state=tk.DISABLED, text="Undo (Ctrl+Z)")
+
+    def reset_selection_after_undo(self):
+        """Undo replaces the model objects, so drop references to the old ones."""
+        self.selected_rule = None
+        self.selected_folder_path = None
+        self.selected_group = None
+        self.selected_pool_item = None
+        self._select_tree_iid_silently(None)
+        self._show_inspector(self.frame_empty)
+
+    def _show_toast(self, message: str, error: bool = False):
         """Display non-blocking status notification in bottom tip bar."""
-        self.lbl_toast.config(text=message, fg="#0284c7")
+        self.lbl_toast.config(text=message, fg="#b91c1c" if error else "#0284c7")
         if self._toast_after_id:
             try:
                 self.after_cancel(self._toast_after_id)
@@ -1540,10 +1643,14 @@ class RuleManagerView(ttk.Frame):
             if self.selected_rule and self.selected_rule.target_folder:
                 dest_folder = self.selected_rule.target_folder
             else:
-                folders = self.yaml_mgr.get_all_folders()
+                folders = [f for f in self.yaml_mgr.get_all_folders() if not self.yaml_mgr.is_inside_unclassified(f)]
                 dest_folder = folders[0] if folders else "General"
+        if self.yaml_mgr.is_inside_unclassified(dest_folder):
+            self._show_toast(f"New rules cannot be created inside '{self.yaml_mgr.unclassified_folder()}'.", error=True)
+            return
 
         rule_name = f"New Rule {len(self.yaml_mgr.rules) + 1}"
+        self.yaml_mgr.next_change_label = f"Create rule in '{dest_folder}'"
         new_id = self.yaml_mgr.generate_rule_id(rule_name)
         new_rule = RuleConfig(
             id=new_id,
@@ -1561,6 +1668,15 @@ class RuleManagerView(ttk.Frame):
         if self.tree.exists(rule_iid):
             self.tree.selection_set(rule_iid)
             self._on_tree_select()
+            # Type the real name straight away: placeholder is pre-selected in the Name field.
+            # Done after idle so the inspector refresh triggered by the selection doesn't clear it.
+            self.after_idle(self._focus_new_rule_name)
+
+    def _focus_new_rule_name(self):
+        if self.ent_rule_name.winfo_exists():
+            self.ent_rule_name.focus_set()
+            self.ent_rule_name.select_range(0, tk.END)
+            self.ent_rule_name.icursor(tk.END)
 
     def _save_rule_changes(self, refresh_tree: bool = True, select_after: bool = True) -> bool:
         if not self.selected_rule:
@@ -1578,6 +1694,7 @@ class RuleManagerView(ttk.Frame):
         self.selected_rule.domains = domains
         self.selected_rule.subject_keywords = keywords
 
+        self.yaml_mgr.next_change_label = f"Edit rule '{self.selected_rule.name}'"
         self.yaml_mgr.save()
         self._show_toast(f"Saved rule '{name}' to rules.yaml")
         self._refresh_dirty_state()
@@ -1621,15 +1738,15 @@ class RuleManagerView(ttk.Frame):
                 self._populate_rule_inspector(dup)
                 self._show_inspector(self.frame_rule)
 
-    def _delete_selected(self):
-        """Delete currently selected rule or folder."""
+    def _delete_selected(self, ask: bool = True):
+        """Delete currently selected rule or folder (Delete key: no question, Undo is available)."""
         if self.selected_rule:
             rule = self.selected_rule
             if rule.id == "rule_unclassified":
                 messagebox.showwarning("Notice", "Cannot delete the default [Unclassified] fallback rule.")
                 return
 
-            confirm = messagebox.askyesno(
+            confirm = (not ask) or messagebox.askyesno(
                 "Confirm Delete Rule",
                 f"Are you sure you want to delete rule '{rule.name}'?\n\n"
                 f"Addresses will be safely moved to the Unclassified Pool.",
@@ -1637,7 +1754,7 @@ class RuleManagerView(ttk.Frame):
             )
             if confirm:
                 self.yaml_mgr.remove_rule_and_repool(rule.id)
-                self._show_toast(f"Deleted rule '{rule.name}'")
+                self._show_toast(f"Deleted rule '{rule.name}' (Ctrl+Z to restore)")
                 self.selected_rule = None
                 self._current_selected_iid = None
                 self.refresh_all()
@@ -1796,8 +1913,11 @@ class RuleManagerView(ttk.Frame):
             if not chosen:
                 return
             chosen = "\\".join([s.strip() for s in re.split(r'[\\/]', chosen) if s.strip()])
-            self.selected_rule.target_folder = chosen
-            self.yaml_mgr.save()
+            if not self.yaml_mgr.move_rule_to_folder(self.selected_rule.id, chosen):
+                messagebox.showwarning(
+                    "Change Folder", f"Rules cannot be moved into '{self.yaml_mgr.unclassified_folder()}'.", parent=dlg
+                )
+                return
             dlg.destroy()
             self._show_toast(f"Moved rule '{self.selected_rule.name}' -> '{chosen}'")
             self.refresh_all()
@@ -1838,6 +1958,7 @@ class RuleManagerView(ttk.Frame):
         self.selected_group.name = name
         self.selected_group.emails = emails
         self.selected_group.domains = domains
+        self.yaml_mgr.next_change_label = f"Edit group '{self.selected_group.name}'"
         self.yaml_mgr.save()
         self._show_toast(f"Saved group '{name}'")
         self._refresh_dirty_state()

@@ -40,26 +40,28 @@ class TestUiSimplifyPhaseS1(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def test_two_pane_layout_no_drag_drop_or_left_rule_tree(self):
+    def test_inbox_layout_old_widgets_removed_and_drop_panel_present(self):
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
         try:
-            win.geometry("1120x720")
+            win.geometry("1280x760")
             win.update()
             triage = win.tab_triage
 
-            # Removed widgets/methods
+            # Old S0 widgets stay removed (the old rule tree, drop zone and assign menubutton)
             self.assertFalse(hasattr(triage, "tree_rules"))
             self.assertFalse(hasattr(triage, "drop_new_zone"))
             self.assertFalse(hasattr(triage, "mb_assign_rule"))
             self.assertFalse(hasattr(triage, "_on_drag_start"))
 
-            # Drag bindings must NOT exist on tree_inbox
-            self.assertFalse(triage.tree_inbox.bind("<ButtonPress-1>"))
-            self.assertFalse(triage.tree_inbox.bind("<B1-Motion>"))
-            self.assertFalse(triage.tree_inbox.bind("<ButtonRelease-1>"))
+            # Drag & drop re-added on request (2026-11-26): mail list -> Rules navigator (single screen)
+            self.assertTrue(triage.tree_inbox.bind("<ButtonPress-1>"))
+            self.assertTrue(triage.tree_inbox.bind("<B1-Motion>"))
+            self.assertTrue(triage.tree_inbox.bind("<ButtonRelease-1>"))
 
-            # 2 panes: Inbox list left, Reading/Actions right
-            self.assertEqual(len(triage.paned.panes()), 2)
+            # Single screen, 3 panes: Rules navigator | Mail list | Details
+            self.assertIsNone(triage.paned)
+            self.assertEqual(len(win.workspace.panes()), 3)
+            self.assertIs(triage.tree_rules_drop, win.tab_rules.tree)
 
             # Right-click menu mirrors inspector actions
             menu_labels = [
@@ -114,7 +116,7 @@ class TestUiSimplifyPhaseS1(unittest.TestCase):
     def test_add_to_rule_flow_pending_bar_review_and_apply_to_yaml(self):
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
         try:
-            win.geometry("1120x720")
+            win.geometry("1280x760")
             win.update()
             triage = win.tab_triage
 

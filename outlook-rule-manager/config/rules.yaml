@@ -7,7 +7,7 @@ settings:
 stores:
   active_archive:
     name: Archive 2025
-    file_path: C:\Outlook_Data\longp_Archive_2025.pst
+    file_path: D:\Outlook_Data\longp_Archive_2025.pst
 groups:
   executive:
     name: Executive Board
@@ -42,7 +42,7 @@ rules:
   domains: []
   subject_keywords: []
   target_store: active_archive
-  target_folder: Management\Directors
+  target_folder: Management\Executive_Board\Directors
 - id: rule_engineering
   name: SCADA PLC Maintenance
   enabled: true
@@ -52,7 +52,7 @@ rules:
   domains: []
   subject_keywords: []
   target_store: active_archive
-  target_folder: PLC_Unit
+  target_folder: Engineering_Team\SCADA_Part\PLC_Unit
 - id: rule_suppliers
   name: Omron Equipment
   enabled: true
@@ -72,23 +72,3 @@ rules:
   subject_keywords: []
   target_store: active_archive
   target_folder: _Unclassified
-- id: rule_5
-  name: Copy of Executive Board
-  enabled: true
-  groups:
-  - executive
-  emails: []
-  domains: []
-  subject_keywords: []
-  target_store: active_archive
-  target_folder: Management\Directors
-- id: rule_6
-  name: Copy of Copy of Executive Board
-  enabled: true
-  groups:
-  - executive
-  emails: []
-  domains: []
-  subject_keywords: []
-  target_store: active_archive
-  target_folder: Management\Directors

@@ -59,8 +59,8 @@ class TestUiPhase2(unittest.TestCase):
 
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
         try:
-            win.geometry("1120x720")
-            win.notebook.select(win.tab_rules)
+            win.geometry("1280x760")
+            win.show_rule_details()
             win.update()
 
             view: RuleManagerView = win.tab_rules
@@ -129,7 +129,7 @@ class TestUiPhase2(unittest.TestCase):
     def test_footer_visible_with_simulation_banner_and_refreshes(self):
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
         try:
-            win.geometry("1120x720")
+            win.geometry("1280x760")
             win.update()
 
             self.assertTrue(bool(win.sim_banner.winfo_ismapped()))
@@ -291,7 +291,7 @@ class TestUiPhase2(unittest.TestCase):
         # GUI quota updates immediately on Link/Unlink and after Save + empty/no-folder warnings
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
         try:
-            win.notebook.select(win.tab_rules)
+            win.show_rule_details()
             win.update()
             view: RuleManagerView = win.tab_rules
 

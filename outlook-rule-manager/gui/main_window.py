@@ -20,28 +20,33 @@ class MainWindow(tk.Tk):
     def __init__(self, config_path: str, outlook_client: Optional[BaseOutlookClient] = None):
         super().__init__()
         self.title("Outlook Rule Companion")
-        self.geometry("1120x720")
-        self.minsize(960, 620)
+        self.geometry("1280x760")
+        self.minsize(1040, 620)
 
         # Initialize Core Layers
         self.yaml_mgr = YamlConfigManager(config_path)
         self.outlook = outlook_client if outlook_client is not None else get_outlook_client()
         self.sync_engine = SyncEngine(self.yaml_mgr, self.outlook)
 
-        self._current_tab_index: int = 0
-        self._restoring_tab: bool = False
 
         self._apply_style()
         self._build_header()
         self._build_simulation_banner()
         self._build_footer()
-        self._build_notebook()
+        self._build_workspace()
 
         self.yaml_mgr.add_change_listener(self._on_yaml_state_changed)
         self._update_simulation_banner()
         self._update_sync_status()
         self._refresh_footer()
         self.protocol("WM_DELETE_WINDOW", self._on_close_window)
+
+        # Undo: Ctrl+Z anywhere (text boxes keep their own Ctrl+Z) + Undo buttons in the tabs
+        self.tab_rules.on_undo_request = self.undo_last
+        self.tab_triage.on_undo_request = self.undo_last
+        self.bind_all("<Control-z>", self._on_ctrl_z, add="+")
+        self.bind_all("<Control-Z>", self._on_ctrl_z, add="+")
+        self._refresh_undo_buttons()
 
     def _apply_style(self):
         styles.apply_styles(self)
@@ -160,6 +165,41 @@ class MainWindow(tk.Tk):
     def _on_yaml_state_changed(self):
         self._update_sync_status()
         self._refresh_footer()
+        self._refresh_undo_buttons()
+        # Keep the "Will go to" column truthful after any rule change
+        if hasattr(self, "tab_triage"):
+            self.tab_triage._populate_inbox_table()
+
+    def _refresh_undo_buttons(self):
+        for tab in (getattr(self, "tab_rules", None), getattr(self, "tab_triage", None)):
+            if tab is not None and hasattr(tab, "refresh_undo_button"):
+                tab.refresh_undo_button()
+
+    def _on_ctrl_z(self, event):
+        # Let text/entry widgets handle their own undo
+        if isinstance(event.widget, (tk.Text, tk.Entry, ttk.Entry, ttk.Combobox)):
+            return None
+        self.undo_last()
+        return "break"
+
+    def undo_last(self) -> Optional[str]:
+        """Undo the last saved change to rules.yaml (rules, folders, groups, pool)."""
+        if not self.yaml_mgr.can_undo():
+            self.tab_rules._show_toast("Nothing to undo.")
+            return None
+        if not self.tab_rules.confirm_pending_changes(reset_if_discard=True):
+            return None
+        label = self.yaml_mgr.undo()
+        self.tab_rules.reset_selection_after_undo()
+        self.tab_rules.refresh_all()
+        self.tab_triage.refresh_inbox()
+        note = " (rules only — emails already moved in Outlook stay where they are)" if label.startswith("Apply") else ""
+        message = f"Undone: {label}{note}"
+        self.tab_rules._show_toast(message)
+        if hasattr(self.tab_triage, "show_panel_status"):
+            self.tab_triage.show_panel_status(message)
+        self._refresh_undo_buttons()
+        return label
 
     def _retry_outlook_connection(self):
         new_client = get_outlook_client()
@@ -179,19 +219,77 @@ class MainWindow(tk.Tk):
                 "Could not connect to Outlook Classic. Make sure Outlook is installed and running.",
             )
 
-    def _build_notebook(self):
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=(2, 2))
+    def _build_workspace(self):
+        """Single screen: Rules navigator | Mail list | Details (mail reader OR rule/folder/group editor)."""
+        self.workspace = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
+        self.workspace.pack(fill=tk.BOTH, expand=True, padx=4, pady=(4, 0))
 
-        # Tab 1: Inbox
-        self.tab_triage = TriageView(self.notebook, self.yaml_mgr, self.outlook, self.sync_engine)
-        self.notebook.add(self.tab_triage, text="Inbox")
+        self.nav_host = ttk.Frame(self.workspace)
+        self.inbox_host = ttk.Frame(self.workspace)
+        self.details_host = ttk.Frame(self.workspace)
+        self.workspace.add(self.nav_host, weight=3)
+        self.workspace.add(self.inbox_host, weight=4)
+        self.workspace.add(self.details_host, weight=4)
 
-        # Tab 2: Rules & Address Groups
-        self.tab_rules = RuleManagerView(self.notebook, self.yaml_mgr, self.sync_engine)
-        self.notebook.add(self.tab_rules, text="Rules")
+        # The right pane stacks the mail reader and the rule inspector; one is shown at a time
+        self.reader_host = ttk.Frame(self.details_host)
+        self.inspector_host = ttk.Frame(self.details_host)
+        self.bottom_host = ttk.Frame(self)
+        self.bottom_host.pack(fill=tk.X, side=tk.BOTTOM, before=self.workspace)
 
-        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_change)
+        # The view objects stay hidden; their widgets live in the hosts above
+        self.tab_triage = TriageView(
+            self, self.yaml_mgr, self.outlook, self.sync_engine,
+            inbox_host=self.inbox_host, reader_host=self.reader_host, bottom_host=self.bottom_host,
+        )
+        self.tab_rules = RuleManagerView(
+            self, self.yaml_mgr, self.sync_engine,
+            nav_host=self.nav_host, inspector_host=self.inspector_host,
+        )
+
+        # Mails are dropped straight onto the rules tree
+        self.tab_triage.attach_drop_tree(self.tab_rules.tree, self.tab_rules.resolve_drop_iid)
+        self.tab_triage.status_sink = lambda msg, error=False: self.tab_rules._show_toast(msg, error=error)
+        self.tab_triage.on_message_activated = self.show_mail_details
+        self.tab_triage.on_rules_changed = self.tab_rules.refresh_all
+        self.tab_rules.on_item_activated = self.show_rule_details
+
+        self.details_mode = ""
+        self.show_mail_details()
+        self._sashes_placed = False
+        self.workspace.bind("<Configure>", self._place_sashes, add="+")
+
+    def _place_sashes(self, event=None):
+        """Initial split (once, when the window first gets its real size): 24% | 34% | 42%."""
+        if self._sashes_placed:
+            return
+        width = self.workspace.winfo_width()
+        if width < 600:
+            return
+        try:
+            self.workspace.sashpos(0, int(width * 0.24))
+            self.workspace.sashpos(1, int(width * 0.58))
+            self._sashes_placed = True
+        except tk.TclError:
+            pass
+
+    def show_mail_details(self):
+        """Right pane: the selected mail (asks first if a rule/group form has unsaved edits)."""
+        if self.details_mode == "mail":
+            return
+        if self.details_mode == "rule" and not self.tab_rules.confirm_pending_changes(reset_if_discard=True):
+            return
+        self.inspector_host.pack_forget()
+        self.reader_host.pack(fill=tk.BOTH, expand=True)
+        self.details_mode = "mail"
+
+    def show_rule_details(self):
+        """Right pane: the editor for the rule/folder/group selected in the navigator."""
+        if self.details_mode == "rule":
+            return
+        self.reader_host.pack_forget()
+        self.inspector_host.pack(fill=tk.BOTH, expand=True)
+        self.details_mode = "rule"
 
     def _build_footer(self):
         self.footer = ttk.Frame(self, padding=(8, 2))
@@ -242,27 +340,6 @@ class MainWindow(tk.Tk):
             self.lbl_footer_status.config(text="found in Outlook", foreground=styles.OK)
         else:
             self.lbl_footer_status.config(text="NOT found in Outlook", foreground=styles.DANGER)
-
-    def _on_tab_change(self, event):
-        if self._restoring_tab:
-            return
-        current_idx = self.notebook.index("current")
-        if self._current_tab_index == 1 and current_idx != 1:
-            if not self.tab_rules.confirm_pending_changes(reset_if_discard=True):
-                self._restoring_tab = True
-                try:
-                    self.notebook.select(1)
-                    self._current_tab_index = 1
-                finally:
-                    self.update_idletasks()
-                    self._restoring_tab = False
-                return
-
-        self._current_tab_index = current_idx
-        if current_idx == 0:
-            self.tab_triage.refresh_inbox()
-        elif current_idx == 1:
-            self.tab_rules.refresh_all()
 
     def _open_conflict_inspector(self):
         if not self.tab_rules.confirm_pending_changes(reset_if_discard=True):

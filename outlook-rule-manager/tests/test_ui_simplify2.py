@@ -53,7 +53,7 @@ class TestUiSimplifyPhaseS2(unittest.TestCase):
     def test_triage_columns_fit_panel_and_pending_bar_no_emdash(self):
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
         try:
-            win.geometry("1120x720")
+            win.geometry("1280x760")
             win.update()
             triage = win.tab_triage
 
@@ -89,14 +89,12 @@ class TestUiSimplifyPhaseS2(unittest.TestCase):
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
         roll_dlg = None
         try:
-            win.geometry("1120x720")
+            win.geometry("1280x760")
             win.update()
 
-            # Only 2 tabs remain: Inbox and Rules
-            tab_ids = win.notebook.tabs()
-            self.assertEqual(len(tab_ids), 2)
-            tab_texts = [win.notebook.tab(tid, "text") for tid in tab_ids]
-            self.assertEqual(tab_texts, ["Inbox", "Rules"])
+            # No tabs any more: one screen (navigator | mails | details)
+            self.assertFalse(hasattr(win, "notebook"))
+            self.assertEqual(len(win.workspace.panes()), 3)
             self.assertFalse(hasattr(win, "tab_dryrun"))
             self.assertFalse(hasattr(win, "tab_rollover"))
 
@@ -150,8 +148,8 @@ class TestUiSimplifyPhaseS2(unittest.TestCase):
 
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
         try:
-            win.geometry("1120x720")
-            win.notebook.select(win.tab_rules)
+            win.geometry("1280x760")
+            win.show_rule_details()
             win.update()
 
             view = win.tab_rules
@@ -165,7 +163,9 @@ class TestUiSimplifyPhaseS2(unittest.TestCase):
             self.assertEqual(menu_labels, ["Rule", "Folder", "Subfolder", "Group"])
 
             toolbar_frame = view.mb_new.master
-            self.assertIs(view.ent_search.master, toolbar_frame)
+            # Single screen: the navigator is narrow, so Filter sits on its own row right under the toolbar
+            self.assertIs(view.ent_search.master.master, win.nav_host)
+            self.assertIs(toolbar_frame.master, win.nav_host)
             toolbar_btns = [b.cget("text") for b in _find_widgets(toolbar_frame, ttk.Button)]
             self.assertEqual(toolbar_btns, ["Expand", "Collapse"])
 

@@ -37,7 +37,7 @@ class TestUiSimplifyPhaseS3(unittest.TestCase):
 
     def _make_window(self):
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
-        win.geometry("1120x720+0+0")
+        win.geometry("1280x760+0+0")
         win.update()
         return win
 
@@ -56,10 +56,10 @@ class TestUiSimplifyPhaseS3(unittest.TestCase):
         win = self._make_window()
         try:
             self.assertTrue(win.sim_banner.winfo_ismapped())
-            content = win.tab_triage
+            content = win.workspace
             top = content.winfo_rooty() - win.winfo_rooty()
             bottom = (win.winfo_rooty() + win.winfo_height()) - (content.winfo_rooty() + content.winfo_height())
-            # Header + banner + tab bar + footer (incl. separators/padding)
+            # Header + banner + footer (incl. separators/padding); no tab bar any more
             self.assertLessEqual(top + bottom, 130, f"chrome uses {top + bottom}px (top={top}, bottom={bottom})")
             # Banner is a single compact line
             self.assertLessEqual(win.sim_banner.winfo_height(), 36)
@@ -87,11 +87,12 @@ class TestUiSimplifyPhaseS3(unittest.TestCase):
         finally:
             win.destroy()
 
-    def test_tabs_named_inbox_and_rules(self):
+    def test_single_screen_without_tabs(self):
         win = self._make_window()
         try:
-            texts = [win.notebook.tab(t, "text") for t in win.notebook.tabs()]
-            self.assertEqual(texts, ["Inbox", "Rules"])
+            self.assertFalse(hasattr(win, "notebook"))
+            panes = [str(p) for p in win.workspace.panes()]
+            self.assertEqual(panes, [str(win.nav_host), str(win.inbox_host), str(win.details_host)])
         finally:
             win.destroy()
 
@@ -118,7 +119,7 @@ class TestUiSimplifyPhaseS3(unittest.TestCase):
         try:
             danger_texts = {
                 b.cget("text")
-                for b in _find_widgets(win.tab_rules, ttk.Button)
+                for b in _find_widgets(win.inspector_host, ttk.Button)  # widgets live in the shared right pane
                 if b.cget("style") == "Danger.TButton"
             }
             self.assertTrue({"Delete Rule", "Delete Folder", "Delete Group", "Clear Entire Pool"} <= danger_texts)

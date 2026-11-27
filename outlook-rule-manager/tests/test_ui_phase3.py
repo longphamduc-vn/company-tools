@@ -65,7 +65,7 @@ class TestUiPhase3(unittest.TestCase):
     def test_triage_layout_header_conflicts_and_footer_colors(self):
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
         try:
-            win.geometry("1120x720")
+            win.geometry("1280x760")
             win.update()
 
             # Check Rule Conflicts moved to MainWindow header next to Sync
@@ -78,10 +78,9 @@ class TestUiPhase3(unittest.TestCase):
             self.assertEqual(win.lbl_footer_status.cget("text"), "NOT found in Outlook")
             self.assertEqual(str(win.lbl_footer_status.cget("foreground")), styles.DANGER)
 
-            # Triage 2-pane layout (Inbox list left | Reading + Actions right), Search label & single action set
+            # Single screen: Rules navigator | Mail list | Details; Search label & single action set
             triage = win.tab_triage
-            paned = next(w for w in _find_widgets(triage, ttk.PanedWindow))
-            self.assertEqual(len(paned.panes()), 2)
+            self.assertEqual(len(win.workspace.panes()), 3)
             self.assertFalse(hasattr(triage, "tree_rules"))
             self.assertFalse(hasattr(triage, "drop_new_zone"))
             self.assertFalse(hasattr(triage, "mb_assign_rule"))
@@ -117,8 +116,8 @@ class TestUiPhase3(unittest.TestCase):
 
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
         try:
-            win.geometry("1120x720")
-            win.notebook.select(win.tab_rules)
+            win.geometry("1280x760")
+            win.show_rule_details()
             win.update()
 
             rules_texts = _collect_tree_texts(win.tab_rules.tree)
@@ -251,7 +250,7 @@ class TestUiPhase3(unittest.TestCase):
 
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
         try:
-            win.notebook.select(win.tab_rules)
+            win.show_rule_details()
             win.update()
             view: RuleManagerView = win.tab_rules
 
@@ -287,8 +286,8 @@ class TestUiPhase3(unittest.TestCase):
     def test_dirty_tracking_yes_no_cancel_and_no_prompt_on_save_refresh(self):
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
         try:
-            win.geometry("1120x720")
-            win.notebook.select(win.tab_rules)
+            win.geometry("1280x760")
+            win.show_rule_details()
             win.update()
             view: RuleManagerView = win.tab_rules
 
@@ -378,12 +377,13 @@ class TestUiPhase3(unittest.TestCase):
             self.assertTrue(view.is_group_dirty())
             self.assertEqual(view.btn_save_group.cget("text"), "Save Changes ●")
 
-            # Attempt tab switch -> Cancel restores tab 1
+            # Attempt switching the right pane to a mail -> Cancel keeps the group editor
+            win.show_rule_details()
             with patch("gui.rule_manager_view.messagebox.askyesnocancel", return_value=None) as mock_ask:
-                win.notebook.select(0)
+                win.show_mail_details()
                 win.update()
                 mock_ask.assert_called()
-            self.assertEqual(win.notebook.index("current"), 1)
+            self.assertEqual(win.details_mode, "rule")
             self.assertTrue(view.is_group_dirty())
 
             # Attempt window close -> Cancel keeps window alive; Yes saves & closes

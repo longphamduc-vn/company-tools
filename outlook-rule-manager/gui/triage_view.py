@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import re
 from typing import List, Optional, Tuple, Dict, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from core.models import EmailMessage, RuleConfig, pluralize_count
 from core.yaml_manager import YamlConfigManager
@@ -11,6 +11,7 @@ from core.outlook_client import BaseOutlookClient
 from core.sync_engine import SyncEngine
 from core.conflict_detector import ConflictDetector
 from gui.conflict_dialog import ConflictDialog
+from gui.quick_rule_dialog import QuickRuleDialog
 
 
 def suggest_rule_and_folder(sender_name: str, sender_email: str) -> Tuple[str, str]:
@@ -56,13 +57,37 @@ class StagedAction:
     match_mode: str             # 'email' or 'domain'
     message_id: str
     subject: str
+    moved_from: List[str] = field(default_factory=list)   # rules that will lose this sender
+    merge_same_name: bool = False   # new flows: reuse a rule with the same name in the same folder
+
+    @property
+    def sender_value(self) -> str:
+        return self.sender_domain if self.match_mode == "domain" else self.sender_email
 
 
 class TriageView(ttk.Frame):
     """High-Performance Workspace: Instant Click Response, Spacious Email Inspector & Conflict Resolver."""
 
-    def __init__(self, parent, yaml_mgr: YamlConfigManager, outlook: BaseOutlookClient, sync_engine: SyncEngine):
+    def __init__(
+        self,
+        parent,
+        yaml_mgr: YamlConfigManager,
+        outlook: BaseOutlookClient,
+        sync_engine: SyncEngine,
+        inbox_host: Optional[tk.Misc] = None,
+        reader_host: Optional[tk.Misc] = None,
+        bottom_host: Optional[tk.Misc] = None,
+    ):
         super().__init__(parent)
+        # Integrated (single-screen) mode: the main window owns the panes; mails are dropped on the
+        # main rules tree (see attach_drop_tree) instead of this view's own drop panel.
+        self.inbox_host = inbox_host
+        self.reader_host = reader_host
+        self.bottom_host = bottom_host
+        self.integrated = inbox_host is not None and reader_host is not None and bottom_host is not None
+        self.on_message_activated = None   # integrated mode: user picked a mail -> show the reader
+        self.on_rules_changed = None       # integrated mode: rules.yaml changed by Apply -> refresh tree
+        self.status_sink = None            # integrated mode: where short feedback messages go
         self.yaml_mgr = yaml_mgr
         self.outlook = outlook
         self.sync_engine = sync_engine
@@ -73,6 +98,17 @@ class TriageView(ttk.Frame):
         self.staged_actions: List[StagedAction] = []
         self.active_filter: str = "ALL"
         self.search_query: str = ""
+        self.last_apply_mismatches: List[str] = []
+        self.last_status_message: str = ""
+        self.on_undo_request = None  # set by MainWindow
+        self._last_used_folder: str = ""
+
+        # Drag & drop state (mail list -> rules drop panel)
+        self._drag_start: Optional[Tuple[int, int]] = None
+        self._drag_pressed_selection: Tuple[str, ...] = ()
+        self._drag_active: bool = False
+        self._drag_ghost: Optional[tk.Toplevel] = None
+        self._drag_hover_iid: Optional[str] = None
 
         self._build_ui()
         self.refresh_inbox()
@@ -81,14 +117,19 @@ class TriageView(ttk.Frame):
         # -------------------------------------------------------------
         # MAIN 2-PANE LAYOUT: INBOX LIST (LEFT) | READING & ACTIONS (RIGHT)
         # -------------------------------------------------------------
-        self.paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        self.paned.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+        if self.integrated:
+            self.paned = None
+            self.frame_left = tk.Frame(self.inbox_host, bg="#f8fafc", highlightbackground="#e2e8f0", highlightthickness=1, padx=6, pady=6)
+            self.frame_left.pack(fill=tk.BOTH, expand=True)
+        else:
+            self.paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
+            self.paned.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
 
-        # =============================================================
-        # PANE 1 (LEFT, WIDE): INBOX LIST WITH "WILL GO TO" COLUMN
-        # =============================================================
-        self.frame_left = tk.Frame(self.paned, bg="#f8fafc", highlightbackground="#e2e8f0", highlightthickness=1, padx=6, pady=6)
-        self.paned.add(self.frame_left, weight=6)
+            # =========================================================
+            # PANE 1 (LEFT, WIDE): INBOX LIST WITH "WILL GO TO" COLUMN
+            # =========================================================
+            self.frame_left = tk.Frame(self.paned, bg="#f8fafc", highlightbackground="#e2e8f0", highlightthickness=1, padx=6, pady=6)
+            self.paned.add(self.frame_left, weight=6)
 
         # Filter Strip
         filter_strip = tk.Frame(self.frame_left, bg="#f8fafc")
@@ -130,14 +171,14 @@ class TriageView(ttk.Frame):
         inbox_container.pack(fill=tk.BOTH, expand=True)
 
         cols = ("Sender", "Subject", "WillGoTo")
-        self.tree_inbox = ttk.Treeview(inbox_container, columns=cols, show="headings", selectmode="browse")
+        self.tree_inbox = ttk.Treeview(inbox_container, columns=cols, show="headings", selectmode="extended")
         self.tree_inbox.heading("Sender", text="From")
         self.tree_inbox.heading("Subject", text="Subject")
         self.tree_inbox.heading("WillGoTo", text="Will go to")
 
-        self.tree_inbox.column("Sender", width=140, minwidth=85, stretch=True)
-        self.tree_inbox.column("Subject", width=190, minwidth=110, stretch=True)
-        self.tree_inbox.column("WillGoTo", width=135, minwidth=90, stretch=True)
+        self.tree_inbox.column("Sender", width=120, minwidth=80, stretch=True)
+        self.tree_inbox.column("Subject", width=150, minwidth=100, stretch=True)
+        self.tree_inbox.column("WillGoTo", width=120, minwidth=80, stretch=True)
 
         inbox_scroll = ttk.Scrollbar(inbox_container, orient=tk.VERTICAL, command=self.tree_inbox.yview)
         self.tree_inbox.configure(yscrollcommand=inbox_scroll.set)
@@ -154,11 +195,26 @@ class TriageView(ttk.Frame):
         self.menu_inbox.add_command(label="Move Now", command=self._move_selected_now)
         self.tree_inbox.bind("<Button-3>", self._on_inbox_right_click)
 
+        # Drag mail(s) onto the Rules drop panel (selection behaviour is kept intact)
+        self.tree_inbox.bind("<ButtonPress-1>", self._on_drag_press, add="+")
+        self.tree_inbox.bind("<B1-Motion>", self._on_drag_motion, add="+")
+        self.tree_inbox.bind("<ButtonRelease-1>", self._on_drag_release, add="+")
+        self.tree_inbox.bind("<Escape>", lambda e: self._cancel_drag())
+
+        # Clicking / arrowing through the mail list shows the mail in the (shared) right pane
+        self.tree_inbox.bind("<ButtonRelease-1>", self._notify_message_activated, add="+")
+        self.tree_inbox.bind("<KeyRelease-Up>", self._notify_message_activated, add="+")
+        self.tree_inbox.bind("<KeyRelease-Down>", self._notify_message_activated, add="+")
+
         # =============================================================
-        # PANE 2 (RIGHT): EMAIL INSPECTOR & ACTIONS
+        # PANE 3 (RIGHT): EMAIL INSPECTOR & ACTIONS
         # =============================================================
-        self.frame_right = tk.Frame(self.paned, bg="#ffffff", highlightbackground="#cbd5e1", highlightthickness=1, padx=12, pady=10)
-        self.paned.add(self.frame_right, weight=4)
+        if self.integrated:
+            self.frame_right = tk.Frame(self.reader_host, bg="#ffffff", highlightbackground="#cbd5e1", highlightthickness=1, padx=12, pady=10)
+            self.frame_right.pack(fill=tk.BOTH, expand=True)
+        else:
+            self.frame_right = tk.Frame(self.paned, bg="#ffffff", highlightbackground="#cbd5e1", highlightthickness=1, padx=12, pady=10)
+            self.paned.add(self.frame_right, weight=4)
 
         # Top Header of Inspector
         top_meta = tk.Frame(self.frame_right, bg="#ffffff")
@@ -206,7 +262,7 @@ class TriageView(ttk.Frame):
             borderwidth=1,
             padx=8,
             pady=6,
-            wraplength=380,
+            wraplength=300,
             justify=tk.LEFT
         )
         self.lbl_inspector_subject.pack(fill=tk.X, pady=(4, 6))
@@ -244,6 +300,7 @@ class TriageView(ttk.Frame):
 
         self.txt_inspector_body = tk.Text(
             body_container,
+            width=36,  # small requested width; the pane still expands with the window
             wrap=tk.WORD,
             font=("Segoe UI", 10),
             bg="#f8fafc",
@@ -262,7 +319,7 @@ class TriageView(ttk.Frame):
         # SLIM PENDING STAGED BAR (SHOWN ONLY WHEN N > 0)
         # =============================================================
         self.pending_bar = tk.Frame(
-            self,
+            self.bottom_host if self.integrated else self,
             bg="#eff6ff",
             highlightbackground="#bfdbfe",
             highlightthickness=1,
@@ -323,6 +380,230 @@ class TriageView(ttk.Frame):
         self.txt_inspector_body.config(state=tk.DISABLED)
 
     # -----------------------------------------------------------------
+    # DROP TARGET: mails are dropped on the main Rules navigator (see attach_drop_tree)
+    # -----------------------------------------------------------------
+    def _request_undo(self):
+        if callable(self.on_undo_request):
+            self.on_undo_request()
+
+    # --- drop target abstraction ----
+    def attach_drop_tree(self, tree: ttk.Treeview, resolver):
+        """Use another tree (the main Rules navigator) as the drop target for mails."""
+        self.tree_rules_drop = tree
+        self._external_resolver = resolver
+        tree.tag_configure("drop_hover", background="#bae6fd")
+
+    def _resolve_drop(self, iid: Optional[str]):
+        """('rule', id) / ('folder', path) / ('new', None) / None for a drop-target item."""
+        if not iid:
+            return None
+        resolver = getattr(self, "_external_resolver", None)
+        return resolver(iid) if resolver is not None else None
+
+    def _notify_message_activated(self, event=None):
+        if callable(self.on_message_activated) and self.tree_inbox.selection() and not self._drag_active:
+            self.after_idle(self.on_message_activated)
+
+    def refresh_undo_button(self):
+        """Undo lives in the Rules navigator; nothing to refresh here."""
+
+    def show_panel_status(self, message: str, error: bool = False):
+        """Short feedback for the user (shown in the navigator status bar via status_sink)."""
+        if callable(self.status_sink):
+            self.status_sink(message, error)
+        self.last_status_message = message
+
+    def _rule_name_for(self, msg: EmailMessage, whole_domain: bool) -> str:
+        """Readable rule name: the sender's display name, or the company for a whole-domain rule."""
+        email = msg.sender_email or ""
+        domain = email.split("@", 1)[1].lower() if "@" in email else ""
+        if whole_domain and domain:
+            return domain.split(".")[0].replace("-", " ").replace("_", " ").title()
+        name = re.sub(r"[\(\[\{].*?[\)\]\}]", "", msg.sender_name or "").strip()
+        name = re.sub(r"<.*?>", "", name).strip().strip('"')
+        if name:
+            return name
+        local = email.split("@")[0] if email else "New Rule"
+        return local.replace(".", " ").replace("_", " ").title() or "New Rule"
+
+    def _default_folder_for(self, msg: EmailMessage) -> str:
+        """Folder of a rule already handling this sender's domain, else the last folder used."""
+        email = (msg.sender_email or "").lower()
+        domain = "@" + email.split("@", 1)[1] if "@" in email else ""
+        if domain:
+            for rule in self.yaml_mgr.rules:
+                if self.yaml_mgr.is_inside_unclassified(rule.target_folder or ""):
+                    continue
+                if domain in self.yaml_mgr.get_all_domains_for_rule(rule) or any(
+                    e.endswith(domain) for e in self.yaml_mgr.get_all_emails_for_rule(rule)
+                ):
+                    return rule.target_folder
+        return self._last_used_folder
+
+    def _stage_new_rule_in_folder(self, msg: EmailMessage, name: str, folder: str, whole_domain: bool = False):
+        """Stage 'sender -> rule <name> in <folder>'; reuses an existing rule of that name in that folder."""
+        self._last_used_folder = folder
+        existing = next(
+            (r for r in self.yaml_mgr.rules
+             if r.name.strip().lower() == name.strip().lower() and (r.target_folder or "").lower() == folder.lower()),
+            None,
+        )
+        mode = "domain" if whole_domain else "email"
+        if existing:
+            self._stage_add_to_existing_rule(msg, existing.id, match_mode=mode, refresh=False)
+            return
+        sender_email = msg.sender_email
+        for prev in list(self.staged_actions):
+            if prev.message_id == msg.entry_id:
+                self.staged_actions.remove(prev)
+        self._append_staged(StagedAction(
+            action_type="create_rule",
+            rule_name=name,
+            rule_id="",
+            target_folder=folder,
+            sender_email=sender_email,
+            sender_domain=f"@{sender_email.split('@')[1]}" if "@" in sender_email else "",
+            match_mode=mode,
+            message_id=msg.entry_id,
+            subject=msg.subject,
+            merge_same_name=True,
+        ))
+
+    def _selected_messages(self) -> List[EmailMessage]:
+        ids = set(self.tree_inbox.selection())
+        return [m for m in self.messages if m.entry_id in ids]
+
+    def drop_messages_on_target(self, target_iid: Optional[str], messages: List[EmailMessage],
+                                whole_domain: bool = False) -> int:
+        """Apply a drop of messages onto a drop-panel item. Returns number of staged actions."""
+        if not messages or not target_iid:
+            return 0
+        target = self._resolve_drop(target_iid)
+        if target is None:
+            return 0
+        kind, value = target
+        if kind == "new":
+            self._open_create_hierarchical_rule_dialog(messages[0])
+            return 0
+        if kind == "folder":
+            folder = value
+            if not folder or self.yaml_mgr.is_inside_unclassified(folder):
+                self.show_panel_status("New rules cannot be created in this folder.", error=True)
+                return 0
+            for msg in messages:
+                self._stage_new_rule_in_folder(msg, self._rule_name_for(msg, whole_domain), folder, whole_domain)
+            self._populate_inbox_table()
+            self._update_pending_bar()
+            self.show_panel_status(f"Staged {pluralize_count(len(messages), 'email')} into '{folder}'.")
+            return len(messages)
+        rule_id = value
+        mode = "domain" if whole_domain else "email"
+        count = 0
+        for msg in messages:
+            if self._stage_add_to_existing_rule(msg, rule_id, match_mode=mode, refresh=False):
+                count += 1
+        if count:
+            self._populate_inbox_table()
+            self._update_pending_bar()
+            rule = next((r for r in self.yaml_mgr.rules if r.id == rule_id), None)
+            if rule is not None:
+                self.show_panel_status(f"Staged {pluralize_count(count, 'email')} for rule '{rule.name}'.")
+        return count
+
+    # --- drag mechanics ------------------------------------------------
+    def _on_drag_press(self, event):
+        row = self.tree_inbox.identify_row(event.y)
+        if not row:
+            self._drag_start = None
+            return
+        self._drag_start = (event.x_root, event.y_root)
+        current = self.tree_inbox.selection()
+        # Pressing on an already-selected row of a multi-selection keeps the whole selection for dragging
+        no_modifiers = not (event.state & 0x0001 or event.state & 0x0004)
+        self._drag_pressed_selection = current if (row in current and no_modifiers and len(current) > 1) else ()
+
+    def _on_drag_motion(self, event):
+        if self._drag_start is None:
+            return
+        if not self._drag_active:
+            dx = abs(event.x_root - self._drag_start[0])
+            dy = abs(event.y_root - self._drag_start[1])
+            if max(dx, dy) < 6:
+                return
+            self._begin_drag()
+        self._move_ghost(event.x_root, event.y_root)
+        self._set_drop_hover(self._drop_target_at(event.x_root, event.y_root))
+
+    def _on_drag_release(self, event):
+        if not self._drag_active:
+            self._drag_start = None
+            return
+        target = self._drop_target_at(event.x_root, event.y_root)
+        messages = self._selected_messages()
+        whole_domain = bool(event.state & 0x0004)
+        self._cancel_drag()
+        if target:
+            self.drop_messages_on_target(target, messages, whole_domain=whole_domain)
+
+    def _begin_drag(self):
+        self._drag_active = True
+        if self._drag_pressed_selection:
+            self.tree_inbox.selection_set(self._drag_pressed_selection)
+        n = len(self.tree_inbox.selection())
+        ghost = tk.Toplevel(self)
+        ghost.overrideredirect(True)
+        try:
+            ghost.attributes("-topmost", True)
+        except tk.TclError:
+            pass
+        tk.Label(
+            ghost, text=f"{pluralize_count(n, 'email')} → drop on a rule", bg="#0284c7", fg="#ffffff",
+            font=("", 9, "bold"), padx=8, pady=3,
+        ).pack()
+        self._drag_ghost = ghost
+        self.tree_inbox.configure(cursor="hand2")
+
+    def _move_ghost(self, x_root: int, y_root: int):
+        if self._drag_ghost is not None:
+            self._drag_ghost.geometry(f"+{x_root + 14}+{y_root + 10}")
+
+    def _drop_target_at(self, x_root: int, y_root: int) -> Optional[str]:
+        """Return the drop-target item iid under the pointer (rules, folders, '+ New rule…')."""
+        tree = getattr(self, "tree_rules_drop", None)
+        if tree is None or not tree.winfo_ismapped():
+            return None
+        x = x_root - tree.winfo_rootx()
+        y = y_root - tree.winfo_rooty()
+        if not (0 <= x < tree.winfo_width() and 0 <= y < tree.winfo_height()):
+            return None
+        iid = tree.identify_row(y)
+        return iid if self._resolve_drop(iid) is not None else None
+
+    def _set_drop_hover(self, iid: Optional[str]):
+        if iid == self._drag_hover_iid:
+            return
+        tree = getattr(self, "tree_rules_drop", None)
+        if tree is None:
+            return
+        if self._drag_hover_iid and tree.exists(self._drag_hover_iid):
+            tags = [t for t in tree.item(self._drag_hover_iid, "tags") if t != "drop_hover"]
+            tree.item(self._drag_hover_iid, tags=tags)
+        if iid and tree.exists(iid):
+            tree.item(iid, tags=list(tree.item(iid, "tags")) + ["drop_hover"])
+            tree.see(iid)
+        self._drag_hover_iid = iid
+
+    def _cancel_drag(self):
+        self._set_drop_hover(None)
+        if self._drag_ghost is not None:
+            self._drag_ghost.destroy()
+            self._drag_ghost = None
+        self._drag_active = False
+        self._drag_start = None
+        self._drag_pressed_selection = ()
+        self.tree_inbox.configure(cursor="")
+
+    # -----------------------------------------------------------------
     # FILTER & SEARCH
     # -----------------------------------------------------------------
     def _set_filter(self, filter_name: str):
@@ -345,6 +626,7 @@ class TriageView(ttk.Frame):
 
     def _populate_inbox_table(self):
         """High-performance virtual rendering for Inbox items (<2ms)."""
+        previous_selection = tuple(self.tree_inbox.selection())
         self.tree_inbox.delete(*self.tree_inbox.get_children())
         staged_map = {a.message_id: a for a in self.staged_actions}
 
@@ -379,6 +661,8 @@ class TriageView(ttk.Frame):
             if is_staged:
                 action = staged_map[msg.entry_id]
                 will_go_to = f"* {action.target_folder or 'Inbox'}"
+                if action.moved_from:
+                    will_go_to += f"  (from {', '.join(action.moved_from)})"
             elif matched_rule:
                 will_go_to = matched_rule.target_folder or "Inbox (no rule)"
             else:
@@ -396,9 +680,12 @@ class TriageView(ttk.Frame):
         self.btn_f_untracked.config(text=f"Needs Rule ({untracked_count})")
         self.btn_f_staged.config(text=f"Staged ({staged_count})")
 
-        # Select first message automatically if nothing is selected
+        # Keep the user's selection across refreshes (e.g. after a drop); otherwise select the first row
         children = self.tree_inbox.get_children()
-        if children and not self.tree_inbox.selection():
+        kept = [iid for iid in previous_selection if self.tree_inbox.exists(iid)]
+        if kept:
+            self.tree_inbox.selection_set(kept)
+        elif children and not self.tree_inbox.selection():
             self.tree_inbox.selection_set(children[0])
             self._on_message_select_fast(None)
 
@@ -429,15 +716,24 @@ class TriageView(ttk.Frame):
             message_id=msg.entry_id,
             subject=msg.subject
         )
-        self.staged_actions.append(action)
+        self._append_staged(action)
 
         self._populate_inbox_table()
         self._update_pending_bar()
 
-    def _stage_add_to_existing_rule(self, msg: EmailMessage, rule_id: str, match_mode: str = "email"):
+    def _append_staged(self, action: "StagedAction"):
+        """Queue an action, recording which rules would lose this sender (shown as 'from …')."""
+        action.moved_from = self.yaml_mgr.preview_sender_move(
+            action.sender_value, action.rule_id or None, as_domain=(action.match_mode == "domain")
+        )["from_rules"]
+        self.staged_actions.append(action)
+
+    def _stage_add_to_existing_rule(
+        self, msg: EmailMessage, rule_id: str, match_mode: str = "email", refresh: bool = True
+    ) -> bool:
         rule = next((r for r in self.yaml_mgr.rules if r.id == rule_id), None)
         if not rule:
-            return
+            return False
 
         sender_email = msg.sender_email
         sender_domain = f"@{sender_email.split('@')[1]}" if "@" in sender_email else ""
@@ -458,10 +754,12 @@ class TriageView(ttk.Frame):
             message_id=msg.entry_id,
             subject=msg.subject
         )
-        self.staged_actions.append(action)
+        self._append_staged(action)
 
-        self._populate_inbox_table()
-        self._update_pending_bar()
+        if refresh:
+            self._populate_inbox_table()
+            self._update_pending_bar()
+        return True
 
     def _build_rule_picker_dialog(
         self,
@@ -608,141 +906,31 @@ class TriageView(ttk.Frame):
             return
         self._open_create_hierarchical_rule_dialog(self.selected_message)
 
+    def _ask_quick_rule(self, **kwargs):
+        """Open the Quick New Rule dialog (separate method so tests can patch it)."""
+        return QuickRuleDialog.ask(self, **kwargs)
+
     def _open_create_hierarchical_rule_dialog(self, msg: EmailMessage):
-        r"""Open modal dialog to configure Team \ Part \ Unit hierarchy for new rule."""
-        suggested_name, suggested_folder = suggest_rule_and_folder(msg.sender_name, msg.sender_email)
+        """'+ New rule…' / 'New Rule...': name + folder only, then stage the new rule."""
         sender_email = msg.sender_email
         sender_domain = f"@{sender_email.split('@')[1]}" if "@" in sender_email else ""
+        folders = [f for f in self.yaml_mgr.get_all_folders() if not self.yaml_mgr.is_inside_unclassified(f)]
+        result = self._ask_quick_rule(
+            folders=folders,
+            default_name=self._rule_name_for(msg, whole_domain=False),
+            default_folder=self._default_folder_for(msg),
+            sender_email=sender_email,
+            sender_domain=sender_domain,
+            blocked_folder=self.yaml_mgr.unclassified_folder(),
+            title="New Rule",
+        )
+        if not result:
+            return
+        name, folder, scope = result
+        self._stage_new_rule_in_folder(msg, name, folder, whole_domain=(scope == "domain"))
+        self._populate_inbox_table()
+        self._update_pending_bar()
 
-        # Parse suggested segments
-        segs = [s.strip() for s in re.split(r'[\\/]', suggested_folder) if s.strip()]
-        sug_team = segs[0] if len(segs) >= 1 else "Engineering_Team"
-        sug_part = segs[1] if len(segs) >= 2 else "General_Part"
-        sug_unit = segs[2] if len(segs) >= 3 else f"{suggested_name.replace(' ', '_')}_Unit"
-
-        dlg = tk.Toplevel(self)
-        dlg.title("Create Hierarchical Rule (Team \\ Part \\ Unit)")
-        dlg.geometry("520x460")
-        dlg.minsize(480, 420)
-        dlg.transient(self)
-        dlg.grab_set()
-
-        frm = ttk.Frame(dlg, padding=16)
-        frm.pack(fill=tk.BOTH, expand=True)
-
-        ttk.Label(frm, text="Create Rule (Team \\ Part \\ Unit)", font=("", 12, "bold"), foreground="#15803d").pack(anchor=tk.W, pady=(0, 4))
-        ttk.Label(frm, text=f"Source: {msg.sender_name} <{sender_email}>", font=("", 9, "bold")).pack(anchor=tk.W, pady=(0, 8))
-
-        # Form
-        box_form = ttk.LabelFrame(frm, text="Rule & Folder Hierarchy", padding=10)
-        box_form.pack(fill=tk.X, pady=(0, 8))
-
-        grid = ttk.Frame(box_form)
-        grid.pack(fill=tk.X)
-
-        ttk.Label(grid, text="Rule Name:").grid(row=0, column=0, sticky=tk.W, pady=3)
-        ent_name = ttk.Entry(grid, width=32)
-        ent_name.grid(row=0, column=1, sticky=tk.EW, padx=6, pady=3)
-        ent_name.insert(0, suggested_name)
-
-        teams, parts, units = self.yaml_mgr.get_existing_hierarchy()
-
-        ttk.Label(grid, text="Team (Level 1):").grid(row=1, column=0, sticky=tk.W, pady=3)
-        cbo_t = ttk.Combobox(grid, width=28, values=teams)
-        cbo_t.grid(row=1, column=1, sticky=tk.EW, padx=6, pady=3)
-        cbo_t.set(sug_team)
-
-        ttk.Label(grid, text="Part (Level 2):").grid(row=2, column=0, sticky=tk.W, pady=3)
-        cbo_p = ttk.Combobox(grid, width=28, values=parts)
-        cbo_p.grid(row=2, column=1, sticky=tk.EW, padx=6, pady=3)
-        cbo_p.set(sug_part)
-
-        ttk.Label(grid, text="Unit (Level 3):").grid(row=3, column=0, sticky=tk.W, pady=3)
-        cbo_u = ttk.Combobox(grid, width=28, values=units)
-        cbo_u.grid(row=3, column=1, sticky=tk.EW, padx=6, pady=3)
-        cbo_u.set(sug_unit)
-
-        ttk.Label(grid, text="Folder Path (L1\\L2\\L3...):", font=("", 9, "bold")).grid(row=4, column=0, sticky=tk.W, pady=4)
-        ent_full = ttk.Entry(grid, width=32)
-        ent_full.grid(row=4, column=1, sticky=tk.EW, padx=6, pady=4)
-        ent_full.insert(0, f"{sug_team}\\{sug_part}\\{sug_unit}")
-
-        def _sync_full_path(*args):
-            t = cbo_t.get().strip()
-            p = cbo_p.get().strip()
-            u = cbo_u.get().strip()
-            res = "\\".join([s for s in [t, p, u] if s])
-            ent_full.delete(0, tk.END)
-            ent_full.insert(0, res)
-
-        cbo_t.bind("<<ComboboxSelected>>", _sync_full_path)
-        cbo_t.bind("<KeyRelease>", _sync_full_path)
-        cbo_p.bind("<<ComboboxSelected>>", _sync_full_path)
-        cbo_p.bind("<KeyRelease>", _sync_full_path)
-        cbo_u.bind("<<ComboboxSelected>>", _sync_full_path)
-        cbo_u.bind("<KeyRelease>", _sync_full_path)
-
-        # Match Scope Options
-        box_scope = ttk.LabelFrame(frm, text="Match Condition", padding=8)
-        box_scope.pack(fill=tk.X, pady=(0, 10))
-
-        var_scope = tk.StringVar(value="email")
-        rb_email = ttk.Radiobutton(box_scope, text=f"Match exact email: {sender_email}", variable=var_scope, value="email")
-        rb_email.pack(anchor=tk.W, pady=2)
-
-        if sender_domain:
-            rb_domain = ttk.Radiobutton(
-                box_scope,
-                text=f"Match entire domain: *{sender_domain} (Recommended for vendors/teams)",
-                variable=var_scope,
-                value="domain"
-            )
-            rb_domain.pack(anchor=tk.W, pady=2)
-
-        # Buttons
-        btn_bar = ttk.Frame(frm)
-        btn_bar.pack(fill=tk.X, side=tk.BOTTOM)
-
-        def on_confirm_stage():
-            r_name = ent_name.get().strip()
-            r_path = ent_full.get().strip()
-            if not r_name or not r_path:
-                messagebox.showwarning("Notice", "Specify both Rule Name and Target Folder.")
-                return
-
-            dlg.destroy()
-
-            # Clean path to Team\Part\Unit format
-            norm_path = "\\".join([s.strip() for s in re.split(r'[\\/]', r_path) if s.strip()])
-            mode = var_scope.get()
-
-            # Remove previous staged for this message
-            for existing in self.staged_actions:
-                if existing.message_id == msg.entry_id:
-                    self.staged_actions.remove(existing)
-                    break
-
-            action = StagedAction(
-                action_type="create_rule",
-                rule_name=r_name,
-                rule_id="",
-                target_folder=norm_path,
-                sender_email=sender_email,
-                sender_domain=sender_domain,
-                match_mode=mode,
-                message_id=msg.entry_id,
-                subject=msg.subject
-            )
-            self.staged_actions.append(action)
-
-            self._populate_inbox_table()
-            self._update_pending_bar()
-
-        btn_cancel = ttk.Button(btn_bar, text="Cancel", command=dlg.destroy)
-        btn_cancel.pack(side=tk.RIGHT, padx=4)
-
-        btn_ok = ttk.Button(btn_bar, text="Stage Hierarchical Rule", command=on_confirm_stage)
-        btn_ok.pack(side=tk.RIGHT, padx=4)
 
     def _move_selected_now(self):
         if not self.selected_message:
@@ -789,7 +977,10 @@ class TriageView(ttk.Frame):
         if count > 0:
             self.lbl_pending_status.config(text=pluralize_count(count, "pending change"))
             if not self.pending_bar.winfo_manager():
-                self.pending_bar.pack(fill=tk.X, side=tk.BOTTOM, before=self.paned, padx=6, pady=(0, 4))
+                if self.integrated:
+                    self.pending_bar.pack(fill=tk.X, padx=4, pady=(0, 4))
+                else:
+                    self.pending_bar.pack(fill=tk.X, side=tk.BOTTOM, before=self.paned, padx=6, pady=(0, 4))
         else:
             if self.pending_bar.winfo_manager():
                 self.pending_bar.pack_forget()
@@ -834,7 +1025,12 @@ class TriageView(ttk.Frame):
         def _populate():
             tree.delete(*tree.get_children())
             for idx, act in enumerate(self.staged_actions):
-                action_lbl = "New Rule" if act.action_type == "create_rule" else "Add to Rule"
+                if act.action_type == "create_rule":
+                    action_lbl = "New Rule"
+                elif act.moved_from:
+                    action_lbl = f"Move from {', '.join(act.moved_from)}"
+                else:
+                    action_lbl = "Add to Rule"
                 scope_lbl = (
                     f"Whole domain ({act.sender_domain})"
                     if act.match_mode == "domain"
@@ -887,20 +1083,8 @@ class TriageView(ttk.Frame):
         if not self.staged_actions:
             return
 
-        # Check for conflicts first
-        conflicts = self.conflict_detector.detect_conflicts()
-        if conflicts:
-            resp = messagebox.askyesno(
-                "Rule Conflicts Detected",
-                f"Warning: {len(conflicts)} potential conflicts detected between YAML and Outlook rules.\n\n"
-                "Do you want to open the Conflict Inspector to review them before syncing?\n"
-                "(Choose 'No' to proceed with YAML as Master Overwrite)",
-                icon=messagebox.WARNING
-            )
-            if resp:
-                self._open_conflict_inspector()
-                return
-
+        # One confirmation only. Conflicts with legacy Outlook rules are reviewed on demand via
+        # "Check Rule Conflicts" in the header instead of interrupting every Apply.
         count = len(self.staged_actions)
         new_rules_count = sum(1 for a in self.staged_actions if a.action_type == "create_rule")
         add_rules_count = count - new_rules_count
@@ -919,8 +1103,44 @@ class TriageView(ttk.Frame):
         store = self.yaml_mgr.stores.get("active_archive")
         store_path = store.file_path if store else ""
 
-        # 1. Update YAML
+        # Senders that also sit in address groups shared by several rules: ask once for the whole batch
+        shared_lines = []
         for action in self.staged_actions:
+            preview = self.yaml_mgr.preview_sender_move(
+                action.sender_value, action.rule_id or None, as_domain=(action.match_mode == "domain")
+            )
+            for grp_name, users in preview["shared_groups"]:
+                shared_lines.append(f"• {action.sender_value} — group '{grp_name}' (used by {', '.join(users)})")
+        remove_from_shared = False
+        if shared_lines:
+            remove_from_shared = bool(messagebox.askyesno(
+                "Shared Address Groups",
+                "These senders are also in groups shared by several rules:\n\n"
+                + "\n".join(shared_lines)
+                + "\n\nRemove them from those groups too?\n"
+                "(No = keep them there; they may keep going to the old rule.)",
+            ))
+
+        # 1. Update YAML (one Undo step for the whole batch)
+        self.yaml_mgr.next_change_label = f"Apply {pluralize_count(count, 'inbox change')}"
+        for action in self.staged_actions:
+            if action.action_type == "create_rule" and action.merge_same_name:
+                # Several emails dropped on the same folder/name -> one rule, not duplicates
+                same = next(
+                    (r for r in self.yaml_mgr.rules
+                     if r.name.strip().lower() == action.rule_name.strip().lower()
+                     and (r.target_folder or "").lower() == (action.target_folder or "").lower()),
+                    None,
+                )
+                if same is not None:
+                    self.yaml_mgr.assign_sender(
+                        action.sender_value, same.id, as_domain=(action.match_mode == "domain"),
+                        remove_from_shared_groups=remove_from_shared, save=False,
+                    )
+                    if action.message_id and action.target_folder:
+                        self.outlook.move_message(action.message_id, action.target_folder, store_path)
+                    continue
+
             if action.action_type == "create_rule":
                 new_id = self.yaml_mgr.generate_rule_id(action.rule_name)
 
@@ -939,16 +1159,22 @@ class TriageView(ttk.Frame):
                     target_folder=action.target_folder
                 )
                 self.yaml_mgr.rules.append(new_r)
-
+                # A sender lives in one rule: take it out of the rules that held it before
+                self.yaml_mgr.detach_sender(
+                    action.sender_value,
+                    as_domain=(action.match_mode == "domain"),
+                    except_rule_id=new_id,
+                    remove_from_shared_groups=remove_from_shared,
+                )
                 if action.sender_email in self.yaml_mgr.unclassified_pool:
                     self.yaml_mgr.unclassified_pool.remove(action.sender_email)
 
             elif action.action_type == "add_to_rule":
-                as_domain = (action.match_mode == "domain")
-                self.yaml_mgr.add_sender_to_rule_or_group(
-                    action.sender_email,
+                self.yaml_mgr.assign_sender(
+                    action.sender_value,
                     action.rule_id,
-                    as_domain=as_domain,
+                    as_domain=(action.match_mode == "domain"),
+                    remove_from_shared_groups=remove_from_shared,
                     save=False,
                 )
 
@@ -961,9 +1187,21 @@ class TriageView(ttk.Frame):
         # 2. Sync to Outlook COM
         success, msg = self.sync_engine.push_to_outlook()
 
+        # Honesty check: report staged emails whose sender still resolves to another folder
+        mismatches = []
+        for action in self.staged_actions:
+            matched, _ = self.sync_engine.match_message(action.sender_email, action.subject)
+            got = matched.target_folder if matched else "Inbox"
+            if got != action.target_folder:
+                mismatches.append(f"• {action.sender_email} still goes to '{got}'")
+        mismatch_txt = ("\n\nNot moved as expected:\n" + "\n".join(mismatches)) if mismatches else ""
+        self.last_apply_mismatches = mismatches
+
         # 3. Clear queue & refresh
         self.staged_actions.clear()
         self.refresh_inbox()
+        if callable(self.on_rules_changed):
+            self.on_rules_changed()
 
         if success:
             sim_prefix = "[SIMULATION] No changes were made to Outlook.\n\n" if self.outlook.is_simulated() else ""
@@ -973,6 +1211,7 @@ class TriageView(ttk.Frame):
                 f"Successfully applied {count} actions!\n"
                 f"Created {new_rules_count} new rules, updated {add_rules_count} rules.\n"
                 f"Outlook native rules are now synchronized."
+                f"{mismatch_txt}"
             )
         else:
-            messagebox.showwarning("Notice", f"Updated YAML, but Outlook sync returned:\n{msg}")
+            messagebox.showwarning("Notice", f"Updated YAML, but Outlook sync returned:\n{msg}{mismatch_txt}")

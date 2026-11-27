@@ -419,8 +419,8 @@ class TestUiPhase1(unittest.TestCase):
     def test_inspector_save_button_visible_and_scrollable_at_1120x720(self):
         win = MainWindow(self.config_path, outlook_client=MockOutlookClient())
         try:
-            win.geometry("1120x720")
-            win.notebook.select(win.tab_rules)
+            win.geometry("1280x760")
+            win.show_rule_details()
             win.update()
 
             # Select rule -> Save Rule button must be mapped & inside window bounds
@@ -450,7 +450,7 @@ class TestUiPhase1(unittest.TestCase):
             self.assertGreater(win.tab_rules.rule_scroll_canvas.yview()[0], first_before)
 
             # Select group -> Save Group button also mapped & visible inside window bounds
-            win.geometry("1120x720")
+            win.geometry("1280x760")
             win.tab_rules.tree.selection_set("grp_executive")
             win.tab_rules._on_tree_select()
             win.update()
