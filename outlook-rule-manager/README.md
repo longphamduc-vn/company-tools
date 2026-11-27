@@ -14,6 +14,7 @@
 - **Native Outlook Synchronization**: Outlook executes all rules natively (24/7 in the background, even when this companion app is closed). Sync YAML configurations directly into Outlook with one click.
 - **Auto-Split Recipient Quotas**: Automatically splits oversized rules into sub-rules (`Rule (Part 1)`, `Rule (Part 2)`) to prevent Outlook RPC/quota errors.
 - **1-Click Yearly PST Rollover**: Seamlessly re-point target folders of all active rules to a new year's PST file (`Archive 2025.pst`, `Archive 2026.pst`) in seconds.
+- **Create a new PST (first year)**: In the Rollover dialog, *Create new PST...* creates an empty Unicode PST (suggested `Archive_<year>.pst` next to your open data files), opens it in Outlook and selects it. It never overwrites a file and refuses OneDrive/network paths; rules only change when you click *Execute 1-Click Rollover*.
 - **Triage & Auto-Learning**: Inspect incoming Inbox emails, view attachments and body text, and assign senders/domains to rules with one click.
 - **Exchange X.500 Resolution**: Automatically resolves internal company Exchange addresses (`/O=EXCHANGELABS/...`) to clean SMTP addresses.
 - **Unclassified Pool**: When a rule is deleted, its addresses are safely retained in `unclassified` and routed to `_Unclassified` rather than cluttering your Inbox.

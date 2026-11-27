@@ -79,6 +79,9 @@ class BaseOutlookClient:
         raise NotImplementedError
     def move_message(self, entry_id: str, target_folder_path: str, store_path: str = "") -> bool:
         raise NotImplementedError
+    def create_pst(self, file_path: str, display_name: str = "") -> Tuple[bool, str]:
+        """Create a new empty PST and open it in Outlook. Returns (ok, file path or error)."""
+        raise NotImplementedError
 
 
 class WindowsOutlookClient(BaseOutlookClient):
@@ -191,6 +194,30 @@ class WindowsOutlookClient(BaseOutlookClient):
         if not self._connected or not (identifier or "").strip():
             return False
         return self._find_store(identifier) is not None
+
+    def create_pst(self, file_path: str, display_name: str = "") -> Tuple[bool, str]:
+        """Create a new Unicode PST with Namespace.AddStoreEx (creates + opens it). Never overwrites."""
+        from core.rollover_suggest import validate_new_pst_path
+
+        if not self._connected:
+            return False, "Outlook is not connected."
+        path = os.path.abspath((file_path or "").strip())
+        problem = validate_new_pst_path(path)
+        if problem:
+            return False, problem
+        try:
+            self.namespace.AddStoreEx(path, 3)  # 3 = olStoreUnicode
+        except Exception as ex:
+            return False, f"Outlook could not create the PST: {ex}"
+        store = self._find_store(path)
+        if store is None:
+            return False, f"Outlook created the file but it is not open: {path}"
+        if (display_name or "").strip():
+            try:
+                store.GetRootFolder().Name = display_name.strip()   # this is the name Outlook shows
+            except Exception:
+                pass
+        return True, path
 
     def get_inbox_messages(self, limit: int = 50) -> List[EmailMessage]:
         if not self._connected:
@@ -799,6 +826,20 @@ class MockOutlookClient(BaseOutlookClient):
         if not (identifier or "").strip():
             return False
         return self._find_store(identifier) is not None
+
+    def create_pst(self, file_path: str, display_name: str = "") -> Tuple[bool, str]:
+        """Simulated: the new store only appears in this session's store list (no file is written)."""
+        path = (file_path or "").strip()
+        if not path.lower().endswith(".pst"):
+            return False, "The file name must end with .pst."
+        if self._find_store(path) is not None:
+            return False, f"A store with this file is already open: {path}"
+        name = (display_name or "").strip() or os.path.splitext(os.path.basename(path))[0]
+        self._stores.insert(len([s for s in self._stores if s.get("file_path")]), {
+            "name": name, "file_path": path, "store_id": f"STORE_{name}",
+            "is_data_file": True, "size_gb": 0.0, "folders": [],
+        })
+        return True, path
 
     def save_native_rules(
         self,

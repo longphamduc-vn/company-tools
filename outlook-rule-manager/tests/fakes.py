@@ -321,6 +321,17 @@ class FakeNamespace:
     def GetItemFromID(self, entry_id: str):
         return self._items[entry_id]
 
+    def AddStoreEx(self, path: str, store_type: int = 3):
+        """Like Outlook: open the PST at `path`, creating an empty one if it does not exist."""
+        import os
+
+        if not os.path.exists(path):
+            with open(path, "wb") as f:
+                f.write(b"!BDN")   # placeholder bytes; real PSTs start with this signature
+        name = os.path.splitext(os.path.basename(path))[0]
+        self.Stores.append(FakeStore(name, path, root_folder=FakeFolder(Name=name, FolderPath=f"\\\\{name}")))
+        self.added_store_types = getattr(self, "added_store_types", []) + [store_type]
+
 
 def managed_name(yaml_mgr, name: str, suffix: str = "") -> str:
     """Outlook name of the YAML rule that is called `name` (or targets folder `name`)."""

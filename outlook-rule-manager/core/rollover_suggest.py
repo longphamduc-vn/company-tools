@@ -35,3 +35,42 @@ def suggest_rollover_target(current_name: str, current_path: str) -> Tuple[str, 
             suggested_path = f"{dir_prefix}{next_file}"
 
     return suggested_name, suggested_path
+
+
+def validate_new_pst_path(path: str) -> str:
+    """Return '' if a brand-new PST may be created at `path`, otherwise the reason it may not."""
+    import os
+
+    raw = (path or "").strip()
+    if not raw:
+        return "Choose where to save the new PST file."
+    if not raw.lower().endswith(".pst"):
+        return "The file name must end with .pst."
+    low = raw.lower()
+    if low.startswith("\\\\") or low.startswith("//") or "onedrive" in low or "sharepoint" in low:
+        return "Do not keep PST files on OneDrive, SharePoint or a network share (they get corrupted). Pick a local drive."
+    if os.path.exists(raw):
+        return f"A file already exists there: {raw}. Pick a new name (nothing is overwritten)."
+    folder = os.path.dirname(os.path.abspath(raw))
+    if not os.path.isdir(folder):
+        return f"The folder does not exist: {folder}"
+    return ""
+
+
+def suggest_new_pst(stores, year: int, default_dir: str = "") -> Tuple[str, str]:
+    """Suggest (display name, file path) for a new yearly PST: 'Archive <year>' next to the open data files."""
+    import os
+
+    paths = [s.get("file_path", "") for s in (stores or []) if s.get("file_path")]
+    folder = os.path.dirname(paths[0]) if paths else (
+        default_dir or os.path.join(os.path.expanduser("~"), "Documents", "Outlook Files")
+    )
+    taken = {p.lower() for p in paths}
+    n = 1
+    while True:
+        suffix = "" if n == 1 else f"_{n}"
+        candidate = os.path.join(folder, f"Archive_{year}{suffix}.pst")
+        if candidate.lower() not in taken and not os.path.exists(candidate):
+            name = f"Archive {year}" if n == 1 else f"Archive {year} ({n})"
+            return name, candidate
+        n += 1

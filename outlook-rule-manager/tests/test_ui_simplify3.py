@@ -137,7 +137,7 @@ class TestUiSimplifyPhaseS3(unittest.TestCase):
             self.assertTrue(dlg.btn_close.winfo_ismapped())
             labels = [w.cget("text") for w in _find_widgets(view, ttk.Label)]
             self.assertIn(
-                "Re-point Companion rules to a new yearly PST that is already open in Outlook.", labels
+                "Re-point Companion rules to a new yearly PST: pick one open in Outlook, or create one.", labels
             )
             dlg.btn_close.invoke()
             self.assertFalse(dlg.winfo_exists())

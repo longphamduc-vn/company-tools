@@ -2,12 +2,13 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import os
+from datetime import date
 from typing import Any, Callable, Dict, List, Optional
 
 from core.yaml_manager import YamlConfigManager
 from core.outlook_client import BaseOutlookClient
 from core.sync_engine import SyncEngine
-from core.rollover_suggest import suggest_rollover_target
+from core.rollover_suggest import suggest_new_pst, suggest_rollover_target, validate_new_pst_path
 
 
 class RolloverView(ttk.Frame):
@@ -57,7 +58,7 @@ class RolloverView(ttk.Frame):
 
         lbl_desc = ttk.Label(
             container,
-            text="Re-point Companion rules to a new yearly PST that is already open in Outlook.",
+            text="Re-point Companion rules to a new yearly PST: pick one open in Outlook, or create one.",
             wraplength=800
         )
         lbl_desc.pack(anchor=tk.W, pady=(0, 10))
@@ -133,9 +134,14 @@ class RolloverView(ttk.Frame):
         btn_browse = ttk.Button(path_box, text="Browse", command=self._browse_pst)
         btn_browse.pack(side=tk.LEFT, padx=2)
 
+        self.btn_create_pst = ttk.Button(grid_new, text="Create new PST...", command=self._create_new_pst)
+        self.btn_create_pst.grid(row=2, column=1, sticky=tk.W, padx=6, pady=(4, 0))
+
         ttk.Label(
             frame_new,
-            text="Tip: open the new PST in Outlook first (File > Open > Outlook Data File), then select it in the table above.",
+            text="Tip: select a PST that is already open in Outlook in the table above, or click "
+                 "'Create new PST...' to make an empty one and open it in Outlook. Rules only change "
+                 "when you click Execute.",
             foreground="#475569",
             wraplength=380,
             font=("", 8),
@@ -284,6 +290,77 @@ class RolloverView(ttk.Frame):
             base = os.path.splitext(os.path.basename(filename))[0]
             self.ent_new_name.delete(0, tk.END)
             self.ent_new_name.insert(0, base.replace("_", " "))
+
+    # -- create a brand-new PST (first year) -------------------------------
+    def _ask_new_pst_path(self, initial_dir: str, initial_file: str) -> str:
+        return filedialog.asksaveasfilename(
+            title="Create a new Outlook Data File (.pst)",
+            initialdir=initial_dir,
+            initialfile=initial_file,
+            defaultextension=".pst",
+            filetypes=[("Outlook Data Files (*.pst)", "*.pst")],
+            confirmoverwrite=False,   # existing files are refused below, never overwritten
+        )
+
+    def _create_new_pst(self) -> bool:
+        """Create an empty PST, open it in Outlook, and select it as the new archive (no rule changes)."""
+        name, path = suggest_new_pst(self.outlook.get_stores(), date.today().year)
+        chosen = self._ask_new_pst_path(os.path.dirname(path), os.path.basename(path))
+        if not chosen:
+            return False
+        chosen = os.path.normpath(chosen)
+        problem = validate_new_pst_path(chosen) if not self.outlook.is_simulated() else ""
+        if problem:
+            messagebox.showwarning("Create new PST", problem)
+            return False
+
+        typed = self.ent_new_name.get().strip()
+        active = self.yaml_mgr.stores.get("active_archive")
+        # Keep a name the user typed; otherwise name it after the file (Archive_2027.pst -> Archive 2027)
+        if not typed or (active and typed == active.name) or typed == self._suggested_name():
+            display = os.path.splitext(os.path.basename(chosen))[0].replace("_", " ")
+        else:
+            display = typed
+        if not messagebox.askyesno(
+            "Create new PST",
+            f"Create an empty PST and open it in Outlook?\n\n  File: {chosen}\n  Name in Outlook: {display}\n\n"
+            "Your rules do not change until you click 'Execute 1-Click Rollover'.",
+        ):
+            return False
+
+        ok, result = self.outlook.create_pst(chosen, display)
+        if not ok:
+            messagebox.showerror("Create new PST", result)
+            return False
+        self.refresh_view()
+        self._select_store_by_path(result)
+        self.ent_new_name.delete(0, tk.END)
+        self.ent_new_name.insert(0, display)
+        note = "\n\n[SIMULATION] No file was written." if self.outlook.is_simulated() else ""
+        messagebox.showinfo(
+            "Create new PST",
+            f"Created and opened in Outlook:\n{result}\n\nIt is selected below. Click "
+            f"'Execute 1-Click Rollover' to send new mail there.{note}",
+        )
+        return True
+
+    def _suggested_name(self) -> str:
+        active = self.yaml_mgr.stores.get("active_archive")
+        return suggest_rollover_target(active.name if active else "", "")[0]
+
+    def _select_store_by_path(self, path: str) -> None:
+        want = os.path.normcase(os.path.normpath(path))
+        for idx, s in enumerate(self.outlook.get_stores()):
+            fp = s.get("file_path", "")
+            if fp and os.path.normcase(os.path.normpath(fp)) == want:
+                iid = f"store_{idx}"
+                if self.tree_stores.exists(iid):
+                    self.tree_stores.selection_set(iid)
+                    self.tree_stores.see(iid)
+                    self._on_store_selected(None)
+                return
+        self.ent_new_path.delete(0, tk.END)
+        self.ent_new_path.insert(0, path)
 
     def _execute_rollover(self):
         new_name = self.ent_new_name.get().strip()
